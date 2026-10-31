@@ -3,6 +3,7 @@ FOURMOLU ?= fourmolu
 GENERATOR_NIX ?= generator-nix
 VITE ?= vite --configLoader native
 WATCH_PORT ?= 5173
+PREVIEW_PORT ?= 4173
 
 .PHONY: help
 help: ## Show available targets
@@ -27,7 +28,7 @@ shell: ## Enter devenv shell
 develop: devenv.local.nix devenv.local.yaml ## Bootstrap devenv shell + VS Code
 	devenv shell --profile=devcontainer -- code .
 
-# ── Elm & Haskell sources ────────────────────────────────────────────────────
+# ── Sources ──────────────────────────────────────────────────────────────────
 
 HS_SOURCES := $(shell find src generator -name '*.hs') brick-studio.cabal $(wildcard cabal.project*)
 SHARED_ELM_SOURCES := $(shell find packages/brick-frame-viewport/src packages/brick-frame-simulation/src packages/brick-frame-simulator/src packages/brick-frame-ui/src packages/brick-frame-studio/src -name '*.elm' ! -name 'ColorData.elm')
@@ -79,6 +80,13 @@ studio-build: build/.studio-stamp ## Production build of studio-app → build/st
 .PHONY: build
 build: studio-build ## Build studio-app
 
+.PHONY: preview
+preview: build ## Preview production build locally
+	cd studio-app && $(VITE) preview --outDir ../build/studio --host 0.0.0.0 --port $(PREVIEW_PORT)
+
+.PHONY: serve
+serve: preview ## Alias for preview
+
 # ── Test & Quality ───────────────────────────────────────────────────────────
 
 .PHONY: elm-test
@@ -113,6 +121,10 @@ elm-format: ## Auto-format Elm source files
 elm-review: ## Run elm-review on studio-app
 	cd studio-app && elm-review
 
+.PHONY: elm-review-fix
+elm-review-fix: ## Run elm-review with auto-fix
+	cd studio-app && elm-review --fix
+
 .PHONY: check
 check: ## Check formatting, hlint, and elm-review
 	$(HLINT) src generator
@@ -128,4 +140,4 @@ format: ## Auto-format Haskell and Elm source files
 .PHONY: clean
 clean: ## Remove build artifacts
 	cabal clean
-	rm -rf build brick-data-generator .hpc studio-app/.elm-tailwind studio-app/elm-stuff packages/brick-frame-studio/elm-stuff packages/brick-frame-data/src/Data.elm packages/brick-frame-data/src/.data-nix-stamp build/.studio-stamp
+	rm -rf build brick-data-generator .hpc studio-app/.elm-tailwind studio-app/elm-stuff studio-app/.vite packages/brick-frame-studio/elm-stuff packages/brick-frame-data/src/Data.elm packages/brick-frame-data/src/.data-nix-stamp build/.studio-stamp
