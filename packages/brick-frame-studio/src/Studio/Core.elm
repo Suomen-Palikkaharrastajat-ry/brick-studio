@@ -11,8 +11,11 @@ module Studio.Core exposing
     , addPartAt
     , addPartCentered
     , applyFixes
+    , canExplode
+    , canGroup
     , canRedo
     , canUndo
+    , canUngroup
     , cancelDrag
     , clearSelection
     , clearUnglued
@@ -20,8 +23,10 @@ module Studio.Core exposing
     , copySelection
     , currentArcHandles
     , currentHandles
+    , cutSelection
     , deleteSelection
     , duplicateSelection
+    , explodeSelection
     , fineMove
     , fitView
     , freeSpotFor
@@ -31,6 +36,7 @@ module Studio.Core exposing
     , getClipboard
     , getDocument
     , getPlacements
+    , groupSelection
     , hasClipboard
     , hasSelection
     , init
@@ -307,7 +313,10 @@ type Msg
     | DeleteSelection
     | DuplicateSelection
     | CopySelection
+    | CutSelection
     | PasteClipboard
+    | GroupSelection
+    | ExplodeSelection
     | Undo
     | Redo
     | RotateSelection Axis Int
@@ -1308,6 +1317,167 @@ pasteClipboard model =
                     )
 
 
+{-| Cut the current selection to the clipboard and delete it.
+-}
+cutSelection : Model -> ( Model, Cmd Msg, List Event )
+cutSelection model =
+    deleteSelection (copySelection model)
+
+
+{-| Whether the current selection can be grouped into a submodel (2 or more parts).
+-}
+canGroup : Model -> Bool
+canGroup model =
+    not (isDragging model) && Set.size model.selection > 1
+
+
+{-| Whether the current selection can be exploded / ungrouped (single submodel reference).
+-}
+canExplode : Model -> Bool
+canExplode model =
+    if isDragging model || Set.size model.selection /= 1 then
+        False
+
+    else
+        case Set.toList model.selection of
+            [ id ] ->
+                case Document.getPlacement id model.document of
+                    Just p ->
+                        Document.isSubmodelReference p model.document
+
+                    Nothing ->
+                        False
+
+            _ ->
+                False
+
+
+{-| Alias for `canExplode`.
+-}
+canUngroup : Model -> Bool
+canUngroup =
+    canExplode
+
+
+nextSubmodelName : Document -> String
+nextSubmodelName doc =
+    let
+        existing =
+            doc.submodels
+                |> List.map (.name >> Document.normalise)
+                |> Set.fromList
+                |> Set.insert "main.ldr"
+
+        check n =
+            let
+                candidate =
+                    "submodel" ++ String.fromInt n ++ ".ldr"
+            in
+            if Set.member (Document.normalise candidate) existing then
+                check (n + 1)
+
+            else
+                candidate
+    in
+    check 1
+
+
+{-| Group the selected placements into a new submodel.
+-}
+groupSelection : Model -> ( Model, Cmd Msg, List Event )
+groupSelection model =
+    if not (canGroup model) then
+        ( model, Cmd.none, [] )
+
+    else
+        let
+            submodelName =
+                nextSubmodelName model.document
+
+            ( newDoc, newHistory ) =
+                recordEdit (GroupIntoSubmodel submodelName (Set.toList model.selection)) model
+
+            newSelection =
+                Set.singleton model.document.nextId
+
+            ( nextViewport, viewportCmd, events ) =
+                Viewport.applyDocument newDoc model.viewport
+
+            nextModel =
+                { model
+                    | viewport = nextViewport
+                    , document = Document.clearTouched newDoc
+                    , history = newHistory
+                    , selection = newSelection
+                    , drag = Nothing
+                    , activeSnap = Nothing
+                    , collidingPlacements = Set.empty
+                }
+
+            ( finalModel, extraCmds, emittedEvents ) =
+                handleViewportEvents events
+                    ( nextModel
+                    , []
+                    , [ DocumentChanged nextModel.document
+                      , SelectionChanged newSelection
+                      ]
+                    )
+        in
+        ( syncTouchShiftMode finalModel
+        , Cmd.batch (Cmd.map ViewportMsg viewportCmd :: extraCmds)
+        , emittedEvents
+        )
+
+
+{-| Explode / ungroup the selected submodel reference back into constituent parts.
+-}
+explodeSelection : Model -> ( Model, Cmd Msg, List Event )
+explodeSelection model =
+    if not (canExplode model) then
+        ( model, Cmd.none, [] )
+
+    else
+        case Set.toList model.selection of
+            [ id ] ->
+                let
+                    ( newDoc, newHistory ) =
+                        recordEdit (ExplodeSubmodel id) model
+
+                    newSelection =
+                        Set.fromList (List.range model.document.nextId (newDoc.nextId - 1))
+
+                    ( nextViewport, viewportCmd, events ) =
+                        Viewport.applyDocument newDoc model.viewport
+
+                    nextModel =
+                        { model
+                            | viewport = nextViewport
+                            , document = Document.clearTouched newDoc
+                            , history = newHistory
+                            , selection = newSelection
+                            , drag = Nothing
+                            , activeSnap = Nothing
+                            , collidingPlacements = Set.empty
+                        }
+
+                    ( finalModel, extraCmds, emittedEvents ) =
+                        handleViewportEvents events
+                            ( nextModel
+                            , []
+                            , [ DocumentChanged nextModel.document
+                              , SelectionChanged newSelection
+                              ]
+                            )
+                in
+                ( syncTouchShiftMode finalModel
+                , Cmd.batch (Cmd.map ViewportMsg viewportCmd :: extraCmds)
+                , emittedEvents
+                )
+
+            _ ->
+                ( model, Cmd.none, [] )
+
+
 {-| Undo the last edit.
 -}
 undo : Model -> ( Model, Cmd Msg, List Event )
@@ -2004,8 +2174,17 @@ updateInner msg model =
         CopySelection ->
             ( copySelection model, Cmd.none, [] )
 
+        CutSelection ->
+            cutSelection model
+
         PasteClipboard ->
             pasteClipboard model
+
+        GroupSelection ->
+            groupSelection model
+
+        ExplodeSelection ->
+            explodeSelection model
 
         Undo ->
             undo model
@@ -2190,11 +2369,21 @@ handleCanvasKey keyEvent model =
         else if key == "c" then
             ( copySelection updatedModel, Cmd.none, [] )
 
+        else if key == "x" then
+            cutSelection updatedModel
+
         else if key == "v" then
             pasteClipboard updatedModel
 
         else if key == "d" then
             duplicateSelection updatedModel
+
+        else if key == "g" || key == "G" then
+            if keyEvent.shift then
+                explodeSelection updatedModel
+
+            else
+                groupSelection updatedModel
 
         else
             passToViewport keyEvent updatedModel
@@ -2532,12 +2721,25 @@ handleViewportEvent event ( model, cmds, outEvents ) =
                         |> Maybe.map .source
 
                 newSel =
-                    case picked of
-                        Just id ->
-                            Set.singleton id
+                    if model.shiftHeld then
+                        case picked of
+                            Just id ->
+                                if Set.member id model.selection then
+                                    Set.remove id model.selection
 
-                        Nothing ->
-                            Set.empty
+                                else
+                                    Set.insert id model.selection
+
+                            Nothing ->
+                                model.selection
+
+                    else
+                        case picked of
+                            Just id ->
+                                Set.singleton id
+
+                            Nothing ->
+                                Set.empty
             in
             ( pivotOnPicked picked { model | selection = newSel }
             , cmds

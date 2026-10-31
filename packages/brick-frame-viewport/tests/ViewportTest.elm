@@ -587,6 +587,76 @@ suite =
                         , \_ -> Expect.equal False released.captured
                         ]
                         ()
+            , test "secondary finger tap while holding first finger emits Clicked x y True" <|
+                \_ ->
+                    let
+                        ( held, down1Events ) =
+                            update (PointerTouchStart { id = 1, x = 50, y = 50 }) idle
+
+                        ( withSecond, _ ) =
+                            update (PointerTouchStart { id = 2, x = 150, y = 120 }) held
+
+                        ( afterSecondUp, up2Events ) =
+                            update (PointerTouchEnd 2) withSecond
+
+                        ( _, up1Events ) =
+                            update (PointerTouchEnd 1) afterSecondUp
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal [ PressStarted 50 50 ] down1Events
+                        , \_ -> Expect.equal [ Clicked 150 120 True, CameraSettled ] up2Events
+                        , \_ -> Expect.equal [ CameraSettled ] up1Events
+                        ]
+                        ()
+            , test "continuous held finger allows multiple secondary taps without deselecting on release" <|
+                \_ ->
+                    let
+                        held =
+                            update (PointerTouchStart { id = 1, x = 50, y = 50 }) idle
+                                |> Tuple.first
+
+                        -- First secondary tap
+                        ( s1Up, s1Events ) =
+                            held
+                                |> update (PointerTouchStart { id = 2, x = 120, y = 80 })
+                                |> Tuple.first
+                                |> update (PointerTouchEnd 2)
+
+                        -- Second secondary tap
+                        ( s2Up, s2Events ) =
+                            s1Up
+                                |> update (PointerTouchStart { id = 3, x = 180, y = 160 })
+                                |> Tuple.first
+                                |> update (PointerTouchEnd 3)
+
+                        -- Release held finger
+                        ( _, up1Events ) =
+                            update (PointerTouchEnd 1) s2Up
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal [ Clicked 120 80 True, CameraSettled ] s1Events
+                        , \_ -> Expect.equal [ Clicked 180 160 True, CameraSettled ] s2Events
+                        , \_ -> Expect.equal [ CameraSettled ] up1Events
+                        ]
+                        ()
+            , test "secondary finger drag exceeding tapSlop or deadzone does not emit Clicked" <|
+                \_ ->
+                    let
+                        held =
+                            update (PointerTouchStart { id = 1, x = 50, y = 50 }) idle
+                                |> Tuple.first
+
+                        dragged =
+                            held
+                                |> update (PointerTouchStart { id = 2, x = 150, y = 50 })
+                                |> Tuple.first
+                                |> update (PointerTouchMove { id = 2, x = 200, y = 50 })
+                                |> Tuple.first
+
+                        ( _, upEvents ) =
+                            update (PointerTouchEnd 2) dragged
+                    in
+                    Expect.equal [ CameraSettled ] upEvents
             ]
         , describe "panCurrentGesture"
             [ test "a plain left drag turned into a pan moves the target, not the angle" <|

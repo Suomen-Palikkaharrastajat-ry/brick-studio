@@ -146,6 +146,16 @@ type TouchGesture
     | PinchGesture PinchState
 
 
+type alias SecondaryTouch =
+    { id : Int
+    , x : Float
+    , y : Float
+    , startX : Float
+    , startY : Float
+    , travel : Float
+    }
+
+
 {-| Two-finger gesture state.
 
 `startDistance` and `zoomEngaged` implement the zoom dead-zone: a two-finger
@@ -260,6 +270,8 @@ type alias Model =
     , hiddenSources : Set Int
     , activePath : List Int
     , canvasOrigin : ( Float, Float )
+    , multiTouchInteraction : Bool
+    , secondaryTouch : Maybe SecondaryTouch
     }
 
 
@@ -388,6 +400,8 @@ init config =
       , hiddenSources = Set.empty
       , activePath = []
       , canvasOrigin = ( 0, 0 )
+      , multiTouchInteraction = False
+      , secondaryTouch = Nothing
       }
     , Cmd.batch <|
         (if config.useWindowResize then
@@ -1316,12 +1330,46 @@ touchesDown touches model =
     let
         list =
             touchesFromDict touches
+
+        newTouches =
+            Dict.filter (\id _ -> not (Dict.member id model.activeTouches)) touches
+
+        isSingleHeld =
+            Dict.size model.activeTouches == 1
+
+        secTouch =
+            if not model.secondFingerShift && isSingleHeld && Dict.size newTouches == 1 then
+                case Dict.values newTouches of
+                    [ newPt ] ->
+                        Just
+                            { id = newPt.id
+                            , x = newPt.x
+                            , y = newPt.y
+                            , startX = newPt.x
+                            , startY = newPt.y
+                            , travel = 0.0
+                            }
+
+                    _ ->
+                        model.secondaryTouch
+
+            else
+                model.secondaryTouch
+
+        multiTouch =
+            model.multiTouchInteraction || List.length list > 1
     in
     case list of
         [ p ] ->
             let
                 begun =
-                    beginTouchGesture list { model | activeTouches = touches, pressShift = False }
+                    beginTouchGesture list
+                        { model
+                            | activeTouches = touches
+                            , pressShift = False
+                            , multiTouchInteraction = multiTouch
+                            , secondaryTouch = Nothing
+                        }
             in
             ( { begun | lastPointer = ( p.x, p.y ) }, Cmd.none, [ PressStarted p.x p.y ] )
 
@@ -1329,7 +1377,12 @@ touchesDown touches model =
             if model.secondFingerShift then
                 case model.touchGesture of
                     SingleTouchGesture _ ->
-                        ( { model | activeTouches = touches, pressShift = True }
+                        ( { model
+                            | activeTouches = touches
+                            , pressShift = True
+                            , multiTouchInteraction = multiTouch
+                            , secondaryTouch = secTouch
+                          }
                         , Cmd.none
                         , if model.pressShift then
                             []
@@ -1341,7 +1394,13 @@ touchesDown touches model =
                     _ ->
                         let
                             begun =
-                                beginTouchGesture [ p1 ] { model | activeTouches = touches, pressShift = True }
+                                beginTouchGesture [ p1 ]
+                                    { model
+                                        | activeTouches = touches
+                                        , pressShift = True
+                                        , multiTouchInteraction = multiTouch
+                                        , secondaryTouch = secTouch
+                                    }
                         in
                         ( { begun | lastPointer = ( p1.x, p1.y ) }
                         , Cmd.none
@@ -1351,7 +1410,13 @@ touchesDown touches model =
             else
                 let
                     begun =
-                        beginTouchGesture list { model | activeTouches = touches, pressShift = False }
+                        beginTouchGesture list
+                            { model
+                                | activeTouches = touches
+                                , pressShift = False
+                                , multiTouchInteraction = multiTouch
+                                , secondaryTouch = secTouch
+                            }
                 in
                 if model.captured then
                     ( { begun | captured = False }, Cmd.none, [ DragEnded (Tuple.first model.lastPointer) (Tuple.second model.lastPointer) ] )
@@ -1362,7 +1427,13 @@ touchesDown touches model =
         [] ->
             let
                 begun =
-                    beginTouchGesture list { model | activeTouches = touches, pressShift = False }
+                    beginTouchGesture list
+                        { model
+                            | activeTouches = touches
+                            , pressShift = False
+                            , multiTouchInteraction = False
+                            , secondaryTouch = Nothing
+                        }
             in
             ( begun, Cmd.none, [] )
 
@@ -1372,6 +1443,23 @@ touchesMoved touches model =
     let
         list =
             touchesFromDict touches
+
+        updatedSec =
+            case model.secondaryTouch of
+                Just sec ->
+                    case Dict.get sec.id touches of
+                        Just pt ->
+                            let
+                                d =
+                                    hypot (pt.x - sec.x) (pt.y - sec.y)
+                            in
+                            Just { sec | x = pt.x, y = pt.y, travel = sec.travel + d }
+
+                        Nothing ->
+                            Just sec
+
+                Nothing ->
+                    Nothing
     in
     case ( model.captured, list ) of
         ( True, first :: _ ) ->
@@ -1407,13 +1495,17 @@ touchesMoved touches model =
                         _ ->
                             [ DragMoved p.x p.y ]
             in
-            ( { model | activeTouches = touches, dragTravel = travel, lastPointer = ( p.x, p.y ) }
+            ( { model
+                | activeTouches = touches
+                , dragTravel = travel
+                , lastPointer = ( p.x, p.y )
+                , secondaryTouch = updatedSec
+              }
             , Cmd.none
             , events
             )
 
         ( False, [ p ] ) ->
-            -- Travel is kept for one finger so a tap can be told from a drag.
             let
                 ( lx, ly ) =
                     model.lastPointer
@@ -1427,17 +1519,14 @@ touchesMoved touches model =
                             model.dragTravel
 
                 moved =
-                    advanceTouchGesture list { model | activeTouches = touches }
+                    advanceTouchGesture list { model | activeTouches = touches, secondaryTouch = updatedSec }
             in
             ( { moved | dragTravel = travel, lastPointer = ( p.x, p.y ) }, Cmd.none, [] )
 
         _ ->
-            ( advanceTouchGesture list { model | activeTouches = touches }, Cmd.none, [] )
+            ( advanceTouchGesture list { model | activeTouches = touches, secondaryTouch = updatedSec }, Cmd.none, [] )
 
 
-{-| Fingers came up. A captured gesture ends with them; a one-finger gesture that
-barely moved is a tap (even when the press was captured on a part).
--}
 touchesUp : Dict Int TouchPoint -> Model -> ( Model, Cmd Msg, List Event )
 touchesUp touches model =
     let
@@ -1447,10 +1536,49 @@ touchesUp touches model =
         ( x, y ) =
             model.lastPointer
 
+        liftedTouches =
+            Dict.filter (\id _ -> not (Dict.member id touches)) model.activeTouches
+
+        pinchOrOrbitEngaged =
+            case model.touchGesture of
+                PinchGesture pinch ->
+                    pinch.zoomEngaged
+                        || pinch.rotateEngaged
+                        || pinch.orbitEngaged
+                        || (hypot (pinch.midX - pinch.startMidX) (pinch.midY - pinch.startMidY) >= tapSlop)
+
+                _ ->
+                    False
+
+        wasSecondaryTap =
+            not model.secondFingerShift
+                && (case model.secondaryTouch of
+                        Just sec ->
+                            Dict.member sec.id liftedTouches
+                                && (sec.travel < tapSlop)
+                                && (hypot (sec.x - sec.startX) (sec.y - sec.startY) < tapSlop)
+                                && not pinchOrOrbitEngaged
+
+                        Nothing ->
+                            False
+                   )
+
+        secondaryTapEvents =
+            case model.secondaryTouch of
+                Just sec ->
+                    if wasSecondaryTap then
+                        [ Clicked sec.x sec.y True ]
+
+                    else
+                        []
+
+                Nothing ->
+                    []
+
         wasTap =
-            List.isEmpty list
-                && model.dragTravel
-                < tapSlop
+            not model.multiTouchInteraction
+                && List.isEmpty list
+                && (model.dragTravel < tapSlop)
                 && (case model.touchGesture of
                         SingleTouchGesture _ ->
                             True
@@ -1458,13 +1586,26 @@ touchesUp touches model =
                         _ ->
                             False
                    )
+
+        remainingMultiTouch =
+            if List.isEmpty list then
+                False
+
+            else
+                model.multiTouchInteraction
     in
     if model.captured then
         case list of
             [] ->
                 let
                     ended =
-                        endTouchGesture [] { model | activeTouches = touches, pressShift = False }
+                        endTouchGesture []
+                            { model
+                                | activeTouches = touches
+                                , pressShift = False
+                                , multiTouchInteraction = False
+                                , secondaryTouch = Nothing
+                            }
 
                     shiftOff =
                         if model.pressShift then
@@ -1517,15 +1658,23 @@ touchesUp touches model =
                     , touchGesture = SingleTouchGesture keepId
                     , lastPointer = ( activePoint.x, activePoint.y )
                     , pressShift = stillShifted
+                    , multiTouchInteraction = remainingMultiTouch
+                    , secondaryTouch = Nothing
                   }
                 , Cmd.none
-                , shiftEvents
+                , secondaryTapEvents ++ shiftEvents
                 )
 
     else
         let
             ended =
-                endTouchGesture list { model | activeTouches = touches, pressShift = False }
+                endTouchGesture list
+                    { model
+                        | activeTouches = touches
+                        , pressShift = False
+                        , multiTouchInteraction = remainingMultiTouch
+                        , secondaryTouch = Nothing
+                    }
 
             shiftOff =
                 if model.pressShift && List.length list < 2 then
@@ -1538,7 +1687,7 @@ touchesUp touches model =
             ( ended, Cmd.none, shiftOff ++ [ Tapped x y, CameraSettled ] )
 
         else
-            ( ended, Cmd.none, shiftOff ++ [ CameraSettled ] )
+            ( ended, Cmd.none, secondaryTapEvents ++ shiftOff ++ [ CameraSettled ] )
 
 
 {-| How far, in pixels, a finger may wander and still count as a tap.

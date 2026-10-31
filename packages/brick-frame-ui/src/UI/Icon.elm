@@ -107,6 +107,27 @@ featherSized size name =
                 "columns" ->
                     FeatherIcons.columns
 
+                "scissors" ->
+                    FeatherIcons.scissors
+
+                "copy" ->
+                    FeatherIcons.copy
+
+                "clipboard" ->
+                    FeatherIcons.clipboard
+
+                "package" ->
+                    FeatherIcons.package
+
+                "box" ->
+                    FeatherIcons.box
+
+                "minimize-2" ->
+                    FeatherIcons.minimize2
+
+                "layers" ->
+                    FeatherIcons.layers
+
                 _ ->
                     FeatherIcons.play
     in

@@ -2411,6 +2411,205 @@ copyPasteSuite =
                     , \_ -> Expect.equal (List.length (Core.getPlacements afterDup)) 3
                     ]
                     ()
+        , test "cutSelection copies to clipboard, deletes selected part, and Ctrl+X shortcut works" <|
+            \_ ->
+                let
+                    config =
+                        { ldrawBase = "/ldraw"
+                        , ldrawFallbackBase = ""
+                        , defaultModelUrl = ""
+                        , initialHash = ""
+                        , supportsPointerEvents = True
+                        , document = Document.empty
+                        , gridStep = Just 20
+                        , rotateStep = Just 90
+                        , snapDistance = Just 24.0
+                        , collisionMode = Nothing
+                        }
+
+                    ( model0, _ ) =
+                        Core.init config
+
+                    ( model1, _, _ ) =
+                        Core.addPart "3001.dat" 14 (vec3 0 0 0) model0
+
+                    ( afterCut, _, _ ) =
+                        Core.cutSelection model1
+
+                    ( afterPaste, _, _ ) =
+                        Core.pasteClipboard afterCut
+
+                    cutKey =
+                        let
+                            k =
+                                pressOn "CANVAS" "x"
+                        in
+                        { k | ctrl = True }
+
+                    ( afterKeyCut, _, _ ) =
+                        Core.update (Core.ViewportMsg (Viewport.KeyPressed cutKey)) model1
+                in
+                Expect.all
+                    [ \_ -> Expect.equal (List.length (Core.getPlacements afterCut)) 0
+                    , \_ -> Expect.equal (Core.hasClipboard afterCut) True
+                    , \_ -> Expect.equal (List.length (Core.getPlacements afterPaste)) 1
+                    , \_ -> Expect.equal (List.length (Core.getPlacements afterKeyCut)) 0
+                    , \_ -> Expect.equal (Core.hasClipboard afterKeyCut) True
+                    ]
+                    ()
+        , test "groupSelection and explodeSelection group multiple parts and unpack them" <|
+            \_ ->
+                let
+                    config =
+                        { ldrawBase = "/ldraw"
+                        , ldrawFallbackBase = ""
+                        , defaultModelUrl = ""
+                        , initialHash = ""
+                        , supportsPointerEvents = True
+                        , document = Document.empty
+                        , gridStep = Just 20
+                        , rotateStep = Just 90
+                        , snapDistance = Just 24.0
+                        , collisionMode = Nothing
+                        }
+
+                    ( model0, _ ) =
+                        Core.init config
+
+                    ( m1, _, _ ) =
+                        Core.addPart "3001.dat" 14 (vec3 0 0 0) model0
+
+                    ( m2, _, _ ) =
+                        Core.addPart "3001.dat" 4 (vec3 40 0 0) m1
+
+                    bothSel =
+                        Core.selectAll m2
+
+                    canGroupBefore =
+                        Core.canGroup bothSel
+
+                    ( grouped, _, _ ) =
+                        Core.groupSelection bothSel
+
+                    canGroupAfter =
+                        Core.canGroup grouped
+
+                    canExplodeGrouped =
+                        Core.canExplode grouped
+
+                    ( exploded, _, _ ) =
+                        Core.explodeSelection grouped
+                in
+                Expect.all
+                    [ \_ -> Expect.equal True canGroupBefore
+                    , \_ -> Expect.equal 1 (List.length (Document.mainPlacements grouped.document))
+                    , \_ -> Expect.equal 1 (Set.size grouped.selection)
+                    , \_ -> Expect.equal False canGroupAfter
+                    , \_ -> Expect.equal True canExplodeGrouped
+                    , \_ -> Expect.equal 2 (List.length (Document.mainPlacements exploded.document))
+                    , \_ -> Expect.equal 2 (Set.size exploded.selection)
+                    ]
+                    ()
+        , test "group and explode keyboard shortcuts Ctrl+G and Ctrl+Shift+G work on canvas" <|
+            \_ ->
+                let
+                    config =
+                        { ldrawBase = "/ldraw"
+                        , ldrawFallbackBase = ""
+                        , defaultModelUrl = ""
+                        , initialHash = ""
+                        , supportsPointerEvents = True
+                        , document = Document.empty
+                        , gridStep = Just 20
+                        , rotateStep = Just 90
+                        , snapDistance = Just 24.0
+                        , collisionMode = Nothing
+                        }
+
+                    ( model0, _ ) =
+                        Core.init config
+
+                    ( m1, _, _ ) =
+                        Core.addPart "3001.dat" 14 (vec3 0 0 0) model0
+
+                    ( m2, _, _ ) =
+                        Core.addPart "3001.dat" 4 (vec3 40 0 0) m1
+
+                    bothSel =
+                        Core.selectAll m2
+
+                    groupKey =
+                        let
+                            k =
+                                pressOn "CANVAS" "g"
+                        in
+                        { k | ctrl = True }
+
+                    ( afterGroupKey, _, _ ) =
+                        Core.update (Core.ViewportMsg (Viewport.KeyPressed groupKey)) bothSel
+
+                    ungroupKey =
+                        let
+                            k =
+                                pressOn "CANVAS" "G"
+                        in
+                        { k | ctrl = True, shift = True }
+
+                    ( afterUngroupKey, _, _ ) =
+                        Core.update (Core.ViewportMsg (Viewport.KeyPressed ungroupKey)) afterGroupKey
+                in
+                Expect.all
+                    [ \_ -> Expect.equal 1 (List.length (Document.mainPlacements afterGroupKey.document))
+                    , \_ -> Expect.equal 2 (List.length (Document.mainPlacements afterUngroupKey.document))
+                    ]
+                    ()
+        , test "Viewport.Tapped toggles selection when shiftHeld is true" <|
+            \_ ->
+                let
+                    config =
+                        { ldrawBase = "/ldraw"
+                        , ldrawFallbackBase = ""
+                        , defaultModelUrl = ""
+                        , initialHash = ""
+                        , supportsPointerEvents = True
+                        , document = Document.empty
+                        , gridStep = Just 20
+                        , rotateStep = Just 90
+                        , snapDistance = Just 24.0
+                        , collisionMode = Nothing
+                        }
+
+                    ( model0, _ ) =
+                        Core.init config
+
+                    ( m1, _, _ ) =
+                        Core.addPart "3001.dat" 14 (vec3 0 0 0) model0
+
+                    ( m2, _, _ ) =
+                        Core.addPart "3001.dat" 4 (vec3 40 0 0) m1
+
+                    -- Without shift, tap on empty space clears selection
+                    ( down1, _, _ ) =
+                        Core.update (Core.ViewportMsg (Viewport.PointerTouchStart { id = 1, x = -100, y = -100 })) m2
+
+                    ( cleared, _, _ ) =
+                        Core.update (Core.ViewportMsg (Viewport.PointerTouchEnd 1)) down1
+
+                    -- With shiftHeld, tap on empty space preserves selection
+                    shifted =
+                        Core.setShiftHeld True m2
+
+                    ( down2, _, _ ) =
+                        Core.update (Core.ViewportMsg (Viewport.PointerTouchStart { id = 2, x = -100, y = -100 })) shifted
+
+                    ( preserved, _, _ ) =
+                        Core.update (Core.ViewportMsg (Viewport.PointerTouchEnd 2)) down2
+                in
+                Expect.all
+                    [ \_ -> Expect.equal Set.empty cleared.selection
+                    , \_ -> Expect.equal m2.selection preserved.selection
+                    ]
+                    ()
         , describe "recolorSelection"
             [ test "recolors a single selected part, emits DocumentChanged, and records undo" <|
                 \_ ->
