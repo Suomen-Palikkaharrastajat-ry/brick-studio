@@ -1,4 +1,10 @@
-module LDraw.Parser exposing (firstMpdFileName, parseFile, parseLine, splitMpd)
+module LDraw.Parser exposing
+    ( firstMpdFileName
+    , isMpd
+    , parseFile
+    , parseLine
+    , splitMpd
+    )
 
 {-| LDraw file format parser.
 
@@ -13,6 +19,7 @@ import Dict exposing (Dict)
 import LDraw.Types exposing (LDrawLine(..))
 import Math.Matrix4 as Mat4
 import Math.Vector3 exposing (vec3)
+
 
 
 -- ── Public API ────────────────────────────────────────────────────────────────
@@ -117,6 +124,14 @@ firstMpdFileName text =
         |> String.lines
         |> List.filterMap parseFileName
         |> List.head
+
+
+{-| Whether the given text appears to be an MPD file (contains at least one `0 FILE` marker).
+-}
+isMpd : String -> Bool
+isMpd text =
+    firstMpdFileName text /= Nothing
+
 
 
 -- ── Internal parsers ──────────────────────────────────────────────────────────
@@ -284,6 +299,7 @@ parseConditional tokens =
 
         _ ->
             Nothing
+
 
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────

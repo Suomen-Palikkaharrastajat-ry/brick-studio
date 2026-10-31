@@ -2,10 +2,12 @@ module LDraw.Resolve exposing
     ( PartCache
     , PartStatus(..)
     , ResolverConfig
+    , canUseBundle
     , defaultResolverConfig
     , fetchPart
     , fetchPartPrimitive
     , initCache
+    , isMpd
     , markLoading
     , partCandidateUrls
     , pendingParts
@@ -70,11 +72,13 @@ type alias PartCache =
   - `primaryBase` is required and should point to a directory containing
     `parts/` and `p/` subdirectories (for example `/ldraw`).
   - `fallbackBase` is optional and is used when primary fetches fail.
+  - `bundlesBase` is optional and points to pre-bundled MPD parts.
 
 -}
 type alias ResolverConfig =
     { primaryBase : String
     , fallbackBase : Maybe String
+    , bundlesBase : Maybe String
     }
 
 
@@ -115,19 +119,31 @@ defaultResolverConfig : ResolverConfig
 defaultResolverConfig =
     { primaryBase = "/ldraw"
     , fallbackBase = Just "https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw"
+    , bundlesBase = Nothing
     }
 
 
 {-| Build a normalised resolver configuration from environment values.
+If `primaryBase` ends with `/raw`, `bundlesBase` is automatically inferred as `.../bundles`.
 -}
 resolverConfig : String -> Maybe String -> ResolverConfig
 resolverConfig primary fallback =
-    { primaryBase =
-        if String.trim primary == "" then
-            defaultResolverConfig.primaryBase
+    let
+        normPrimary =
+            if String.trim primary == "" then
+                defaultResolverConfig.primaryBase
 
-        else
-            normalizeBase primary
+            else
+                normalizeBase primary
+
+        inferredBundles =
+            if String.endsWith "/raw" normPrimary then
+                Just (String.dropRight 4 normPrimary ++ "/bundles")
+
+            else
+                Nothing
+    in
+    { primaryBase = normPrimary
     , fallbackBase =
         fallback
             |> Maybe.andThen
@@ -138,6 +154,7 @@ resolverConfig primary fallback =
                     else
                         Just (normalizeBase value)
                 )
+    , bundlesBase = inferredBundles
     }
 
 
@@ -172,11 +189,12 @@ seedFromMpd text cache =
         seeded =
             Dict.foldl
                 (\name content acc ->
-                    if Dict.member name acc then
-                        acc
+                    case Dict.get name acc of
+                        Just (Loaded _) ->
+                            acc
 
-                    else
-                        Dict.insert name (Loaded (Parser.parseFile content)) acc
+                        _ ->
+                            Dict.insert name (Loaded (Parser.parseFile content)) acc
                 )
                 cache
                 sections
@@ -196,13 +214,107 @@ seedFromMpd text cache =
     ( seeded, mainFile )
 
 
+{-| Whether the given text appears to be an MPD file.
+-}
+isMpd : String -> Bool
+isMpd text =
+    String.startsWith "0 FILE " text || Parser.isMpd text
+
+
+{-| Check if a part name refers to a top-level model part (as opposed to a primitive or subpart).
+Only top-level parts have pre-compiled MPD bundles.
+-}
+canUseBundle : String -> Bool
+canUseBundle rawName =
+    let
+        norm =
+            rawName
+                |> String.replace "\\" "/"
+                |> (\n ->
+                        if String.startsWith "parts/" n then
+                            String.dropLeft 6 n
+
+                        else
+                            n
+                   )
+    in
+    if String.isEmpty norm then
+        False
+
+    else if String.startsWith "s/" norm || String.startsWith "p/" norm || String.startsWith "48/" norm || String.startsWith "8/" norm then
+        False
+
+    else if String.contains "/" norm then
+        False
+
+    else if isLikelyPrimitiveName norm then
+        False
+
+    else
+        True
+
+
+bundleUrl : String -> String -> String
+bundleUrl base rawName =
+    let
+        cleanName =
+            rawName
+                |> String.replace "\\" "/"
+                |> (\n ->
+                        if String.startsWith "parts/" n then
+                            String.dropLeft 6 n
+
+                        else
+                            n
+                   )
+
+        bundleFile =
+            if String.endsWith ".dat" (String.toLower cleanName) then
+                String.dropRight 4 cleanName ++ ".mpd"
+
+            else if String.endsWith ".mpd" (String.toLower cleanName) then
+                cleanName
+
+            else
+                cleanName ++ ".mpd"
+    in
+    if String.endsWith "/bundles" base then
+        joinBase base bundleFile
+
+    else
+        joinBase (base ++ "/bundles") bundleFile
+
+
 {-| Update the cache after a successful or failed fetch.
+If the fetched text looks like an MPD, `seedFromMpd` is used to immediately store
+all embedded subparts and primitives in the cache as `Loaded`.
 -}
 updateCache : String -> Result Http.Error String -> (String -> List LDrawLine) -> PartCache -> PartCache
 updateCache name result parseFn cache =
     case result of
         Ok text ->
-            Dict.insert name (Loaded (parseFn text)) cache
+            if isMpd text then
+                let
+                    ( seededCache, _ ) =
+                        seedFromMpd text cache
+
+                    mainLines =
+                        case Dict.get name seededCache of
+                            Just (Loaded lines) ->
+                                lines
+
+                            _ ->
+                                case Parser.firstMpdFileName text |> Maybe.andThen (\first -> Dict.get first seededCache) of
+                                    Just (Loaded lines) ->
+                                        lines
+
+                                    _ ->
+                                        parseFn text
+                in
+                Dict.insert name (Loaded mainLines) seededCache
+
+            else
+                Dict.insert name (Loaded (parseFn text)) cache
 
         Err err ->
             Dict.insert name (Failed (httpErrorToString err)) cache
@@ -222,14 +334,34 @@ pendingParts lines cache =
 {-| Fetch a single part by name. The `toMsg` callback wraps the result into
 your application's `Msg` type.
 
+If `bundlesBase` is configured and the part is a top-level part (`canUseBundle`),
+it tries fetching the self-contained MPD bundle first, falling back to individual
+candidate files if the bundle fetch fails.
+
     fetchPart config "3647.dat" (\name result -> PartLoaded name result)
 
 -}
 fetchPart : ResolverConfig -> String -> (String -> Result Http.Error String -> msg) -> Cmd msg
 fetchPart config name toMsg =
-    partCandidateUrls config name
-        |> fetchFirst
-        |> Task.attempt (toMsg name)
+    let
+        candidatesTask =
+            partCandidateUrls config name
+                |> fetchFirst
+
+        task =
+            case config.bundlesBase of
+                Just base ->
+                    if canUseBundle name then
+                        httpGet (bundleUrl base name)
+                            |> Task.onError (\_ -> candidatesTask)
+
+                    else
+                        candidatesTask
+
+                Nothing ->
+                    candidatesTask
+    in
+    Task.attempt (toMsg name) task
 
 
 {-| Fetch a part from the primitives directory (`p/`).
