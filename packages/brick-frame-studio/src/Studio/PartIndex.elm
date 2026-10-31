@@ -4,6 +4,8 @@ module Studio.PartIndex exposing
     , categories
     , decoder
     , fetch
+    , fetchFrom
+    , fetchWithFallback
     , makePart
     )
 
@@ -93,10 +95,37 @@ partDecoder =
 -}
 fetch : String -> (Result Http.Error PartIndex -> msg) -> Cmd msg
 fetch ldrawBase toMsg =
+    fetchWithFallback Nothing ldrawBase toMsg
+
+
+{-| Fetch the index from `indicesBase`, falling back to `ldrawBase` if `indicesBase` is Nothing or empty.
+-}
+fetchWithFallback : Maybe String -> String -> (Result Http.Error PartIndex -> msg) -> Cmd msg
+fetchWithFallback maybeIndicesBase ldrawBase toMsg =
+    let
+        baseUrl =
+            case maybeIndicesBase of
+                Just base ->
+                    if String.isEmpty (String.trim base) then
+                        ldrawBase
+
+                    else
+                        base
+
+                Nothing ->
+                    ldrawBase
+    in
     Http.get
-        { url = withoutTrailingSlash ldrawBase ++ "/parts-index.json"
+        { url = withoutTrailingSlash baseUrl ++ "/parts-index.json"
         , expect = Http.expectJson toMsg decoder
         }
+
+
+{-| Fetch the index from a record specifying `ldrawBase` and an optional `indicesBase`.
+-}
+fetchFrom : { indicesBase : Maybe String, ldrawBase : String } -> (Result Http.Error PartIndex -> msg) -> Cmd msg
+fetchFrom config toMsg =
+    fetchWithFallback config.indicesBase config.ldrawBase toMsg
 
 
 withoutTrailingSlash : String -> String

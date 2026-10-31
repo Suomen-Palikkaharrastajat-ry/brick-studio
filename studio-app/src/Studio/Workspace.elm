@@ -112,6 +112,9 @@ viewer (`docs/library-usage.md`); the studio ignores the playback fields.
 type alias Flags =
     { ldrawBase : String
     , ldrawFallbackBase : String
+    , indicesBase : Maybe String
+    , bundlesBase : Maybe String
+    , manifestUrl : Maybe String
     , defaultModelUrl : String
     , initialHash : String
     , maxRpm : Float
@@ -435,9 +438,23 @@ init flags =
 
         -- No hash write here: the camera has not been framed yet, and a hash
         -- holding this default camera made every reload skip auto-fit.
-        , PartIndex.fetch flags.ldrawBase PartIndexLoaded
+        , PartIndex.fetchWithFallback flags.indicesBase flags.ldrawBase PartIndexLoaded
         , Http.get
-            { url = withoutTrailingSlash flags.ldrawBase ++ "/elements-index.json"
+            { url =
+                let
+                    effectiveIndicesBase =
+                        case flags.indicesBase of
+                            Just base ->
+                                if String.isEmpty (String.trim base) then
+                                    flags.ldrawBase
+
+                                else
+                                    base
+
+                            Nothing ->
+                                flags.ldrawBase
+                in
+                withoutTrailingSlash effectiveIndicesBase ++ "/elements-index.json"
             , expect = Http.expectJson ElementCatalogLoaded Catalog.elementCatalogDecoder
             }
         , Browser.Dom.getViewport

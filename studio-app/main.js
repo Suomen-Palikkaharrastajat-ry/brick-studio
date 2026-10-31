@@ -47,13 +47,15 @@ const model = requestedModel ?? (draft !== null ? '' : `${siteRoot}examples/whee
 
 const playBaseUrl = import.meta.env.DEV ? 'http://localhost:5175/' : new URL('../play/', window.location.href).href
 
-const ldrawBase = import.meta.env.VITE_LDRAW_BASE ?? `${siteRoot}ldraw`
+const ldrawBase = import.meta.env.VITE_LDRAW_BASE || 'https://catalog.palikkaharrastajat.fi/raw'
+const indicesBase = import.meta.env.VITE_LDRAW_INDICES_BASE || 'https://catalog.palikkaharrastajat.fi/indices'
 
 const runtime = initBricksRuntime({
   elm: Elm.Main,
   node: document.getElementById('app'),
   mode: 'simulator',
   ldrawBase,
+  indicesBase,
   ldrawFallbackBase: import.meta.env.VITE_LDRAW_FALLBACK_BASE ?? '',
   defaultModel: model,
   loadModelInJs: true,

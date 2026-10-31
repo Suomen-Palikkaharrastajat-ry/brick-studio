@@ -21,6 +21,9 @@ flags : Workspace.Flags
 flags =
     { ldrawBase = ""
     , ldrawFallbackBase = ""
+    , indicesBase = Nothing
+    , bundlesBase = Nothing
+    , manifestUrl = Nothing
     , defaultModelUrl = ""
     , initialHash = ""
     , maxRpm = 120
