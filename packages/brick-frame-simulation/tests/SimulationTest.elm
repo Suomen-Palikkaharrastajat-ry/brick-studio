@@ -120,8 +120,20 @@ drivenCache =
         , ( "2780.dat", Loaded [] )
         , ( "43093.dat", Loaded [] )
         , ( "3700.dat", Loaded [] )
+        , ( "3701.dat", Loaded [] )
+        , ( "3622.dat", Loaded [] )
+        , ( "3005.dat", Loaded [] )
         , ( "32523.dat", Loaded [] )
         ]
+
+
+brick3005At : Float -> Float -> Float -> LDrawLine
+brick3005At x y z =
+    SubFileRef
+        { color = 14
+        , transform = Mat4.makeTranslate3 x y z
+        , file = "3005.dat"
+        }
 
 
 {-| The model with the driven layout, plus an axle 200 LDU away that nothing drives.
@@ -678,6 +690,169 @@ suite =
                     drivenPartsFor [ 0, 1 ] m
                         |> List.map .file
                         |> Expect.equal [ "3705.dat" ]
+            , test "an unglued normal brick on studs of a driven Technic brick rotates with the assembly" <|
+                \_ ->
+                    let
+                        lines =
+                            [ gear24 0
+                            , gear24 60
+                            , axlePinAlongZ 60 0
+                            , brick3700AtZ 60 0
+                            , brick3005At 50 -34 0
+                            ]
+
+                        ( m, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse { lines = lines, cache = drivenCache }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            drivenPartsFor [ 0, 1 ] m
+                                |> List.map .file
+                                |> Expect.equal [ "43093.dat", "3700.dat", "3005.dat" ]
+                        , \_ ->
+                            Expect.equal False (List.member (brick3005At 50 -34 0) analysis.staticLines)
+                        ]
+                        ()
+            , test "transitive chain: multiple connected bricks on studs all rotate with the assembly" <|
+                \_ ->
+                    let
+                        lines =
+                            [ gear24 0
+                            , gear24 60
+                            , axlePinAlongZ 60 0
+                            , brick3700AtZ 60 0
+                            , brick3005At 50 -34 0
+                            , brick3005At 50 -58 0
+                            ]
+
+                        ( m, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse { lines = lines, cache = drivenCache }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            drivenPartsFor [ 0, 1 ] m
+                                |> List.map .file
+                                |> Expect.equal [ "43093.dat", "3700.dat", "3005.dat", "3005.dat" ]
+                        , \_ ->
+                            Expect.equal False (List.member (brick3005At 50 -58 0) analysis.staticLines)
+                        ]
+                        ()
+            , test "a glued brick on studs of an assembly anchors it so it does not rotate and stays static" <|
+                \_ ->
+                    let
+                        lines =
+                            [ gear24 0
+                            , gear24 60
+                            , axlePinAlongZ 60 0
+                            , brick3700AtZ 60 0
+                            , Comment "!PALIKKA GLUED"
+                            , brick3005At 50 -34 0
+                            ]
+
+                        ( m, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse { lines = lines, cache = drivenCache }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            drivenPartsFor [ 0, 1 ] m
+                                |> List.map .file
+                                |> Expect.equal [ "43093.dat" ]
+                        , \_ ->
+                            Expect.equal True (List.member (brick3005At 50 -34 0) analysis.staticLines)
+                        ]
+                        ()
+            , test "an unglued brick on a glued static frame does not rotate while the separate driven assembly rotates" <|
+                \_ ->
+                    let
+                        lines =
+                            [ gear24 0
+                            , gear24 60
+                            , axlePinAlongZ 60 0
+                            , brick3700AtZ 60 0
+                            , Comment "!PALIKKA GLUED"
+                            , brick3005At 0 0 0
+                            , brick3005At 0 -24 0
+                            ]
+
+                        ( m, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse { lines = lines, cache = drivenCache }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            drivenPartsFor [ 0, 1 ] m
+                                |> List.map .file
+                                |> Expect.equal [ "43093.dat", "3700.dat" ]
+                        , \_ ->
+                            Expect.equal True (List.member (brick3005At 0 -24 0) analysis.staticLines)
+                        ]
+                        ()
+            , test "the yellow 1x3 brick 3622 on red Technic brick 3701 driven by 43093 rotates with gear 4019" <|
+                \_ ->
+                    let
+                        gearMat =
+                            Mat4.fromRecord
+                                { m11 = -1
+                                , m21 = 0
+                                , m31 = 0
+                                , m41 = 0
+                                , m12 = 0
+                                , m22 = 1
+                                , m32 = 0
+                                , m42 = 0
+                                , m13 = 0
+                                , m23 = 0
+                                , m33 = -1
+                                , m43 = 0
+                                , m14 = -140
+                                , m24 = -14
+                                , m34 = -150
+                                , m44 = 1
+                                }
+
+                        pinMat =
+                            Mat4.fromRecord
+                                { m11 = 0
+                                , m21 = 0
+                                , m31 = -1
+                                , m41 = 0
+                                , m12 = 0
+                                , m22 = -1
+                                , m32 = 0
+                                , m42 = 0
+                                , m13 = -1
+                                , m23 = 0
+                                , m33 = 0
+                                , m43 = 0
+                                , m14 = -140
+                                , m24 = -14
+                                , m34 = -140
+                                , m44 = 1
+                                }
+
+                        lines =
+                            [ SubFileRef { color = 71, transform = gearMat, file = "4019.dat" }
+                            , SubFileRef { color = 71, transform = pinMat, file = "43093.dat" }
+                            , SubFileRef { color = 4, transform = Mat4.makeTranslate3 -160 -24 -130, file = "3701.dat" }
+                            , SubFileRef { color = 14, transform = Mat4.makeTranslate3 -150 -48 -130, file = "3622.dat" }
+                            ]
+
+                        ( m, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse { lines = lines, cache = drivenCache }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            drivenPartsFor [ 0 ] m
+                                |> List.map .file
+                                |> Expect.equal [ "43093.dat", "3701.dat", "3622.dat" ]
+                        , \_ ->
+                            Expect.equal [] analysis.staticLines
+                        ]
+                        ()
             ]
         , describe "motor"
             [ test "SetMotorGear changes the driving gear" <|

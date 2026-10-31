@@ -52,6 +52,7 @@ import Gear.Detect as Detect
 import Gear.Lod as Lod exposing (Lod)
 import Gear.Types exposing (GearGraph, GearId, GearInstance, GearSpec)
 import LDraw.ColorData exposing (Finish(..))
+import LDraw.Connectivity as Connectivity exposing (ConnectionType(..))
 import LDraw.Resolve exposing (PartCache, PartStatus(..))
 import LDraw.Types exposing (LDrawLine(..))
 import Math.Matrix4 as Mat4
@@ -252,7 +253,7 @@ analyse { lines, cache } model =
         drivenAxles =
             Meshes.buildDrivenAxles cache components gearInstances
 
-        coaxialGearByLine =
+        initialCoaxialGearByLine =
             List.map
                 (\( line, isGlued ) ->
                     if isGlued then
@@ -262,6 +263,9 @@ analyse { lines, cache } model =
                         Meshes.topLevelCoaxialGear cache drivenAxles line gearInstances
                 )
                 taggedLines
+
+        coaxialGearByLine =
+            expandCoaxialConnectivity cache model.gearSpecs taggedLines gearInstances drivenAxles initialCoaxialGearByLine
 
         nonGearTopLevelLines =
             List.map2 (\( line, isGlued ) coaxial -> ( line, isGlued, coaxial )) taggedLines coaxialGearByLine
@@ -446,6 +450,397 @@ tagGluedLines inputLines =
     List.foldl step ( False, [] ) inputLines
         |> Tuple.second
         |> List.reverse
+
+
+type alias LineItem =
+    { index : Int
+    , line : LDrawLine
+    , isGlued : Bool
+    , points : List Connectivity.WorldConnectionPoint
+    , isGearOrAxle : Bool
+    , initialDrivingGearId : Maybe GearId
+    }
+
+
+type alias RotatingElement =
+    { points : List Connectivity.WorldConnectionPoint
+    , drivingGearId : GearId
+    }
+
+
+type alias Candidate =
+    { index : Int
+    , points : List Connectivity.WorldConnectionPoint
+    }
+
+
+expandCoaxialConnectivity :
+    PartCache
+    -> List GearSpec
+    -> List ( LDrawLine, Bool )
+    -> List GearInstance
+    -> List Meshes.DrivenAxle
+    -> List (Maybe GearId)
+    -> List (Maybe GearId)
+expandCoaxialConnectivity cache gearSpecs taggedLines gearInstances drivenAxles initialCoaxialGearByLine =
+    let
+        lineItems : List LineItem
+        lineItems =
+            List.map2
+                (\( index, ( line, isGlued ) ) initialGearId ->
+                    let
+                        ( isGearOrAxle, points ) =
+                            case line of
+                                SubFileRef ref ->
+                                    let
+                                        isGa =
+                                            isTopLevelGearRef gearSpecs line || isTopLevelAxleRef line
+
+                                        pts =
+                                            getPartWorldConnections cache ref.file ref.transform
+                                    in
+                                    ( isGa, pts )
+
+                                _ ->
+                                    ( False, [] )
+                    in
+                    { index = index
+                    , line = line
+                    , isGlued = isGlued
+                    , points = points
+                    , isGearOrAxle = isGearOrAxle
+                    , initialDrivingGearId =
+                        if isGlued then
+                            Nothing
+
+                        else
+                            initialGearId
+                    }
+                )
+                (List.indexedMap Tuple.pair taggedLines)
+                initialCoaxialGearByLine
+
+        initiallyGluedIndices =
+            lineItems
+                |> List.filter .isGlued
+                |> List.map .index
+                |> Set.fromList
+
+        allAnchoredIndices =
+            expandStaticAnchors lineItems initiallyGluedIndices
+
+        gearElements : List RotatingElement
+        gearElements =
+            gearInstances
+                |> List.map
+                    (\gear ->
+                        { points = getPartWorldConnections cache gear.spec.partFile gear.worldMatrix
+                        , drivingGearId = gear.id
+                        }
+                    )
+
+        axleElements : List RotatingElement
+        axleElements =
+            drivenAxles
+                |> List.map
+                    (\axle ->
+                        { points = getPartWorldConnections cache axle.file axle.transform
+                        , drivingGearId = axle.drivingGearId
+                        }
+                    )
+
+        initialCoaxialElements : List RotatingElement
+        initialCoaxialElements =
+            lineItems
+                |> List.filterMap
+                    (\it ->
+                        case it.initialDrivingGearId of
+                            Just gid ->
+                                if not (Set.member it.index allAnchoredIndices) then
+                                    Just { points = it.points, drivingGearId = gid }
+
+                                else
+                                    Nothing
+
+                            Nothing ->
+                                Nothing
+                    )
+
+        initialRotating : List RotatingElement
+        initialRotating =
+            gearElements ++ axleElements ++ initialCoaxialElements
+
+        candidates : List Candidate
+        candidates =
+            lineItems
+                |> List.filterMap
+                    (\it ->
+                        if not it.isGlued && not it.isGearOrAxle && not (Set.member it.index allAnchoredIndices) && (it.initialDrivingGearId == Nothing) && not (List.isEmpty it.points) then
+                            Just { index = it.index, points = it.points }
+
+                        else
+                            Nothing
+                    )
+
+        ( _, assigned ) =
+            expandRotating initialRotating candidates Dict.empty
+    in
+    lineItems
+        |> List.map
+            (\it ->
+                if Set.member it.index allAnchoredIndices then
+                    Nothing
+
+                else
+                    case Dict.get it.index assigned of
+                        Just gid ->
+                            Just gid
+
+                        Nothing ->
+                            it.initialDrivingGearId
+            )
+
+
+getPartWorldConnections : PartCache -> String -> Mat4.Mat4 -> List Connectivity.WorldConnectionPoint
+getPartWorldConnections cache file transform =
+    let
+        conn =
+            Connectivity.extractPartConnectivity file (Meshes.lookupPartLines cache)
+    in
+    List.map (Connectivity.transformPoint transform 0) conn.connections
+
+
+expandStaticAnchors : List LineItem -> Set Int -> Set Int
+expandStaticAnchors items anchored =
+    let
+        anchoredPoints =
+            items
+                |> List.filter (\it -> Set.member it.index anchored)
+                |> List.concatMap .points
+
+        newlyAnchored =
+            items
+                |> List.filter
+                    (\it ->
+                        not (Set.member it.index anchored)
+                            && not it.isGearOrAxle
+                            && partsAreStudConnected it.points anchoredPoints
+                    )
+                |> List.map .index
+    in
+    if List.isEmpty newlyAnchored then
+        anchored
+
+    else
+        expandStaticAnchors items (List.foldl Set.insert anchored newlyAnchored)
+
+
+expandRotating :
+    List RotatingElement
+    -> List Candidate
+    -> Dict Int GearId
+    -> ( List RotatingElement, Dict Int GearId )
+expandRotating rotating candidates assigned =
+    let
+        findMatches candidate =
+            rotating
+                |> List.filterMap
+                    (\rot ->
+                        if partsAreRigidlyConnected candidate.points rot.points then
+                            Just rot.drivingGearId
+
+                        else
+                            Nothing
+                    )
+
+        step candidate ( newlyAssigned, remainingCandidates ) =
+            let
+                matchedGearIds =
+                    findMatches candidate
+            in
+            case matchedGearIds of
+                [] ->
+                    ( newlyAssigned, candidate :: remainingCandidates )
+
+                firstGid :: restGids ->
+                    if List.all (\gid -> gid == firstGid) restGids then
+                        ( ( candidate.index, { points = candidate.points, drivingGearId = firstGid } )
+                            :: newlyAssigned
+                        , remainingCandidates
+                        )
+
+                    else
+                        ( newlyAssigned, candidate :: remainingCandidates )
+
+        ( newAssignments, nextCandidates ) =
+            List.foldl step ( [], [] ) candidates
+    in
+    if List.isEmpty newAssignments then
+        ( rotating, assigned )
+
+    else
+        let
+            updatedAssigned =
+                List.foldl (\( idx, rot ) acc -> Dict.insert idx rot.drivingGearId acc) assigned newAssignments
+
+            newRotatingElements =
+                List.map Tuple.second newAssignments
+        in
+        expandRotating (newRotatingElements ++ rotating) nextCandidates updatedAssigned
+
+
+partsAreRigidlyConnected : List Connectivity.WorldConnectionPoint -> List Connectivity.WorldConnectionPoint -> Bool
+partsAreRigidlyConnected ptsA ptsB =
+    if List.isEmpty ptsA || List.isEmpty ptsB then
+        False
+
+    else
+        List.any (\ptA -> List.any (\ptB -> arePointsRigidlyConnected ptA ptB) ptsB) ptsA
+
+
+partsAreStudConnected : List Connectivity.WorldConnectionPoint -> List Connectivity.WorldConnectionPoint -> Bool
+partsAreStudConnected ptsA ptsB =
+    if List.isEmpty ptsA || List.isEmpty ptsB then
+        False
+
+    else
+        List.any (\ptA -> List.any (\ptB -> arePointsStudConnected ptA ptB) ptsB) ptsA
+
+
+arePointsRigidlyConnected : Connectivity.WorldConnectionPoint -> Connectivity.WorldConnectionPoint -> Bool
+arePointsRigidlyConnected ptA ptB =
+    case ( ptA.connType, ptB.connType ) of
+        ( Stud, AntiStud ) ->
+            Vec3.distance ptA.worldPosition ptB.worldPosition
+                <= 1.0
+                && Vec3.dot ptA.worldNormal ptB.worldNormal
+                < -0.7
+
+        ( AntiStud, Stud ) ->
+            Vec3.distance ptA.worldPosition ptB.worldPosition
+                <= 1.0
+                && Vec3.dot ptA.worldNormal ptB.worldNormal
+                < -0.7
+
+        ( TechnicPinMale male, TechnicPinFemale _ ) ->
+            if male.friction then
+                let
+                    offset =
+                        Vec3.sub ptB.worldPosition ptA.worldPosition
+
+                    along =
+                        Vec3.dot offset ptA.worldNormal
+
+                    distToAxis =
+                        Vec3.length (Vec3.sub offset (Vec3.scale along ptA.worldNormal))
+                in
+                distToAxis
+                    <= 1.0
+                    && along
+                    >= -1.0
+                    && along
+                    <= male.length
+                    + 1.0
+                    && abs (Vec3.dot ptA.worldNormal ptB.worldNormal)
+                    > 0.7
+
+            else
+                False
+
+        ( TechnicPinFemale _, TechnicPinMale male ) ->
+            if male.friction then
+                let
+                    offset =
+                        Vec3.sub ptA.worldPosition ptB.worldPosition
+
+                    along =
+                        Vec3.dot offset ptB.worldNormal
+
+                    distToAxis =
+                        Vec3.length (Vec3.sub offset (Vec3.scale along ptB.worldNormal))
+                in
+                distToAxis
+                    <= 1.0
+                    && along
+                    >= -1.0
+                    && along
+                    <= male.length
+                    + 1.0
+                    && abs (Vec3.dot ptA.worldNormal ptB.worldNormal)
+                    > 0.7
+
+            else
+                False
+
+        ( TechnicAxleMale male, TechnicAxleFemale _ ) ->
+            let
+                offset =
+                    Vec3.sub ptB.worldPosition ptA.worldPosition
+
+                along =
+                    Vec3.dot offset ptA.worldNormal
+
+                distToAxis =
+                    Vec3.length (Vec3.sub offset (Vec3.scale along ptA.worldNormal))
+            in
+            distToAxis
+                <= 1.0
+                && along
+                >= -1.0
+                && along
+                <= male.length
+                + 1.0
+                && abs (Vec3.dot ptA.worldNormal ptB.worldNormal)
+                > 0.7
+
+        ( TechnicAxleFemale _, TechnicAxleMale male ) ->
+            let
+                offset =
+                    Vec3.sub ptA.worldPosition ptB.worldPosition
+
+                along =
+                    Vec3.dot offset ptB.worldNormal
+
+                distToAxis =
+                    Vec3.length (Vec3.sub offset (Vec3.scale along ptB.worldNormal))
+            in
+            distToAxis
+                <= 1.0
+                && along
+                >= -1.0
+                && along
+                <= male.length
+                + 1.0
+                && abs (Vec3.dot ptA.worldNormal ptB.worldNormal)
+                > 0.7
+
+        ( ClipMale _, BarFemale _ ) ->
+            Vec3.distance ptA.worldPosition ptB.worldPosition <= 1.0
+
+        ( BarFemale _, ClipMale _ ) ->
+            Vec3.distance ptA.worldPosition ptB.worldPosition <= 1.0
+
+        _ ->
+            False
+
+
+arePointsStudConnected : Connectivity.WorldConnectionPoint -> Connectivity.WorldConnectionPoint -> Bool
+arePointsStudConnected ptA ptB =
+    case ( ptA.connType, ptB.connType ) of
+        ( Stud, AntiStud ) ->
+            Vec3.distance ptA.worldPosition ptB.worldPosition
+                <= 1.0
+                && Vec3.dot ptA.worldNormal ptB.worldNormal
+                < -0.7
+
+        ( AntiStud, Stud ) ->
+            Vec3.distance ptA.worldPosition ptB.worldPosition
+                <= 1.0
+                && Vec3.dot ptA.worldNormal ptB.worldNormal
+                < -0.7
+
+        _ ->
+            False
 
 
 topLevelComponents : List ( LDrawLine, Bool ) -> List Components.ComponentInstance

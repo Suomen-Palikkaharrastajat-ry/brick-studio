@@ -8,6 +8,7 @@ module Simulation.Meshes exposing
     , buildComponentRenders
     , buildDrivenAxles
     , buildGearMeshes
+    , lookupPartLines
     , rotationAround
     , toYUpPoint
     , topLevelCoaxialGear
@@ -929,26 +930,40 @@ extractCatalogConnectors partFile =
 
 lookupPartLines : PartCache -> String -> Maybe (List LDrawLine)
 lookupPartLines cache file =
-    case Dict.get file cache of
-        Just (Loaded lines) ->
-            Just lines
+    let
+        norm =
+            String.replace "\\" "/" file
 
-        _ ->
-            let
-                normalized =
-                    String.replace "\\" "/" file
-            in
-            case Dict.get normalized cache of
-                Just (Loaded lines) ->
-                    Just lines
+        candidates =
+            [ file
+            , norm
+            , String.toLower norm
+            , if String.startsWith "parts/" norm then
+                String.dropLeft 6 norm
 
-                _ ->
-                    case Dict.get (String.toLower normalized) cache of
+              else
+                "parts/" ++ norm
+            , if String.startsWith "parts/" (String.toLower norm) then
+                String.dropLeft 6 (String.toLower norm)
+
+              else
+                "parts/" ++ String.toLower norm
+            ]
+
+        tryLookup remaining =
+            case remaining of
+                [] ->
+                    Nothing
+
+                f :: rest ->
+                    case Dict.get f cache of
                         Just (Loaded lines) ->
                             Just lines
 
                         _ ->
-                            Nothing
+                            tryLookup rest
+    in
+    tryLookup candidates
 
 
 connectorLocalPoints : PartCache -> String -> List Vec3.Vec3
