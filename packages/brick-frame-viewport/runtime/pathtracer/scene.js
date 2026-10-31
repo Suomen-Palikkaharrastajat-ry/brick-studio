@@ -26,6 +26,7 @@
  */
 import { buildBVH } from './bvh.js'
 import { MATERIAL } from './materials.js'
+import { extractSharpEdges } from './edges.js'
 
 /** Key light cone half-angle (degrees): a soft-edged studio softbox. */
 const KEY_CONE_DEG = 6
@@ -63,6 +64,7 @@ export const GROUND_ALBEDO = [0.6, 0.58, 0.55]
 /** The ground sits this far (LDU) below the model's lowest point. */
 const GROUND_OFFSET = 0.01
 const STRIDE = 14
+export const DEFAULT_ZOOM = 1.5
 
 /** sRGB transfer function (0..1) to linear. */
 export function srgbToLinear(c) {
@@ -104,12 +106,13 @@ export function makeCamera(contract, width, height) {
   const up = cross3(right, forward)
   const fov = Number(contract.fovYDegrees)
   if (!(fov > 0 && fov < 180)) throw new Error('Camera fovYDegrees must be in (0, 180)')
+  const zoom = Number(contract.zoom) || DEFAULT_ZOOM
   return {
     origin,
     forward,
     right,
     up,
-    tanHalfY: Math.tan((fov * Math.PI) / 360),
+    tanHalfY: Math.tan((fov * Math.PI) / 360) / zoom,
     aspect: width / height,
   }
 }
@@ -306,6 +309,7 @@ export function prepareScene(request) {
   }
 
   const camera = makeCamera(request.camera, width, height)
+  const edges = extractSharpEdges(triangles)
   return {
     width,
     height,
@@ -315,6 +319,7 @@ export function prepareScene(request) {
     bvh,
     albedo,
     material,
+    edges,
     groundY: minY - GROUND_OFFSET,
     skyIrradiance: ENV_IRRADIANCE,
     groundAlbedo: GROUND_ALBEDO,

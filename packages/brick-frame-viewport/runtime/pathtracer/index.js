@@ -14,6 +14,8 @@
 
 import { denoise } from './denoise.js'
 import { toRgba8 } from './output.js'
+import { makeCamera } from './scene.js'
+import { extractSharpEdges, rasterizeEdges } from './edges.js'
 
 const DEFAULT_BUDGET_MS = 30000
 const MIN_BUDGET_MS = 5000
@@ -69,6 +71,7 @@ function assemble(results, width, height, count) {
   const sums = new Float32Array(pixels * 4)
   const albedo = new Float32Array(pixels * 3)
   const normal = new Float32Array(pixels * 3)
+  const depthBuffer = new Float32Array(pixels)
   for (const result of results) {
     const { index, sums: rowSums, counts, guide } = result
     for (let j = 0; j < counts.length; j++) {
@@ -77,9 +80,12 @@ function assemble(results, width, height, count) {
       sums.set(rowSums.subarray(j * width * 4, (j + 1) * width * 4), dst * 4)
       albedo.set(guide.albedo.subarray(j * width * 3, (j + 1) * width * 3), dst * 3)
       normal.set(guide.normal.subarray(j * width * 3, (j + 1) * width * 3), dst * 3)
+      if (guide.depth) {
+        depthBuffer.set(guide.depth.subarray(j * width, (j + 1) * width), dst)
+      }
     }
   }
-  return { sums, albedo, normal }
+  return { sums, albedo, normal, depthBuffer }
 }
 
 /**
@@ -146,6 +152,9 @@ export async function renderSnapshot(request, options = {}) {
     transparent: Boolean(request.transparent),
     camera: request.camera,
   }
+  const camera = makeCamera(request.camera, width, height)
+  const edges = extractSharpEdges(triangles)
+  const scene = { camera, edges }
 
   return new Promise((resolve, reject) => {
     const workers = []
@@ -189,7 +198,7 @@ export async function renderSnapshot(request, options = {}) {
 
     async function finish() {
       const done = results.slice()
-      const { sums, albedo, normal } = assemble(
+      const { sums, albedo, normal, depthBuffer } = assemble(
         done.map((r, i) => ({ ...r, guide: guides[i] })),
         width,
         height,
@@ -197,6 +206,7 @@ export async function renderSnapshot(request, options = {}) {
       )
       const { color, alpha } = resolveSums(done, width, height, count, sums)
       const denoised = denoise(color, alpha, albedo, normal, width, height)
+      rasterizeEdges(scene.edges, scene.camera, depthBuffer, width, height, denoised.color)
       const rgba = toRgba8(denoised.color, denoised.alpha, width, height)
       const dataUrl = await encode(rgba, width, height)
       if (settled) return
@@ -213,7 +223,7 @@ export async function renderSnapshot(request, options = {}) {
         const msg = event.data
         if (settled) return
         if (msg.type === 'guide') {
-          guides[msg.index] = { albedo: msg.albedo, normal: msg.normal }
+          guides[msg.index] = { albedo: msg.albedo, normal: msg.normal, depth: msg.depth }
         } else if (msg.type === 'progress') {
           latest[msg.index] = msg.samples
         } else if (msg.type === 'done') {

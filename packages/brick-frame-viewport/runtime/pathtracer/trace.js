@@ -392,13 +392,17 @@ export function renderRowSample(scene, rng, y, sums, pixel = new Float64Array(4)
 /**
  * First-hit guide for row `y`: `albedo` (3 floats per pixel, linear) and
  * `normal` (3 floats per pixel), taken at the pixel centre. Misses carry the
- * sky radiance and the view direction.
+ * sky radiance and the view direction. When `depth` is provided (Float32Array),
+ * `depth[x]` receives the Euclidean hit distance or Infinity.
  */
-export function captureGuide(scene, y, albedo, normal) {
+export function captureGuide(scene, y, albedo, normal, depth) {
   const bvh = scene.bvh
   for (let x = 0; x < scene.width; x++) {
     primaryRay(scene, x, y, 0.5, 0.5, ray)
     const hit = intersect(bvh, ray, hitScratch)
+    if (depth) {
+      depth[x] = hit ? hit.t : Infinity
+    }
     const o = x * 3
     const hitGround = groundDistance(scene, ray)
     const tModel = hit ? hit.t : Infinity

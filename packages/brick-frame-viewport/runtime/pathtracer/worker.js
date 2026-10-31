@@ -75,10 +75,17 @@ export function createPathTracerWorker(post, { yieldTurn = createYielder(), now 
 
     const albedo = new Float32Array(rows * rowLen)
     const normal = new Float32Array(rows * rowLen)
+    const depth = new Float32Array(rows * width)
     for (let j = 0; j < rows; j++) {
-      captureGuide(scene, rowYs[j], albedo.subarray(j * rowLen, (j + 1) * rowLen), normal.subarray(j * rowLen, (j + 1) * rowLen))
+      captureGuide(
+        scene,
+        rowYs[j],
+        albedo.subarray(j * rowLen, (j + 1) * rowLen),
+        normal.subarray(j * rowLen, (j + 1) * rowLen),
+        depth.subarray(j * width, (j + 1) * width),
+      )
     }
-    post({ type: 'guide', index, albedo, normal }, [albedo.buffer, normal.buffer])
+    post({ type: 'guide', index, albedo, normal, depth }, [albedo.buffer, normal.buffer, depth.buffer])
 
     const sums = new Float32Array(rows * width * 4)
     const counts = new Uint32Array(rows)

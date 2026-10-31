@@ -28,7 +28,7 @@ function sceneFor(width, height, { triangles, camera, transparent = false }) {
     width,
     height,
     transparent,
-    camera: camera ?? { position: [0, 80, 300], target: [0, 30, 0], up: [0, 1, 0], fovYDegrees: 45 },
+    camera: camera ?? { position: [0, 80, 300], target: [0, 30, 0], up: [0, 1, 0], fovYDegrees: 45, zoom: 1 },
     triangles: Float32Array.from(triangles ?? squareAt(40)),
   })
 }
