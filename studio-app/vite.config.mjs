@@ -52,7 +52,7 @@ export default defineConfig(({ mode }) => {
   return {
     // node_modules is a read-only Nix-store symlink; keep Vite's dep cache off it.
     cacheDir: '.vite',
-    publicDir: false,
+    publicDir: 'public',
     plugins: [elmTailwind(), elm({ debug: false }), tailwindcss(), serveViewerAssets()],
     build: {
       // The viewer build empties `build/` first; the studio goes in beside it.
