@@ -1,0 +1,649 @@
+# Rendering
+
+The simulator renders 3D LDraw models using **WebGL** via
+[elm-explorations/webgl 1.1.3](https://package.elm-lang.org/packages/elm-explorations/webgl/latest/).
+All rendering logic lives in `packages/brick-frame-simulator/src/Render/`.
+
+## Architecture overview
+
+Each animation frame produces a list of `WebGL.Entity` values that are passed
+to a `WebGL.toHtml` canvas element. There are two categories of entity:
+
+- **Static scene** — the non-gear geometry of the loaded model, built once
+  after all parts resolve and held in `Model.scene : Maybe Scene`.
+- **Gear entities** — one entity per detected gear, built from pre-computed
+  meshes (`Model.gearMeshes`) with a per-frame rotation matrix applied.
+
+## Coordinate system
+
+LDraw uses a right-handed coordinate system where **−Y is up** (Y increases
+downward). The simulator converts to the standard WebGL Y-up convention by
+negating every Y coordinate during geometry flattening. This negation is
+applied in two places:
+
+- `LDraw.Geometry.flatten` (Elm, [packages/brick-frame-simulator/src/LDraw/Geometry.elm](../packages/brick-frame-simulator/src/LDraw/Geometry.elm)) — for the Elm-side path.
+- `geometry-worker.js` ([packages/brick-frame-viewport/geometry-worker.js](../packages/brick-frame-viewport/geometry-worker.js)) — for the Web Worker path.
+
+All world positions stored in `GearInstance.worldPosition` and
+`GearInstance.worldMatrix` are already in Y-up space.
+
+## Geometry flattening pipeline
+
+LDraw files are hierarchical: a top-level file references sub-files (parts,
+sub-parts, primitives) via **type-1 lines**, each carrying a 4×4 transform.
+Flattening resolves this tree into a flat list of triangles and edges ready
+for the GPU.
+
+Steps (in order):
+
+1. **Parse** — `LDraw.Parser.parseFile` splits text into `List LDrawLine`.
+2. **Resolve** — `LDraw.Resolve` fetches missing sub-files over HTTP and
+   caches them in `PartCache`. Common gear parts are pre-loaded from
+   `Data.embeddedParts` at init (no HTTP needed for those).
+3. **Flatten** — `LDraw.Geometry.flatten lines cache parentColor worldTransform`
+   accumulates transforms (`Mat4.mul parentMat localMat`) as it recurses,
+   collecting:
+   - **Triangles** (type 3): one triangle, per-face normal via cross product.
+   - **Quads** (type 4): split into two triangles along the p1–p3 diagonal.
+   - **Edge lines** (type 2): passed through as `(Vec3, Vec3)` pairs.
+   - **Conditional lines** (type 5): stored as `ConditionalEdge` records for
+     per-frame visibility testing (see below).
+   - Color inheritance: color code 16 inherits the parent's color; code 24
+     resolves to black (edge color).
+4. **Web Worker** — the flatten step is offloaded to `geometry-worker.js` via
+   the `requestGeometryFlatten` port to avoid blocking the main thread. The
+   worker sends back a JSON payload decoded in `GeometryFlattened`.
+
+Gear geometry is **not** included in the static scene. Gears are detected,
+flattened separately per-gear in `buildGearMeshes`, and rendered with a live
+rotation transform each frame.
+
+## Scene building and rendering
+
+After flattening, `Render.Scene.buildScene` uploads the geometry to the GPU:
+
+```elm
+buildScene :
+    { triangles : List ( Vertex, Vertex, Vertex )
+    , lines : List ( Vec3, Vec3 )
+    , conditionalLines : List ConditionalEdge
+    }
+    -> Bool   -- bfcCertified
+    -> Scene
+```
+
+`Scene` holds three compiled `WebGL.Mesh` values plus the `bfcCertified` flag.
+
+Each frame, `Render.Scene.renderSceneWithStyle scene camera style aspect` returns
+entities in this order:
+
+1. **Triangle mesh** — depth test enabled; back-face culling enabled only when
+   `bfcCertified = True` (see BFC section below).
+2. **Edge line mesh** — flat dark lines, depth test enabled.
+3. **Conditional lines** — a dynamic mesh rebuilt each frame from the edges
+   that pass the visibility test (see below). Omitted when the list is empty.
+
+MVP matrices are built fresh each frame from the current `Camera` state.
+
+## Shaders
+
+### Plastic shaders (`Render.Shader`)
+
+Used for triangle geometry of both the static scene and gears.
+
+**Vertex shader** transforms position through MVP and passes world-space
+normal, world-space position, and RGBA colour to the fragment stage:
+
+```glsl
+vNormalWorld   = mat3(modelMatrix) * normal;
+vPositionWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+```
+
+**Fragment shader** computes:
+- Lambert diffuse with ambient floor
+- A low-cost Blinn-Phong specular term
+- A subtle rim-light term
+- Mild vibrance boost (clamped)
+
+```glsl
+float diffuse = max(0.0, dot(norm, lightDir));
+float light   = ambientStrength + (1.0 - ambientStrength) * diffuse;
+float specular = pow(max(dot(norm, halfDir), 0.0), specularPower) * specularStrength;
+float rim = pow(1.0 - max(dot(norm, viewDir), 0.0), rimPower) * rimStrength;
+```
+
+### Edge shader (`Render.EdgeShader`)
+
+Used for type-2 edge lines and conditional lines. Vertices carry only
+`position`; the fragment shader outputs `edgeColor` from uniforms.
+
+### Guide shader (`Render.GuideShader`)
+
+Used for component (axle/beam) visualisation overlays.
+
+## Style And Lighting
+
+A default style is defined in `Render.Style` and includes light, material, and
+edge parameters:
+
+```elm
+defaultStyle : Style
+defaultStyle =
+    { lightDirection = vec3 0.25 1.0 0.35
+    , ambientStrength = 0.55
+    , specularStrength = 0.14
+    , specularPower = 18
+    , rimStrength = 0.08
+    , rimPower = 2.2
+    , vibrance = 0.12
+    , edgeColor = vec3 0.18 0.19 0.2
+    }
+```
+
+The Realistic preset (`Render.Style.realisticStyle`) differs from the draft
+only in the same shading terms: a stronger directional light, a glossier
+specular lobe and a stronger rim. The shader adds no per-face edge or logo
+effects, because those were drawn on a fixed lattice that does not follow the
+real part geometry.
+
+`Render.Scene.renderScene` remains available for compatibility and internally
+adapts `Render.Lighting.LightUniforms` via `Render.Style.fromLight`.
+
+There are still no point lights, spotlights, shadows, or reflections.
+
+## Camera
+
+`Render.Camera` implements a spherical camera with two navigation modes:
+
+| Field | Meaning |
+|-------|---------|
+| `azimuth` | Horizontal angle around Y axis (radians, wrapped to (-π, π]) |
+| `elevation` | Vertical angle from XZ plane (radians, clamped ±π/2) |
+| `distance` | Orbit radius in LDU (clamped to `minDistance`…`maxDistance`) |
+| `target` | World-space orbit centre (default origin) |
+| `minDistance` / `maxDistance` | Interactive zoom range, sized to the model |
+| `viewportHeight` | Canvas height in CSS px; orbit and pan sensitivity derive from it |
+| `navigation` | `Orbit` or `Walk` — what a drag pivots around |
+| `sceneRadius` | Model bounding-sphere radius in LDU; feeds the far plane and walk speed |
+
+### Navigation modes
+
+Both modes maintain `position = target + eyeOffset(azimuth, elevation, distance)`.
+Only the pivot differs, which is what keeps the change small: the view matrix,
+frustum culling, gear picking and the instanced LOD are all indifferent to which
+mode is active, because a walking camera still has a valid target in front of it.
+
+| | `Orbit` | `Walk` |
+|---|---|---|
+| Drag, arrows, chevron buttons | eye swings around `target` (`orbitBy`) | `target` swings around the eye (`lookAround`) |
+| Wheel / pinch | changes `distance` | `dollyBy` — moves you forwards and backwards |
+| WASD | pans `target` | walks along the heading |
+
+`Camera.enterWalk groundY` drops the eye to `walkEyeHeight` (40 LDU, roughly
+minifig eye level) above the model's lowest point, directly below whatever was
+being looked at, with the horizon levelled and the heading kept. Ground level
+comes from `ModelBounds.minCorner` — see `Viewport.Framing.groundLevel`.
+
+`Camera.walkSpeed` is `max 20 (sceneRadius / 8)` LDU/s, so the same key crosses a
+gear assembly and a city at comparable apparent pace. `Shift` multiplies by four.
+
+There is **no collision detection**: walk mode passes through geometry.
+`Camera.moveBy` uses the *horizontal* heading, so looking up and walking forward
+does not lift you off the ground.
+
+Projection: `Mat4.makePerspective Camera.fovYDegrees aspect near far` (FOV 45°).
+`Camera.fovYDegrees` is the single source for the FOV — the projection matrix,
+the frustum cull in `Render.Pick.isSphereVisible`, `Render.Instanced`'s pixel-radius
+LOD, and the pan scale all read it.
+
+### Re-pivoting (follow the clicked part)
+
+`Camera.repivot newTarget` moves the orbit pivot by **translating the view**: it
+sets `target` and keeps azimuth, elevation, distance and the zoom range, so the
+eye slides along with the target. Nothing turns and nothing zooms; the new pivot
+lands in the centre of the screen and screen-relative directions (camera-left,
+away from the camera — what W/A/S/D move along) stay the same. It leaves the
+camera alone in `Walk` (the eye is the pivot).
+
+(It used to keep the eye fixed and recompute azimuth/elevation/distance instead.
+Playtests found that disorienting: it zoomed right into a freshly added big gear,
+pushed the neighbours to the screen edge, and changed the azimuth so the W/A/S/D
+axes flipped near 45°.)
+
+`Viewport.pivotOn target` applies it to a viewport and marks the camera manual,
+so auto-fit no longer takes over. It does not snap: the target **glides** to the
+new pivot over 280 ms (smoothstep, one `repivot` of the starting camera per
+animation frame — a pan). Any other camera change (the user orbiting, Fit View),
+or a drag capturing the pointer, abandons the glide where it is, and it is a
+no-op before any content has been measured. Fit View is the reset: it recentres
+on the model. The editing hosts (`Studio.Core` for Brick Play, `Studio.Workspace` in the studio) call it **only on an explicit
+click or tap that selects a part** (including a part pressed and released
+without moving it) — never on adding a part, keyboard or action-bar moves, a
+drag drop, undo/redo or select all. The viewer, the studio's Preview and
+Instructions pages never do. Tests of "the camera did not move" compare
+`target` plus azimuth/elevation/distance.
+
+### Sensitivity
+
+Every interaction constant is relative to the viewport rather than a fixed
+pixels-to-units number, following three.js `OrbitControls`:
+
+| Gesture | Formula |
+|---------|---------|
+| Orbit | `2π × Δpx / viewportHeight` — a full-height drag is one full turn |
+| Pan | `2 × Δpx × distance × tan(fov/2) / viewportHeight` — the point under the cursor stays under the cursor |
+| Wheel zoom | `0.95 ^ (\|delta\| × 0.01)`, applied as a ratio — reciprocal, so out-then-in returns to the same distance |
+| Pinch zoom | `Camera.zoomByRatio (lastSeparation / newSeparation)` — exact, no pixel constant |
+| Arrow keys | `keyboardTurnRate` (1.2 rad/s), integrated over frame time |
+| Chevron buttons | `0.08 × speedFactor` (6.0), integrated over frame time |
+| WASD | `Camera.walkSpeed × speedMultiplier`, integrated over frame time |
+
+Held keys are integrated per animation frame rather than counted as key-repeat
+events, so movement speed does not depend on the operating system's repeat rate.
+`Viewport.applyHeldKeys` shares `heldControlTick` with the on-screen rotate buttons
+so there is one notion of frame time.
+
+Fixed constants were only correct at one canvas size: panning overshot the
+cursor by ~2.7× on a tall desktop window while orbiting was ~3× too slow on a
+short phone canvas. The old linear zoom factor `1 + delta × 0.001` was not
+reciprocal and went negative below `delta = -1000`, snapping the camera to its
+minimum distance.
+
+`Viewport.Decode.wheelDeltaDecoder` normalises `deltaMode` before the delta reaches the
+camera (line mode × 16, page mode × 100, `ctrlKey` trackpad pinch × 10).
+Without it Firefox, which reports lines, zoomed ~30× slower than Chrome.
+
+### Zoom range
+
+`minDistance`/`maxDistance` are set from the model's bounding sphere by
+`Viewport.Framing.applyZoomRange`: `0.5` LDU in, and eight times the framed distance out
+(`zoomOutHeadroom`). They are applied on every load, whether or not the camera
+is being re-framed, because a `#d=` link restores a manual camera that still
+needs a range wide enough to reach it.
+
+A fixed `0.5–2000` clamp used to fight auto-fit, which frames a city-scale
+model from several thousand LDU out: the first wheel tick or pinch collapsed the
+view to 2000 LDU and there was no way back.
+
+### Clip planes
+
+```
+farPlane  = max 100 (max (distance × 10) (distance + 2.5 × sceneRadius))
+nearPlane = max 0.1 (farPlane / 10000)
+```
+
+The first far-plane term covers orbiting; a city-scale model is framed from
+several thousand LDU out, so a constant `0.1–2000` range clipped it away
+entirely. The second covers standing **inside** the model, where the orbit
+distance says nothing about how far the geometry is: at a 40 LDU street-level eye
+height the first term alone gives a 400 LDU far plane on a model 3370 LDU wide —
+twenty studs of street and then blackness. That is not merely a clip, because the
+same expression feeds `Instanced.visiblePlacements`, `Instanced.proxyEntities`
+and `Render.Pick.isSphereVisible`, so the far city was never submitted at all.
+
+`sceneRadius` defaults to 0, which reduces the far plane to the first term
+exactly, so a host that never calls `Camera.setSceneRadius` keeps the previous
+behaviour. `Viewport.Framing.applyZoomRange` is the only place it is set.
+
+Deriving `nearPlane` from `farPlane` pins the near:far ratio — and with it
+depth-buffer precision — at 10000 regardless of model scale or eye position. In
+the orbit case `farPlane` is `distance × 10`, so this is `distance / 1000`, the
+same figure as before.
+
+## Interaction controls
+
+- **Desktop mouse:** see the table below. Wheel zooms in every host.
+- **Desktop mouse buttons** (`Viewport.update`, `Viewport.Decode.mouseButtonDecoder`).
+  The viewport emits the same events everywhere; what a left drag on empty
+  canvas does depends on the host's `Studio.Core.DragMode`:
+  - Viewer and studio (`DragPartsOrOrbit`, the default): left drag on empty canvas orbits.
+    In the studio a left drag on a part moves it.
+  - Brick Play (`DragPartsOrPan OneFinger…`): left drag on empty
+    canvas pans, exactly like Shift + drag (`Viewport.panCurrentGesture`). A left drag on
+    a part moves it. A click on empty canvas still clears the selection. Shift + left
+    press on a part grabs it for a fine move (`Viewport.setShiftPressGrabs`, switched on by
+    `Core.setDragMode`); Shift + left press on empty canvas pans. Holding Shift during a
+    body drag moves on a 1 LDU grid (the normal grid returns on release).
+
+  | Input | Viewer, studio | Brick Play | Event |
+  |---|---|---|---|
+  | Left drag, plain | Orbit (empty canvas); a part is picked up if pressed | Pan (empty canvas); a part is picked up if pressed | `PressStarted`, host may `captureDrag` |
+  | Left drag + Shift | Pan | Pan on empty canvas; grabs a part (fine, 1 LDU) | `PressStarted` on a part (Play only), else none |
+  | Left drag + Ctrl / Cmd | Orbit | Orbit | none (never grabs) |
+  | Right drag | Orbit | Orbit | none (never grabs) |
+  | Middle drag | Pan | Pan | none (never grabs) |
+  | Space held + drag | Pan, only with `Viewport.setSpacePan True` (the studio workspace) | Not enabled | none |
+  | Left click, no drag | none | none | `Clicked x y toggle`, `toggle` = Shift, Ctrl or Cmd |
+  | Right / middle click, no drag | none | none | none |
+
+  A right press while a drag is captured emits `DragCancelled` and releases the
+  capture. The canvas suppresses the context menu, and the middle button's
+  default autoscroll is prevented. Held movement keys do not move the camera
+  while a capture is active.
+- **Touch:** 2-finger pan + pinch zoom in the viewer and the studio; in Brick
+  Play two fingers orbit instead (`Viewport.setTwoFingerOrbits`, through
+  `Core.setTwoFingerOrbits`), see below. One finger orbits in the
+  viewer (`OneFingerOrbits`, since touch has no right button). One finger on
+  empty canvas pans in the studio and Brick Play
+  (`OneFingerPans` in Play; the studio workspace's empty-press
+  handler calls `Viewport.panCurrentGesture`), because the camera globe does the
+  orbiting there. A tap without travel clears the selection.
+  Controls are finger-sized (44 px) on coarse pointers: `theme.css` `.touch-target`,
+  with icon-button sizes kept in the `.ui-icon-button` class rather than inline,
+  so the coarse rule can override them.
+- **Camera globe** (`UI.CameraGlobe`, in `packages/brick-frame-ui`, used by the
+  viewer, the studio and Brick Play; it replaced the arrow
+  `UI.ViewPad`): a globe drawn from a fixed viewpoint above the horizon, with the
+  camera's marker on it. Drag on the globe to fly the camera (the marker follows
+  the pointer, `dragOrbit`), tap a point to jump straight there (`flyToDelta`), and
+  use the reset button to fit the whole model (`ResetView` → `FitView`). The zoom
+  slider is log-scale (`zoomLevel`, `wheelDeltaForZoom`), so each step zooms by the
+  same factor. An `extras` slot takes the host's own buttons (walk, play, help). The
+  host owns the pointer state and only forwards camera messages.
+- **Fit view:** the ⛶ button in the viewer control pad re-frames the model
+  (`FitView` → `frameModelBounds`); Brick Play's globe reset does the same, and `F` works everywhere. Without it the camera was a one-way door:
+  the first interaction switches `cameraMode` to `CameraManual` and auto-fit
+  never runs again, so a model lost off-screen needed a page reload. Fitting also
+  returns to `Orbit`.
+- **Canvas resize:** an auto-fit camera is re-framed when the canvas changes size
+  (`Viewport.WindowResize` → `refitForCanvas`), so a portrait phone is framed by its
+  narrower horizontal half-angle. The first load can run before the real size
+  arrives (the model starts at 800×600), which is why the fit is redone here. A
+  manual camera keeps its view and only gets a zoom range for the new size.
+- **Street level:** the person button in the control pad, or `G`, toggles walk
+  mode (`ToggleWalkMode` → `Viewport.toggleWalkMode`). Needs loaded model bounds to
+  know where the ground is, so it is a no-op on an empty viewer.
+- **Control panel:** top-right motor/gear panel is collapsible (`Minimize` / `Maximize`).
+
+### Keyboard shortcuts
+
+Every rotation goes through `Viewport.Navigation.applyLook`, which dispatches on
+`Camera.navigation`, so the arrow keys and the on-screen chevron buttons turn
+your head while walking rather than orbiting a point in front of you. That is the
+only `Camera.orbitBy` call site in `Main` — keep it that way.
+
+`UI.Shortcuts` owns the whole mapping as pure functions, returning its own
+`Action` type that the host's `msgForAction` translates — the host `update` is not exposed,
+so this is the only way key dispatch gets test coverage. `Shortcuts.helpRows`
+also backs the `?` overlay, so the reference cannot drift from the bindings.
+
+| Key | Action |
+|---|---|
+| `W` `A` `S` `D` | Walk along the heading, or pan the target |
+| `Q` `E` | Down / up |
+| `Shift` (held) | Move four times faster |
+| `↑` `↓` `←` `→` | Look, or orbit |
+| `+` `-` | Zoom |
+| `F`, `Home` | Fit whole model |
+| `G` | Street level on / off |
+| `1`–`6` | Front, back, left, right, top, bottom |
+| `` ` `` | Isometric (3/4) view |
+| `?` | Shortcut reference |
+| `Esc` | Close the reference, then leave street level |
+| `Space` | Play / pause |
+
+Two guards matter. `Shortcuts.isTextEntryTarget` rejects events whose target is
+an `INPUT`, `TEXTAREA`, `SELECT`, `OPTION`, `BUTTON` or contenteditable element:
+the keydown subscription is document-global, so without it typing a space into a
+host page's URL field toggled playback in the embedded viewer, and Space on a
+focused button toggled twice (once natively, once through the handler).
+`actionFor` also declines anything held with Ctrl, Cmd or Alt so browser
+shortcuts still work — `Shift` is deliberately not in that list.
+
+`Browser.Events.onVisibilityChange` clears the held-key set, because a keyup lost
+to a tab switch would otherwise leave the camera walking forever.
+
+### View presets
+
+`Viewport.applyViewPreset` reuses `cameraForBounds` for the target and distance —
+both come from the bounding *sphere* and so are independent of viewing angle —
+then overrides the angles from `viewPresetAngles`. `TopView` and `BottomView` stop just short of
+straight up and down, matching the camera's own elevation clamp.
+
+### Touch event handling
+
+Only **one** of the Touch or Pointer listener families is bound to the canvas,
+chosen by the `supportsPointerEvents` flag (`Viewport.view`). iOS Safari
+dispatches both for the same finger, and `activeTouches` is keyed by touch
+`identifier` in one path and `pointerId` in the other, so binding both made the
+two sets of bookkeeping fight.
+
+Fingers are read from `event.targetTouches`, not `event.touches` — the latter
+counts every finger on the screen, so a thumb resting on the controls panel
+forced the canvas into a pinch gesture.
+
+A two-finger gesture starts as pure pan and only engages zoom once the fingers
+have moved `pinchZoomDeadZone` (12 px) apart or together, latching for the rest
+of the gesture. Zoom and pan are then both applied — pan first, so the
+distance-dependent pan scale is taken once per frame.
+
+With `Viewport.setTwoFingerOrbits True` (Brick Play), the two-finger midpoint
+orbits the camera instead of panning — on both axes, at the same rate and signs
+as a mouse orbit drag (`Navigation.applyLook`, so it turns the head in Walk) —
+mirroring the one-finger pan. It engages once the midpoint has travelled
+`twoFingerOrbitDeadZone` (12 px), so a pinch with a wobbling midpoint only
+zooms; the pinch zoom is unchanged, and the twist rotation is off.
+
+`Ports.setUrlHash` is issued at gesture *end*, not on every move, and the JS
+side coalesces writes to one `history.replaceState` per animation frame inside a
+`try/catch`. Safari rate-limits `replaceState` (~100 calls / 30 s) and then
+throws `SecurityError`, which from a port subscriber escapes into Elm's effect
+dispatch.
+
+## Gear rendering
+
+Gear meshes are pre-built once (`buildGearMeshes` in `Simulation.Meshes`) by flattening
+each gear's part file with `LDraw.Geometry.flatten`. At render time, each gear
+gets its own `WebGL.Entity` with a rotation model matrix:
+
+```
+modelMatrix = translate(pivot) · rotate(angle, axis) · translate(-pivot)
+```
+
+where `pivot` is the gear's `worldPosition`, `angle` comes from
+`Gear.Animate.gearAngles`, and `axis` is extracted from the gear's world matrix
+(local Z column after Y-up conversion).
+
+Frustum culling: each gear's bounding sphere is tested against the view frustum
+before creating an entity — gears outside the frustum are skipped.
+
+## BFC (back-face culling)
+
+LDraw parts may declare `0 BFC CERTIFY CCW` to guarantee consistent CCW winding.
+When `bfcCertified = True`, `renderScene` passes
+`WebGL.Settings.cullFace WebGL.Settings.back` to the triangle entity, discarding
+back-facing triangles. For uncertified parts this setting is omitted, which is
+why some parts may show inside-out faces (see Limitations).
+
+## Conditional lines (type 5)
+
+A conditional line is rendered only when both of its control points (`c1`, `c2`)
+are on the same side of the edge as seen from the camera. The test in
+`Render.Scene.conditionalLineVisible` uses the sign of the dot products of the
+cross product with the eye direction:
+
+```elm
+side1 * side2 > 0   -- same side ⟹ render the edge
+```
+
+The visible set is recomputed each frame and uploaded as a fresh `WebGL.lines`
+mesh.
+
+## LOD meshes
+
+The Haskell generator emits `Data.lodParts : Dict String String` containing
+simplified versions of the embedded gear parts (every other geometry line
+kept). At gear-mesh build time (`buildGearMeshes`) each gear gets **both** a
+full and a simplified mesh, uploaded once. Each frame `renderGearEntities`
+selects between them per gear based on the gear's distance from the camera,
+using `Gear.Lod.chooseLod`. The switch has hysteresis (separate switch-to-
+simplified and switch-back-to-full distances, both scaled by pitch radius) so a
+gear hovering near the boundary does not flicker; the chosen level is kept in
+`model.gearLods` and refreshed after every update.
+
+## Instanced rendering for large models
+
+Baking world transforms into vertex buffers is fine for a few hundred parts and
+impossible for tens of thousands. `City of Oulu.io` (22,750 parts) expands to
+**10,911,354 triangles, 7,308,039 edge lines and 3,288,704 conditional lines** —
+several gigabytes once serialised through the geometry worker's JSON, which is
+why it never reached the screen at all.
+
+Above `Render.Instanced.triangleBudgetExceeded` (2,000 placements),
+`Viewport`'s `finishLoading` takes `finishLoadingInstanced` instead of the worker path:
+
+- Each distinct **part** is flattened once in local LDraw space
+  (`Geometry.localOptions`) — 202 meshes and 232,242 triangles for the model
+  above, a 47× reduction.
+- Each placement is a `WebGL.Entity` with its own `modelMatrix` and
+  `instanceColor`. The Y-up conversion is folded into the placement matrix as
+  `Mat4.makeScale3 1 -1 -1` (determinant +1, so winding is untouched).
+- Colour is **not** part of the mesh key. `Render.Mesh.Vertex` carries an
+  `inherit` flag, set by `Geometry` when a surface took LDraw colour 16 all the
+  way down its sub-file chain, and the vertex shader blends `instanceColor` into
+  exactly those surfaces. Keying by part *and* colour instead costs 1,092,318
+  triangles rather than 232,242, because a model uses a part in about five
+  colours on average.
+- Gear detection is skipped on this path: `Detect.extractGears` walks the fully
+  expanded tree down to primitives, which is millions of nodes on a model this
+  size. A `simulation-unavailable` runtime event reports the reason.
+
+### Culling and detail bands
+
+`Render.Instanced.visiblePlacements` frustum-culls each placement's world
+bounding sphere (Gribb–Hartmann planes from `projection × view`), then assigns a
+band from its projected size:
+
+| Projected diameter | Triangles | Edge lines | Conditional lines |
+|--------------------|-----------|------------|-------------------|
+| > 64 px (`Near`)   | mesh      | yes        | yes               |
+| 24–64 px (`Mid`)   | mesh      | yes        | no                |
+| < 24 px (`Far`)    | proxy box | no         | no                |
+
+Conditional lines are dropped first because `ConditionalVertex` carries seven
+`Vec3` attributes per vertex, making it the most expensive buffer in the
+pipeline.
+
+Unlike `Gear.Lod` there is no hysteresis. A settled camera gives a settled
+answer, and keeping previous state for tens of thousands of placements would
+cost a dictionary update per placement per frame to prevent flicker that only
+occurs while the camera is moving — which is when detail is already reduced.
+
+### Proxy chunks
+
+Culling alone cannot rescue a fully zoomed-out view: at that scale a 1×1 plate
+is still around six pixels, so nothing is small enough to drop without leaving
+holes, and every placement is inside the frustum. Each placement therefore also
+contributes a 12-triangle box of its own colour, merged by spatial cell into
+~77 meshes for the model above. At whole-model framing 21,760 of 22,750
+placements fall into `Far`, so the frame costs roughly 2,000 draw calls instead
+of 50,000.
+
+A chunk is drawn only while none of its visible placements is `Near` or `Mid`.
+Hiding a box behind the real part with the depth buffer only works for parts
+that are boxes: a wheel, a slope or a Technic beam sits inside its own bounding
+box, which covered it and left a grey slab with the part's edge lines showing
+through. In a cell that also holds a resolved placement, the `Far` members draw
+their own triangle mesh (no edges) instead of the merged box.
+
+### Static-scene detail settling
+
+When `simulationAvailable` is false nothing animates, so the image only changes
+when the camera does. `Viewport.refineFrames` is refilled on every camera movement
+and spent one per animation frame; while it is non-zero every placement drops
+one band, and the frame after it reaches zero is drawn at full detail.
+`Viewport.needsAnimationFrame` includes the countdown so that refinement frame is
+guaranteed to render before the subscription goes quiet. A model with a running
+simulation is excluded — it redraws continuously and has no settled state to
+refine towards.
+
+### Editing: updating the scene in place
+
+An editor cannot afford to rebuild a city-scale scene for every drag step, so an
+`InstancedScene` can be changed one *source* at a time. A source is the id of the
+`LDraw.Document` placement a group of instances came from (a library part is one
+instance, a reference to a submodel expands to all of its parts):
+
+- `Instanced.buildFrom` builds a scene from `( source, RawPlacement )` pairs.
+- `Instanced.replaceSource cache source raws scene` swaps one source's placements
+  for new ones — which covers add, move, recolour and part change — and
+  `removeSource` drops one. Only the part meshes the new placements need are
+  built, and only the proxy cells the old and new placements fall in are
+  rebuilt (the cell size is fixed when the scene is built, so cells stay put as
+  the model grows).
+- `Viewport.loadDocument` loads a `Document` through this path (always
+  instanced, never baked, no gear analysis) and `Viewport.applyDocument` keeps the
+  scene in step with later edits. `Viewport.Sync.plan` looks only at the
+  placements `Document.touched` names, so the cost of an edit does not depend on
+  how many placements the model has beyond a few passes over the placement list.
+  A placement whose part has not been fetched yet waits in `Sync.State.pending`
+  while the part (and what it references) loads, and appears when it arrives.
+- Edits inside a non-main submodel change `Document.subfilesSignature`; the
+  viewport then reloads the document (keeping the camera) instead.
+- The camera is framed on the first content a document gets and never again; the
+  zoom range and far plane follow the model's bounds.
+
+Measured with a 22,000-placement document in Node (unoptimised Elm build, so the
+browser figure is better): loading it takes about 2.4 s; adding, moving or
+removing one placement takes 8–125 ms, mostly the garbage collector working
+through the placement list.
+
+## Snapshot materials
+
+The path-traced snapshot (`Viewport.Snapshot` → `Render.Snapshot`) takes each
+LDraw colour's finish from `LDConfig.ldr` (`LDraw.ColorData.finishFor`, generated
+from the `!COLOUR` keywords: CHROME, METAL, PEARLESCENT, RUBBER, MATERIAL GLITTER
+and SPECKLE, otherwise Transparent for an ALPHA below 255, otherwise Solid). An
+instanced placement carries its finish (`Render.Instanced.Placement.finish`), and
+an inherited vertex takes its placement's. The triangle's material code is
+chrome or metal `2`, rubber `3`, pearl `4`, transparent `1`, and plastic `0`
+(glitter and speckle are plastic). Ghost context is always `1`. Baked models
+(small files loaded without a document) carry only RGBA, so their material
+comes from the alpha alone.
+
+The studio environment (`runtime/pathtracer/scene.js`) is mostly flat, so
+metal needs structure to reflect. Besides the key and fill cones, it has two
+rectangular softboxes: a soft overhead box front-left, and a narrow tall strip
+behind the model. They are lights like the cones (next-event estimation plus
+MIS in `trace.js`), with radiance set so each adds about as much light as the
+fill. Bounced rays also see a darker band at the horizon (`environmentRadiance`).
+A primary ray reads only the plain sky gradient (`skyRadiance`), so the visible
+backdrop is clean, and the softboxes show only as reflections and as soft pools
+on the ground. Chrome shows a bright band on its top faces, and the front faces
+mostly reflect the ground. Plastic keeps a matte base with a faint clear-coat
+sheen, and rubber stays dull. `lights.test.mjs` checks the softbox sampling, the
+clean backdrop, and that chrome aimed at a softbox is far brighter than chrome
+aimed at the horizon band.
+
+## Limitations
+
+- **Edge line width is always 1 px.** WebGL 1.0 does not support `lineWidth > 1`
+  on most hardware. Thick edges would require rendering lines as geometry quads.
+- **No BFC for uncertified parts.** Parts without `BFC CERTIFY CCW` render
+  double-sided, so inside-out faces may be visible.
+- **No shadows.** The scene uses a single directional light with no shadow map.
+- **No transparency sorting.** Transparent LEGO colors (alpha < 1) are rendered
+  in draw order; overlapping transparent faces may composite incorrectly.
+- **No smooth shading for static geometry.** Normals are per-face (computed by
+  cross product per triangle). Gear meshes share the same limitation, though
+  adjacent triangles from the same quad already have consistent normals.
+- **Large models lose gear simulation.** Past the instanced-path threshold, gear
+  detection is skipped outright rather than being made to scale, so a genuinely
+  large *and* motorised model would render but not animate.
+- **Instanced part meshes are built eagerly.** All 202 distinct parts of a
+  city-scale model are flattened and uploaded at load (~750 MB peak, ~2.4 s),
+  even though only a fraction is ever on screen. Building them on demand would
+  cut both, at the cost of pop-in.
+- **No normal maps or PBR.** Shading uses analytic diffuse/specular/rim terms only.
+- **Co-axial rotation is top-level only.** Top-level `SubFileRef` nodes that
+  share an axle with a detected gear are rendered with rotation. Parts nested
+  inside sub-assemblies are still baked into the static scene and do not rotate.
+- **Known iOS interaction issue (unverified on device).** On some iOS devices,
+  after touch camera gestures, playback controls could still toggle play/pause
+  UI state while the visible gear animation no longer advanced until a reload —
+  the signature of the `onAnimationFrame` subscription no longer being
+  delivered. Three mechanisms that would each produce it have since been fixed:
+  the `history.replaceState` flood (now coalesced and guarded), the
+  Touch/Pointer double-tracking (now one family only), and an unreachable
+  touch-state reset in `MouseUp` that could leave `activeTouches` permanently
+  non-empty. Kept listed until confirmed on an affected device.
