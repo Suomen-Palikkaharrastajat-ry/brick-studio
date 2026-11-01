@@ -5,6 +5,7 @@ module LDraw.Document exposing
     , Submodel
     , addPlacement
     , clearTouched
+    , constituentPlacements
     , empty
     , entryToText
     , explodeSubmodel
@@ -20,6 +21,7 @@ module LDraw.Document exposing
     , insertPlacementIn
     , isGlueLine
     , isGlued
+    , isGluedOrHasGluedMember
     , isMultiFile
     , isSubmodelReference
     , locatePlacement
@@ -477,6 +479,61 @@ placementsOf name doc =
             []
 
 
+{-| All constituent placements of a placement (including nested submodel members).
+If the placement is a library part, returns a list containing only itself.
+If it is a submodel reference, recursively collects all placements inside the submodel
+as well as the submodel reference itself. Unknown ids return `[]`.
+-}
+constituentPlacements : Int -> Document -> List Placement
+constituentPlacements id doc =
+    let
+        collectSubmodel submodelName visited acc =
+            let
+                norm =
+                    normalise submodelName
+            in
+            if Set.member norm visited then
+                ( acc, visited )
+
+            else
+                let
+                    visitedNow =
+                        Set.insert norm visited
+
+                    children =
+                        placementsOf norm doc
+                in
+                List.foldl
+                    (\child ( currentAcc, currentVisited ) ->
+                        let
+                            withChild =
+                                child :: currentAcc
+                        in
+                        if isSubmodelReference child doc then
+                            collectSubmodel child.part currentVisited withChild
+
+                        else
+                            ( withChild, currentVisited )
+                    )
+                    ( acc, visitedNow )
+                    children
+    in
+    case getPlacement id doc of
+        Nothing ->
+            []
+
+        Just p ->
+            if isSubmodelReference p doc then
+                let
+                    ( collected, _ ) =
+                        collectSubmodel p.part Set.empty [ p ]
+                in
+                List.reverse collected
+
+            else
+                [ p ]
+
+
 {-| Whether a line is the glue meta line `0 !PALIKKA GLUED` (surrounding
 whitespace ignored). It only has meaning directly before a placement.
 -}
@@ -490,6 +547,18 @@ isGlueLine text =
 isGlued : Int -> Document -> Bool
 isGlued id doc =
     Set.member id (gluedIds doc)
+
+
+{-| Whether a placement is glued or is a submodel containing any glued placements (transitively).
+-}
+isGluedOrHasGluedMember : Int -> Document -> Bool
+isGluedOrHasGluedMember id doc =
+    let
+        glued =
+            gluedIds doc
+    in
+    constituentPlacements id doc
+        |> List.any (\p -> Set.member p.id glued)
 
 
 {-| Ids of every glued placement, across all submodels.

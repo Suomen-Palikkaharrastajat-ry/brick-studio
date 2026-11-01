@@ -2510,6 +2510,88 @@ copyPasteSuite =
                     , \_ -> Expect.equal 2 (Set.size exploded.selection)
                     ]
                     ()
+        , test "recolorSelection recolors all constituent parts of a selected group, supports undo/redo, and preserves color on explode" <|
+            \_ ->
+                let
+                    config =
+                        { ldrawBase = "/ldraw"
+                        , ldrawFallbackBase = ""
+                        , defaultModelUrl = ""
+                        , initialHash = ""
+                        , supportsPointerEvents = True
+                        , document = Document.empty
+                        , gridStep = Just 20
+                        , rotateStep = Just 90
+                        , snapDistance = Just 24.0
+                        , collisionMode = Nothing
+                        }
+
+                    ( model0, _ ) =
+                        Core.init config
+
+                    ( m1, _, _ ) =
+                        Core.addPart "3001.dat" 14 (vec3 0 0 0) model0
+
+                    ( m2, _, _ ) =
+                        Core.addPart "3001.dat" 4 (vec3 40 0 0) m1
+
+                    ( grouped, _, _ ) =
+                        Core.groupSelection (Core.selectAll m2)
+
+                    ( recolored, _, _ ) =
+                        Core.recolorSelection 1 grouped
+
+                    ( undone, _, _ ) =
+                        Core.undo recolored
+
+                    ( redone, _, _ ) =
+                        Core.redo undone
+
+                    ( exploded, _, _ ) =
+                        Core.explodeSelection redone
+                in
+                Expect.all
+                    [ \_ -> Expect.equal [ 1, 1, 1 ] (List.map .color (Core.getPlacements recolored))
+                    , \_ -> Expect.equal [ 16, 14, 4 ] (List.map .color (Core.getPlacements undone))
+                    , \_ -> Expect.equal [ 1, 1, 1 ] (List.map .color (Core.getPlacements redone))
+                    , \_ -> Expect.equal [ 1, 1 ] (List.map .color (Document.mainPlacements exploded.document))
+                    ]
+                    ()
+        , test "recolorSelection does not recolor a group containing a glued part" <|
+            \_ ->
+                let
+                    config =
+                        { ldrawBase = "/ldraw"
+                        , ldrawFallbackBase = ""
+                        , defaultModelUrl = ""
+                        , initialHash = ""
+                        , supportsPointerEvents = True
+                        , document = Document.empty
+                        , gridStep = Just 20
+                        , rotateStep = Just 90
+                        , snapDistance = Just 24.0
+                        , collisionMode = Nothing
+                        }
+
+                    ( model0, _ ) =
+                        Core.init config
+
+                    ( m1, _, _ ) =
+                        Core.addPart "3001.dat" 14 (vec3 0 0 0) (Core.setGlueEditable True model0)
+
+                    ( m1Glued, _, _ ) =
+                        Core.setGlued True m1
+
+                    ( m2, _, _ ) =
+                        Core.addPart "3001.dat" 4 (vec3 40 0 0) m1Glued
+
+                    ( grouped, _, _ ) =
+                        Core.groupSelection (Core.selectAll m2)
+
+                    ( afterRecolor, _, _ ) =
+                        Core.recolorSelection 1 grouped
+                in
+                Expect.equal [ 16, 14, 4 ] (List.map .color (Core.getPlacements afterRecolor))
         , test "group and explode keyboard shortcuts Ctrl+G and Ctrl+Shift+G work on canvas" <|
             \_ ->
                 let

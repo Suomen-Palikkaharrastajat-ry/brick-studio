@@ -301,6 +301,37 @@ suite =
                         , \_ -> Expect.equal 2 (List.length (Document.placementsOf "inner.ldr" grouped))
                         ]
                         ()
+            , test "constituentPlacements returns nested submodel placements and handles glued members" <|
+                \_ ->
+                    let
+                        mpd =
+                            String.join "\n"
+                                [ "0 FILE main.ldr"
+                                , "1 16 0 0 0 1 0 0 0 1 0 0 0 1 sub.ldr"
+                                , "0 FILE sub.ldr"
+                                , "1 4 10 0 0 1 0 0 0 1 0 0 0 1 3001.dat"
+                                , "1 16 30 0 0 1 0 0 0 1 0 0 0 1 inner.ldr"
+                                , "0 FILE inner.ldr"
+                                , "1 14 0 0 0 1 0 0 0 1 0 0 0 1 3002.dat"
+                                , ""
+                                ]
+
+                        doc =
+                            Document.parse mpd
+
+                        constituentIds =
+                            Document.constituentPlacements 0 doc |> List.map .id
+
+                        gluedDoc =
+                            Document.setGlued True 3 doc
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal [ 0, 1, 2, 3 ] constituentIds
+                        , \_ -> Expect.equal [ 1 ] (Document.constituentPlacements 1 doc |> List.map .id)
+                        , \_ -> Expect.equal False (Document.isGluedOrHasGluedMember 0 doc)
+                        , \_ -> Expect.equal True (Document.isGluedOrHasGluedMember 0 gluedDoc)
+                        ]
+                        ()
             ]
         ]
 

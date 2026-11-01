@@ -132,8 +132,28 @@ apply command doc =
 
         Recolor pairs ->
             let
-                before =
+                explicitIds =
+                    pairs |> List.map Tuple.first |> Set.fromList
+
+                gluedNow =
+                    Document.gluedIds doc
+
+                expandedPairs =
                     pairs
+                        |> List.concatMap
+                            (\( id, colour ) ->
+                                let
+                                    descendants =
+                                        Document.constituentPlacements id doc
+                                            |> List.drop 1
+                                            |> List.filter (\p -> not (Set.member p.id explicitIds) && not (Set.member p.id gluedNow))
+                                            |> List.map (\p -> ( p.id, colour ))
+                                in
+                                ( id, colour ) :: descendants
+                            )
+
+                before =
+                    expandedPairs
                         |> List.filterMap
                             (\( id, _ ) ->
                                 Document.getPlacement id doc |> Maybe.map (\p -> ( id, p.color ))
@@ -142,7 +162,7 @@ apply command doc =
             ( List.foldl
                 (\( id, colour ) d -> Document.updatePlacement id (\p -> { p | color = colour }) d)
                 doc
-                pairs
+                expandedPairs
             , Recolor before
             )
 

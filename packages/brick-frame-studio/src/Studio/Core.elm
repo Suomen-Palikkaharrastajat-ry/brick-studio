@@ -1000,7 +1000,7 @@ stays where it is, and a mixed selection moves only its unglued parts.
 -}
 movableSelection : Model -> Set Int
 movableSelection model =
-    Set.diff model.selection (Document.gluedIds model.document)
+    Set.filter (\id -> not (Document.isGluedOrHasGluedMember id model.document)) model.selection
 
 
 {-| Whether the selection holds a part that a move or recolour may change (a
@@ -2202,22 +2202,24 @@ updateInner msg model =
 
             else
                 let
+                    gluedNow =
+                        Document.gluedIds model.document
+
                     recolorPairs =
                         movableSelection model
                             |> Set.toList
-                            |> List.filterMap
-                                (\id ->
-                                    case Document.getPlacement id model.document of
-                                        Just p ->
-                                            if p.color /= newColor then
-                                                Just ( id, newColor )
+                            |> List.concatMap (\id -> Document.constituentPlacements id model.document)
+                            |> List.foldl
+                                (\p ( seen, acc ) ->
+                                    if Set.member p.id seen || Set.member p.id gluedNow || p.color == newColor then
+                                        ( seen, acc )
 
-                                            else
-                                                Nothing
-
-                                        Nothing ->
-                                            Nothing
+                                    else
+                                        ( Set.insert p.id seen, ( p.id, newColor ) :: acc )
                                 )
+                                ( Set.empty, [] )
+                            |> Tuple.second
+                            |> List.reverse
                 in
                 if List.isEmpty recolorPairs then
                     ( { model | activeColour = newColor }, Cmd.none, [] )
