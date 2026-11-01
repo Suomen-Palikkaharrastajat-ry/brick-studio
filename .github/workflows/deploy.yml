@@ -55,7 +55,7 @@ jobs:
         run: devenv shell --profile ci -- make test-lib
 
       - name: Run studio app unit tests
-        run: devenv shell --profile ci -- bash -c "cd studio-app && elm-test"
+        run: devenv shell --profile ci -- make elm-test
 
       - name: Build
         run: devenv shell --profile ci -- make build
