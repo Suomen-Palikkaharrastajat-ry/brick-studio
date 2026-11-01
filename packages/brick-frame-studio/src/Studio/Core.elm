@@ -120,6 +120,7 @@ import Set exposing (Set)
 import Studio.DragPlane as DragPlane exposing (WorkingPlane)
 import Studio.Edit as Edit exposing (Axis(..), Command(..), History, NewPart)
 import Studio.GearAlign as GearAlign
+import Studio.GearSnap as GearSnap
 import Studio.Gizmo as Gizmo exposing (ArcHandle, DragHandle(..), Handle)
 import Studio.Health as Health
 import Studio.Overlay as Overlay
@@ -3302,21 +3303,72 @@ movePlaneDrag initialDrag grab ( x, y ) model =
                                         targetWorldPoints
                                 )
 
+                    activeConnectionSnap =
+                        case model.activeSnap of
+                            Just snap ->
+                                if GearSnap.isGearSnap snap then
+                                    Nothing
+
+                                else
+                                    Just snap
+
+                            Nothing ->
+                                Nothing
+
+                    activeGearSnap =
+                        case model.activeSnap of
+                            Just snap ->
+                                if GearSnap.isGearSnap snap then
+                                    Just snap
+
+                                else
+                                    Nothing
+
+                            Nothing ->
+                                Nothing
+
+                    solveConnectionSnap () =
+                        Connectivity.solveSnapWithHysteresisAndPredicate
+                            isValidSnap
+                            model.snapDistance
+                            (model.snapDistance * 1.5)
+                            activeConnectionSnap
+                            model.snapRotationStep
+                            leadSurfaceMatrix
+                            leadConn.connections
+                            targetWorldPoints
+
+                    solveGear () =
+                        GearSnap.solveGearSnap
+                            isValidSnap
+                            model.snapDistance
+                            activeGearSnap
+                            leadP
+                            leadSurfaceMatrix
+                            otherPlacements
+
                     maybeSnap =
                         case maybeSideSnap of
                             Just sideSnap ->
                                 Just sideSnap
 
                             Nothing ->
-                                Connectivity.solveSnapWithHysteresisAndPredicate
-                                    isValidSnap
-                                    model.snapDistance
-                                    (model.snapDistance * 1.5)
-                                    model.activeSnap
-                                    model.snapRotationStep
-                                    leadSurfaceMatrix
-                                    leadConn.connections
-                                    targetWorldPoints
+                                case activeGearSnap of
+                                    Just _ ->
+                                        case solveGear () of
+                                            Just gearSnap ->
+                                                Just gearSnap
+
+                                            Nothing ->
+                                                solveConnectionSnap ()
+
+                                    Nothing ->
+                                        case solveConnectionSnap () of
+                                            Just connSnap ->
+                                                Just connSnap
+
+                                            Nothing ->
+                                                solveGear ()
                 in
                 case maybeSnap of
                     Just snap ->
