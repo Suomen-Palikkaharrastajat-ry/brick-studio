@@ -30,6 +30,7 @@ Implements the wire format specification:
       - Bit 0: Mode (0 = Free building, 1 = Puzzle mode)
       - Bit 1: Kit present (0 = None, 1 = Kit inventory block present)
       - Bit 2: Glued placements present (0 = None, 1 = Glued placements block present)
+      - Bit 3: Named submodels present (0 = None, 1 = Submodels block present)
   - Dictionaries:
       - Part Dictionary: U8 count of unique parts, followed by each part name (U8 length + ASCII chars, stripped of ".dat")
       - Color Dictionary: U8 count of unique colors, followed by each U16LE color code
@@ -46,6 +47,8 @@ Implements the wire format specification:
           - Delta position: delta\_x, delta\_y, delta\_z (ZigZag encoded LEB128 varints in 1 LDU integers)
   - Kit Inventory Block (if puzzle mode and kit present):
       - U8 kit\_item\_count, followed by entries: part\_idx (U8), color\_idx (U8), count (U8)
+  - Submodels Block (if submodels flag is set): U8 submodel count, then for each submodel
+    its U8-length name, U16LE glued count and placements, and U16LE loose count and placements
 
 -}
 
@@ -285,7 +288,7 @@ ensureDat name =
         lower =
             String.toLower name
     in
-    if String.endsWith ".dat" lower then
+    if String.endsWith ".dat" lower || String.endsWith ".ldr" lower || String.endsWith ".mpd" lower then
         name
 
     else
@@ -299,6 +302,16 @@ extractPlacements doc =
             Document.gluedIds doc
     in
     Document.mainPlacements doc
+        |> List.partition (\p -> Set.member p.id gluedSet)
+
+
+extractSubmodelPlacements : Document -> Document.Submodel -> ( List Document.Placement, List Document.Placement )
+extractSubmodelPlacements doc submodel =
+    let
+        gluedSet =
+            Document.gluedIds doc
+    in
+    Document.placementsOf submodel.name doc
         |> List.partition (\p -> Set.member p.id gluedSet)
 
 
@@ -745,6 +758,16 @@ encode payload =
         ( glued, loose ) =
             extractPlacements payload.document
 
+        submodels =
+            List.drop 1 payload.document.submodels
+
+        submodelPlacements =
+            submodels
+                |> List.concatMap (\submodel -> Document.placementsOf submodel.name payload.document)
+
+        submodelPlacementGroups =
+            List.map (extractSubmodelPlacements payload.document) submodels
+
         kitItems =
             case payload.mode of
                 Puzzle ->
@@ -757,6 +780,7 @@ encode payload =
         allParts =
             List.map .part glued
                 ++ List.map .part loose
+                ++ List.map .part submodelPlacements
                 ++ List.map .part kitItems
 
         uniqueParts =
@@ -779,6 +803,7 @@ encode payload =
         allColors =
             List.map .color glued
                 ++ List.map .color loose
+                ++ List.map .color submodelPlacements
                 ++ List.map .color kitItems
 
         uniqueColors =
@@ -821,8 +846,15 @@ encode payload =
             else
                 4
 
+        submodelsBit =
+            if List.isEmpty submodels then
+                0
+
+            else
+                8
+
         headerFlags =
-            Bitwise.or modeBit (Bitwise.or kitBit gluedBit)
+            Bitwise.or modeBit (Bitwise.or kitBit (Bitwise.or gluedBit submodelsBit))
 
         -- Part dictionary encoder
         partDictEncoder =
@@ -952,6 +984,28 @@ encode payload =
                 _ ->
                     []
 
+        submodelsSection =
+            if List.isEmpty submodels then
+                []
+
+            else
+                Encode.unsignedInt8 (List.length submodels)
+                    :: List.concatMap
+                        (\( submodel, ( submodelGlued, submodelLoose ) ) ->
+                            let
+                                nameWidth =
+                                    Encode.getStringWidth submodel.name
+                            in
+                            [ Encode.unsignedInt8 nameWidth
+                            , Encode.string submodel.name
+                            , Encode.unsignedInt16 Bytes.LE (List.length submodelGlued)
+                            , Encode.sequence (encodePlacementsList submodelGlued)
+                            , Encode.unsignedInt16 Bytes.LE (List.length submodelLoose)
+                            , Encode.sequence (encodePlacementsList submodelLoose)
+                            ]
+                        )
+                        (List.map2 Tuple.pair submodels submodelPlacementGroups)
+
         fullEncoder =
             Encode.sequence
                 ([ Encode.unsignedInt8 0x42
@@ -964,6 +1018,7 @@ encode payload =
                     ++ gluedSection
                     ++ looseSection
                     ++ kitSection
+                    ++ submodelsSection
                 )
     in
     Encode.encode fullEncoder
@@ -1021,6 +1076,9 @@ decodeWithFlags flags =
 
         hasGlued =
             Bitwise.and flags 0x04 /= 0
+
+        hasSubmodels =
+            Bitwise.and flags 0x08 /= 0
     in
     decodePartDict
         |> Decode.andThen
@@ -1035,12 +1093,16 @@ decodeWithFlags flags =
                                             |> Decode.andThen
                                                 (\loosePlacements ->
                                                     decodeKitSection mode hasKit partDict colorDict
-                                                        |> Decode.map
+                                                        |> Decode.andThen
                                                             (\kit ->
-                                                                { mode = mode
-                                                                , document = toDocument gluedPlacements loosePlacements
-                                                                , kit = kit
-                                                                }
+                                                                decodeSubmodelsSection hasSubmodels partDict colorDict
+                                                                    |> Decode.map
+                                                                        (\submodels ->
+                                                                            { mode = mode
+                                                                            , document = toDocumentWithSubmodels gluedPlacements loosePlacements submodels
+                                                                            , kit = kit
+                                                                            }
+                                                                        )
                                                             )
                                                 )
                                     )
@@ -1094,6 +1156,64 @@ type alias DecodedPlacement =
     , color : Int
     , matrix : Mat4
     }
+
+
+type alias DecodedSubmodel =
+    { name : String
+    , glued : List DecodedPlacement
+    , loose : List DecodedPlacement
+    }
+
+
+toDocumentWithSubmodels : List DecodedPlacement -> List DecodedPlacement -> List DecodedSubmodel -> Document
+toDocumentWithSubmodels glued loose submodels =
+    case submodels of
+        [] ->
+            toDocument glued loose
+
+        _ ->
+            let
+                emptyDoc =
+                    Document.empty
+
+                emptyWithSubmodels =
+                    { emptyDoc
+                        | submodels = { name = "main.ldr", entries = [] } :: List.map (\submodel -> { name = submodel.name, entries = [] }) submodels
+                    }
+
+                addPlacements targetName placements isGlued doc =
+                    List.foldl
+                        (\spec acc ->
+                            let
+                                ( nextDoc, newId ) =
+                                    Document.addPlacement targetName spec acc
+                            in
+                            if isGlued then
+                                Document.setGlued True newId nextDoc
+
+                            else
+                                nextDoc
+                        )
+                        doc
+                        placements
+
+                withMainGlued =
+                    addPlacements "main.ldr" glued True emptyWithSubmodels
+
+                withMain =
+                    addPlacements "main.ldr" loose False withMainGlued
+
+                withSubmodels =
+                    List.foldl
+                        (\submodel doc ->
+                            doc
+                                |> addPlacements submodel.name submodel.glued True
+                                |> addPlacements submodel.name submodel.loose False
+                        )
+                        withMain
+                        submodels
+            in
+            Document.clearTouched withSubmodels
 
 
 decodePlacementList : Int -> Array String -> Array Int -> Decoder (List DecodedPlacement)
@@ -1168,6 +1288,53 @@ decodeLooseSection : Array String -> Array Int -> Decoder (List DecodedPlacement
 decodeLooseSection partDict colorDict =
     Decode.unsignedInt16 Bytes.LE
         |> Decode.andThen (\count -> decodePlacementList count partDict colorDict)
+
+
+decodeSubmodelsSection : Bool -> Array String -> Array Int -> Decoder (List DecodedSubmodel)
+decodeSubmodelsSection hasSubmodels partDict colorDict =
+    if not hasSubmodels then
+        Decode.succeed []
+
+    else
+        Decode.unsignedInt8
+            |> Decode.andThen
+                (\count ->
+                    Decode.loop ( count, [] )
+                        (\( remaining, acc ) ->
+                            if remaining <= 0 then
+                                Decode.succeed (Decode.Done (List.reverse acc))
+
+                            else
+                                Decode.unsignedInt8
+                                    |> Decode.andThen
+                                        (\nameLength ->
+                                            Decode.string nameLength
+                                                |> Decode.andThen
+                                                    (\name ->
+                                                        Decode.unsignedInt16 Bytes.LE
+                                                            |> Decode.andThen
+                                                                (\gluedCount ->
+                                                                    decodePlacementList gluedCount partDict colorDict
+                                                                        |> Decode.andThen
+                                                                            (\glued ->
+                                                                                Decode.unsignedInt16 Bytes.LE
+                                                                                    |> Decode.andThen
+                                                                                        (\looseCount ->
+                                                                                            decodePlacementList looseCount partDict colorDict
+                                                                                                |> Decode.map
+                                                                                                    (\loose ->
+                                                                                                        Decode.Loop
+                                                                                                            ( remaining - 1
+                                                                                                            , { name = name, glued = glued, loose = loose } :: acc
+                                                                                                            )
+                                                                                                    )
+                                                                                        )
+                                                                            )
+                                                                )
+                                                    )
+                                        )
+                        )
+                )
 
 
 decodeKitSection : Mode -> Bool -> Array String -> Array Int -> Decoder (Maybe (List KitItem))

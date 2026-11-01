@@ -87,6 +87,7 @@ roundTripTests =
                             [ \r -> Expect.equal FreeBuilding r.mode
                             , \r -> Expect.equal Nothing r.kit
                             , \r -> Expect.equal 2 (List.length (Document.mainPlacements r.document))
+                            , \r -> Expect.equal False (Document.isMultiFile r.document)
                             , \_ -> Expect.equal (Just "3001.dat") (Maybe.map .part p1)
                             , \_ -> Expect.equal (Just 14) (Maybe.map .color p1)
                             , \_ -> Expect.equal (Just "3002.dat") (Maybe.map .part p2)
@@ -139,6 +140,48 @@ roundTripTests =
 
                     Nothing ->
                         Expect.fail "Failed to decode model with glued parts"
+        , test "grouped free building model round-trips submodel placements" <|
+            \_ ->
+                let
+                    ( doc1, id1 ) =
+                        Document.addPlacement "" { part = "3001.dat", color = 14, matrix = Mat4.makeTranslate3 0 -24 0 } Document.empty
+
+                    ( doc2, id2 ) =
+                        Document.addPlacement "" { part = "3002.dat", color = 4, matrix = Mat4.makeTranslate3 40 -24 20 } doc1
+
+                    grouped =
+                        Document.groupIntoSubmodel "submodel1.ldr" [ id1, id2 ] doc2
+
+                    decoded =
+                        HashPayload.decode
+                            (HashPayload.encode
+                                { mode = FreeBuilding
+                                , document = grouped
+                                , kit = Nothing
+                                }
+                            )
+                in
+                case decoded of
+                    Just result ->
+                        let
+                            mainPlacements =
+                                Document.mainPlacements result.document
+
+                            childPlacements =
+                                Document.placementsOf "submodel1.ldr" result.document
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 1 (List.length mainPlacements)
+                            , \_ -> Expect.equal True (Document.isMultiFile result.document)
+                            , \_ -> Expect.equal (Just "submodel1.ldr") (List.head mainPlacements |> Maybe.map .part)
+                            , \_ -> Expect.equal [ "3001.dat", "3002.dat" ] (List.map .part childPlacements)
+                            , \_ -> Expect.equal [ 14, 4 ] (List.map .color childPlacements)
+                            , \_ -> Expect.equal "submodel1.ldr" (List.drop 1 result.document.submodels |> List.head |> Maybe.map .name |> Maybe.withDefault "")
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Failed to decode grouped model payload"
         , test "puzzle model with glued parts, placed loose parts, and kit inventory round-trip" <|
             \_ ->
                 let
