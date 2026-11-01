@@ -2512,14 +2512,25 @@ makeGear radius thickness partName =
               }
             ]
 
-        bbox =
-            { min = vec3 -radius -radius -halfThick
-            , max = vec3 radius radius halfThick
-            }
+        boundingBoxes =
+            if radius <= 8.0 || halfThick <= 5.0 then
+                [ { min = vec3 -radius -radius -halfThick
+                  , max = vec3 radius radius halfThick
+                  }
+                ]
+
+            else
+                [ { min = vec3 -8.0 -8.0 -halfThick
+                  , max = vec3 8.0 8.0 halfThick
+                  }
+                , { min = vec3 -radius -radius -5.0
+                  , max = vec3 radius radius 5.0
+                  }
+                ]
     in
     { part = partName
     , connections = connections
-    , boundingBoxes = [ bbox ]
+    , boundingBoxes = boundingBoxes
     }
 
 

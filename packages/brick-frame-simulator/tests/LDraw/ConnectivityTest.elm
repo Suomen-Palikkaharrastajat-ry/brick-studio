@@ -574,6 +574,9 @@ extractionTests =
                 let
                     gear8 =
                         makeGear 10.0 20.0 "3647.dat"
+
+                    gear16 =
+                        makeGear 20.0 20.0 "4019.dat"
                 in
                 Expect.all
                     [ \_ -> Expect.equal 1 (List.length gear8.connections)
@@ -589,6 +592,18 @@ extractionTests =
 
                             _ ->
                                 Expect.fail "Expected 1 connection point for gear"
+                    , \_ ->
+                        Expect.equal
+                            [ { min = vec3 -8.0 -8.0 -10.0, max = vec3 8.0 8.0 10.0 }
+                            , { min = vec3 -10.0 -10.0 -5.0, max = vec3 10.0 10.0 5.0 }
+                            ]
+                            gear8.boundingBoxes
+                    , \_ ->
+                        Expect.equal
+                            [ { min = vec3 -8.0 -8.0 -10.0, max = vec3 8.0 8.0 10.0 }
+                            , { min = vec3 -20.0 -20.0 -5.0, max = vec3 20.0 20.0 5.0 }
+                            ]
+                            gear16.boundingBoxes
                     ]
                     ()
         , test "40T gear (3649) includes axle holes and 12 pin holes" <|

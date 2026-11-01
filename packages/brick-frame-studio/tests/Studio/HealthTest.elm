@@ -335,6 +335,50 @@ technicTests =
             \_ ->
                 lines [ brick "3700.dat" 5 -24 0 ]
                     |> (\doc -> Expect.equal [] (Health.check noParts doc Set.empty))
+        , test "a 16T gear placed slightly offset on an axle pin in a Technic brick snaps flush on the pin rather than lifting out" <|
+            \_ ->
+                let
+                    -- 43093 axle pin in brick hole at (-140, -14, -140)
+                    -- 3701 Technic brick 1x4 at (-160, -24, -130)
+                    -- 4019 16T gear offset on axle pin at Z = -148 (flush snap position is Z = -150)
+                    -- 3622 brick 1x3 on top of 3701 at (-150, -48, -130)
+                    doc =
+                        lines
+                            [ "1 71 -140 -14 -140 0 0 -1 0 -1 0 -1 0 0 43093.dat"
+                            , "1 4 -160 -24 -130 1 0 0 0 1 0 0 0 1 3701.dat"
+                            , "1 71 -140 -14 -148 -1 0 0 0 1 0 0 0 -1 4019.dat"
+                            , "1 14 -150 -48 -130 1 0 0 0 1 0 0 0 1 3622.dat"
+                            ]
+
+                    issues =
+                        Health.check noParts doc Set.empty
+
+                    fixes =
+                        Health.plan noParts doc Set.empty issues
+                in
+                case fixes of
+                    [ fix ] ->
+                        let
+                            appliedDoc =
+                                documentWith doc fix
+
+                            gearPlacement =
+                                Document.getPlacement fix.placement appliedDoc
+
+                            zPos =
+                                gearPlacement
+                                    |> Maybe.map (\p -> Vec3.getZ (Mat4.transform p.matrix (Vec3.vec3 0 0 0)))
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 2 fix.placement
+                            , \_ -> Expect.equal SnapToStud fix.reason
+                            , \_ -> Expect.equal (Just -150) (Maybe.map round zPos)
+                            , \_ -> Expect.equal [] (Health.check noParts appliedDoc Set.empty)
+                            ]
+                            ()
+
+                    other ->
+                        Expect.fail ("expected exactly one snap fix, got " ++ String.fromInt (List.length other))
         ]
 
 

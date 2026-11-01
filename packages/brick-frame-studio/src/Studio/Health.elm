@@ -40,10 +40,11 @@ to its planned one:
     nearest translation that puts the most anti-studs onto studs, so a
     half-stud-off 1 × 1 brick moves half a stud onto the nearest stud. Its
     height and rotation never change.
-2.  Each overlap is resolved by moving one part to the nearest free stud-lattice
-    spot (`DragPlane.freeSpotPlacement`): the unglued one, or the higher id (the
-    later added) when both are unglued. Moves repeat until nothing overlaps, or
-    a budget runs out.
+2.  Each overlap is resolved by moving one part: the unglued one, or the higher
+    id (the later added) when both are unglued. In-place connector snap
+    (`findSnapFix`) is attempted first before falling back to the nearest free
+    stud-lattice spot (`DragPlane.freeSpotPlacement`). Moves repeat until
+    nothing overlaps, or a budget runs out.
 
 Everything is pure and deterministic: the same document, cache and issues give
 the same plan.
@@ -94,7 +95,9 @@ type alias Item =
     , matrix : Mat4
     , conn : PartConnectivity
     , box : Box
+    , boxes : List Box
     , obb : OBB
+    , obbs : List OBB
     , studs : List ( Vec3, Vec3 )
     , antis : List ( Vec3, Vec3 )
     , glued : Bool
@@ -295,36 +298,46 @@ items cache doc glued =
                 |> List.map .part
                 |> Set.fromList
                 |> Set.toList
-                |> List.map (\file -> ( file, rawBoxOf cache file ))
+                |> List.map (\file -> ( file, rawBoxesOf cache file ))
                 |> Dict.fromList
     in
     placements
         |> List.filterMap
             (\placement ->
-                case Dict.get placement.part rawBoxes |> Maybe.andThen identity of
-                    Just raw ->
-                        Just (itemOf cache glued placement.id placement.part placement.matrix raw)
+                case Dict.get placement.part rawBoxes of
+                    Just rawList ->
+                        if List.isEmpty rawList then
+                            Nothing
+
+                        else
+                            Just (itemOf cache glued placement.id placement.part placement.matrix rawList)
 
                     Nothing ->
                         Nothing
             )
 
 
-itemOf : PartCache -> Set Int -> Int -> String -> Mat4 -> Box -> Item
-itemOf cache glued id part matrix raw =
+itemOf : PartCache -> Set Int -> Int -> String -> Mat4 -> List Box -> Item
+itemOf cache glued id part matrix rawBoxes =
     let
         conn =
             Connectivity.extractPartConnectivity part (linesOf cache)
 
-        box =
-            Connectivity.effectiveEnvelope raw conn.connections
+        effectiveBoxes =
+            List.map (\raw -> Connectivity.effectiveEnvelope raw conn.connections) rawBoxes
+
+        envelopeBox =
+            DragPlane.unionBox (List.concatMap (\b -> [ b.min, b.max ]) effectiveBoxes)
+                |> Maybe.withDefault (List.head effectiveBoxes |> Maybe.withDefault { min = vec3 0 0 0, max = vec3 0 0 0 })
     in
     placeItem matrix
         { id = id
         , matrix = matrix
         , conn = conn
-        , box = box
-        , obb = Connectivity.toOBB box matrix
+        , box = envelopeBox
+        , boxes = effectiveBoxes
+        , obb = Connectivity.toOBB envelopeBox matrix
+        , obbs = List.map (\b -> Connectivity.toOBB b matrix) effectiveBoxes
         , studs = []
         , antis = []
         , glued = Set.member id glued
@@ -339,7 +352,11 @@ placeItem : Mat4 -> Item -> Item
 placeItem matrix item =
     let
         placed =
-            { item | matrix = matrix, obb = Connectivity.toOBB item.box matrix }
+            { item
+                | matrix = matrix
+                , obb = Connectivity.toOBB item.box matrix
+                , obbs = List.map (\b -> Connectivity.toOBB b matrix) item.boxes
+            }
     in
     { placed
         | studs = worldPoints isStud placed
@@ -352,16 +369,21 @@ withMatrix =
     placeItem
 
 
-{-| A part's raw box: the catalog's for a catalog part, else its loaded geometry.
+{-| A part's raw boxes: the catalog's for a catalog part, else its loaded geometry.
 -}
-rawBoxOf : PartCache -> String -> Maybe Box
-rawBoxOf cache file =
+rawBoxesOf : PartCache -> String -> List Box
+rawBoxesOf cache file =
     case Connectivity.knownCatalogPart file of
         Just catalog ->
-            List.head catalog.boundingBoxes
+            catalog.boundingBoxes
 
         Nothing ->
-            geometryBox cache file
+            case geometryBox cache file of
+                Just box ->
+                    [ box ]
+
+                Nothing ->
+                    []
 
 
 {-| The bounds of a part's loaded geometry, with its sub-files (studs included).
@@ -753,7 +775,7 @@ overlapPairs list =
 
 overlaps : Item -> Item -> Bool
 overlaps a b =
-    Connectivity.testOBB overlapTolerance a.obb b.obb
+    List.any (\obbA -> List.any (\obbB -> Connectivity.testOBB overlapTolerance obbA obbB) b.obbs) a.obbs
         && not (technicJoined a b)
         && not (studJoined a b)
 
@@ -836,6 +858,38 @@ moverFor ( a, b ) =
             Just ( b, a )
 
 
+findSnapFix : Item -> List Item -> Maybe Mat4
+findSnapFix mover list =
+    let
+        others =
+            othersOf mover list
+
+        connected =
+            List.filter (\other -> technicJoined mover other || studJoined mover other) others
+
+        targetPoints =
+            List.concatMap
+                (\item ->
+                    List.map (Connectivity.transformPoint item.matrix item.id) item.conn.connections
+                )
+                connected
+
+        candidates =
+            Connectivity.solveSnapCandidates 24.0 0 mover.matrix mover.conn.connections targetPoints
+
+        isValid candidate =
+            let
+                snappedMover =
+                    withMatrix candidate.snapMatrix mover
+            in
+            not (List.any (overlaps snappedMover) others)
+    in
+    candidates
+        |> List.filter isValid
+        |> List.map .snapMatrix
+        |> List.head
+
+
 overlapStage : Int -> List Item -> Dict Int FixReason -> ( List Item, Dict Int FixReason )
 overlapStage budget list reasons =
     if budget <= 0 then
@@ -844,32 +898,52 @@ overlapStage budget list reasons =
     else
         case List.filterMap moverFor (overlapPairs list) of
             ( mover, other ) :: _ ->
-                let
-                    spot =
-                        DragPlane.freeSpotPlacement
-                            { box = mover.box
-                            , matrix = mover.matrix
-                            , offset = Connectivity.studOffset mover.conn mover.matrix
-                            , start = originXZ mover.matrix
-                            , gridStep = latticeStep
-                            , others = List.map (\item -> DragPlane.worldBox item.matrix item.box) (othersOf mover list)
-                            }
+                case findSnapFix mover list of
+                    Just snappedMatrix ->
+                        let
+                            moved =
+                                withMatrix snappedMatrix mover
 
-                    moved =
-                        withMatrix spot mover
+                            next =
+                                List.map
+                                    (\item ->
+                                        if item.id == mover.id then
+                                            moved
 
-                    next =
-                        List.map
-                            (\item ->
-                                if item.id == mover.id then
-                                    moved
+                                        else
+                                            item
+                                    )
+                                    list
+                        in
+                        overlapStage (budget - 1) next (Dict.insert mover.id SnapToStud reasons)
 
-                                else
-                                    item
-                            )
-                            list
-                in
-                overlapStage (budget - 1) next (Dict.insert mover.id (LiftOut { other = other.id }) reasons)
+                    Nothing ->
+                        let
+                            spot =
+                                DragPlane.freeSpotPlacement
+                                    { box = mover.box
+                                    , matrix = mover.matrix
+                                    , offset = Connectivity.studOffset mover.conn mover.matrix
+                                    , start = originXZ mover.matrix
+                                    , gridStep = latticeStep
+                                    , others = List.map (\item -> DragPlane.worldBox item.matrix item.box) (othersOf mover list)
+                                    }
+
+                            moved =
+                                withMatrix spot mover
+
+                            next =
+                                List.map
+                                    (\item ->
+                                        if item.id == mover.id then
+                                            moved
+
+                                        else
+                                            item
+                                    )
+                                    list
+                        in
+                        overlapStage (budget - 1) next (Dict.insert mover.id (LiftOut { other = other.id }) reasons)
 
             [] ->
                 ( list, reasons )
