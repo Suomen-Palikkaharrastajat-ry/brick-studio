@@ -27,7 +27,9 @@ and supports, but are never moved.
   - `Overlapping` — two parts whose effective boxes (the geometry bounds without
     stud protrusions) intersect by more than `overlapTolerance` (1 LDU). Touching
     faces do not count. A Technic axle or pin is not an overlap with the part it
-    connects to (`technicJoined`), so an axle through a gear is fine.
+    connects to (`technicJoined`), so an axle through a gear is fine. Meshing
+    gears (`gearsMeshing`) are likewise exempt so pitch-circle tooth
+    intersections do not flag legitimate gear trains.
 
 Boxes come from the catalog for catalog parts, otherwise from the part's loaded
 geometry. A part whose geometry is not loaded yet is left out of the check until
@@ -52,7 +54,10 @@ the same plan.
 
 -}
 
+import Data
 import Dict exposing (Dict)
+import Gear.Detect as Detect
+import Gear.Types exposing (GearSpec)
 import I18n exposing (Language(..))
 import LDraw.Connectivity as Connectivity exposing (ConnectionType(..), OBB, PartConnectivity)
 import LDraw.Document as Document exposing (Document)
@@ -804,6 +809,7 @@ overlaps a b =
     List.any (\obbA -> List.any (\obbB -> Connectivity.testOBB overlapTolerance obbA obbB) b.obbs) a.obbs
         && not (technicJoined a b)
         && not (studJoined a b)
+        && not (gearsMeshing a b)
 
 
 {-| Whether a stud of one part connects with an anti-stud of the other, or vice-versa.
@@ -867,6 +873,68 @@ distanceToAxis point origin direction =
             Vec3.dot offset direction
     in
     Vec3.length (Vec3.sub offset (Vec3.scale along direction))
+
+
+{-| Whether two gears legitimately mesh.
+Pitch-circle intersections are valid kinematic connections, not collisions.
+-}
+gearsMeshing : Item -> Item -> Bool
+gearsMeshing a b =
+    case ( gearSpecOf a.conn.part, gearSpecOf b.conn.part ) of
+        ( Just specA, Just specB ) ->
+            let
+                instA =
+                    { id = a.id
+                    , spec = specA
+                    , color = 16
+                    , worldPosition = Mat4.transform a.matrix (vec3 0 0 0)
+                    , worldMatrix = a.matrix
+                    }
+
+                instB =
+                    { id = b.id
+                    , spec = specB
+                    , color = 16
+                    , worldPosition = Mat4.transform b.matrix (vec3 0 0 0)
+                    , worldMatrix = b.matrix
+                    }
+            in
+            Detect.meshing instA instB
+
+        _ ->
+            False
+
+
+gearSpecOf : String -> Maybe GearSpec
+gearSpecOf partName =
+    let
+        clean =
+            normalisePartName partName
+    in
+    Data.gearParts
+        |> List.filter (\s -> normalisePartName s.partFile == clean)
+        |> List.head
+
+
+normalisePartName : String -> String
+normalisePartName name =
+    let
+        lower =
+            String.toLower (String.replace "\\" "/" name)
+
+        baseName =
+            case List.reverse (String.split "/" lower) of
+                first :: _ ->
+                    first
+
+                [] ->
+                    lower
+    in
+    if String.endsWith ".dat" baseName then
+        String.dropRight 4 baseName
+
+    else
+        baseName
 
 
 {-| The mover of an overlapping pair, and the part it is moved away from.

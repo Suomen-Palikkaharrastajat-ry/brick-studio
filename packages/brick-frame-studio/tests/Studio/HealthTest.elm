@@ -17,6 +17,7 @@ import Render.Instanced as Instanced
 import Set
 import Studio.Core as Core
 import Studio.Edit as Edit exposing (Command(..))
+import Studio.HashPayload as HashPayload
 import Studio.Health as Health exposing (FixReason(..), Issue(..))
 import Test exposing (Test, describe, test)
 
@@ -379,6 +380,39 @@ technicTests =
 
                     other ->
                         Expect.fail ("expected exactly one snap fix, got " ++ String.fromInt (List.length other))
+        , test "two meshing 16T gears are not flagged as overlapping" <|
+            \_ ->
+                let
+                    -- 4019 16T gear has pitch radius 20 LDU. Meshing distance is 40 LDU.
+                    -- When rotated to mesh (11.25°), their bounding boxes intersect,
+                    -- but meshing exemption ensures they are not flagged as overlapping.
+                    gear1 =
+                        "1 71 0 -24 0 1 0 0 0 1 0 0 0 1 4019.dat"
+
+                    rot11deg =
+                        "1 14 40 -24 0 0.9808 -0.1951 0 0.1951 0.9808 0 0 0 1 4019.dat"
+
+                    doc =
+                        lines [ gear1, rot11deg ]
+                in
+                Expect.equal [] (Health.check noParts doc Set.empty)
+        , test "two colliding (non-meshing) gears are flagged as overlapping" <|
+            \_ ->
+                let
+                    -- Two 16T gears placed only 20 LDU apart (penetrating hubs/rims far beyond pitch radius)
+                    gear1 =
+                        "1 71 0 -24 0 1 0 0 0 1 0 0 0 1 4019.dat"
+
+                    gear2 =
+                        "1 14 20 -24 0 1 0 0 0 1 0 0 0 1 4019.dat"
+
+                    doc =
+                        lines [ gear1, gear2 ]
+                in
+                Expect.equal [ Overlapping { first = 0, second = 1 } ] (Health.check noParts doc Set.empty)
+        , test "reported model with meshing 16T gears on Technic brick has no false overlap" <|
+            \_ ->
+                Expect.equal [] (Health.check noParts reportedModelDoc Set.empty)
         ]
 
 
@@ -547,6 +581,17 @@ brick file x y z =
 noParts : PartCache
 noParts =
     Dict.empty
+
+
+{-| The decoded document from the reported model hash:
+Technic brick 3701, axle-pin 43093, 1x3 brick 3622, and two meshing 16T gears (4019).
+-}
+reportedModelDoc : Document
+reportedModelDoc =
+    [ 66, 70, 1, 0, 4, 5, 52, 51, 48, 57, 51, 4, 51, 55, 48, 49, 4, 52, 48, 49, 57, 4, 51, 54, 50, 50, 3, 71, 0, 4, 0, 14, 0, 5, 0, 0, 0, 7, 151, 2, 27, 151, 2, 1, 1, 0, 39, 19, 20, 2, 0, 13, 40, 20, 39, 3, 2, 0, 19, 67, 40, 2, 2, 128, 0, 0, 0, 0, 106, 12, 96, 52, 35 ]
+        |> HashPayload.decodeBytes
+        |> Maybe.map .document
+        |> Maybe.withDefault Document.empty
 
 
 {-| A cache holding the jumper plate 3794a, as its LDraw file gives it: a stud at
