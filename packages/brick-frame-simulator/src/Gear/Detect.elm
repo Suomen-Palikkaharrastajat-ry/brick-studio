@@ -374,17 +374,25 @@ gearAxis inst =
         origin =
             Mat4.transform inst.worldMatrix (Vec3.vec3 0 0 0)
 
-        alongLocalZ =
-            Mat4.transform inst.worldMatrix (Vec3.vec3 0 0 1)
+        alongLocalAxis =
+            if inst.spec.partFile == "99010.dat" then
+                Mat4.transform inst.worldMatrix (Vec3.vec3 0 1 0)
+
+            else
+                Mat4.transform inst.worldMatrix (Vec3.vec3 0 0 1)
 
         raw =
-            Vec3.sub alongLocalZ origin
+            Vec3.sub alongLocalAxis origin
 
         len =
             Vec3.length raw
     in
     if len < 1.0e-6 then
-        Vec3.vec3 0 0 1
+        if inst.spec.partFile == "99010.dat" then
+            Vec3.vec3 0 1 0
+
+        else
+            Vec3.vec3 0 0 1
 
     else
         Vec3.scale (1 / len) raw

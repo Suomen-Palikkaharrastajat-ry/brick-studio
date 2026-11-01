@@ -507,6 +507,7 @@ gearParts =
     , { partFile = "32198.dat", teeth = 20, pitchRadius = 25.0 }
     , { partFile = "32269.dat", teeth = 20, pitchRadius = 25.0 }
     , { partFile = "3650b.dat", teeth = 24, pitchRadius = 30.0 }
+    , { partFile = "99010.dat", teeth = 28, pitchRadius = 35.0 }
     ]
 
 

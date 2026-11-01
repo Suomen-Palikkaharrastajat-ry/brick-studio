@@ -275,8 +275,17 @@ analyse { lines, cache } model =
                             True
 
                         else
+                            let
+                                isDrivenAxle =
+                                    case line of
+                                        SubFileRef ref ->
+                                            List.any (\a -> a.transform == ref.transform && a.file == ref.file) drivenAxles
+
+                                        _ ->
+                                            False
+                            in
                             not (isTopLevelGearRef model.gearSpecs line)
-                                && not (isTopLevelAxleRef line)
+                                && not isDrivenAxle
                                 && coaxial
                                 == Nothing
                     )
@@ -292,7 +301,11 @@ analyse { lines, cache } model =
                         else
                             case ( line, coaxial ) of
                                 ( SubFileRef ref, Just gearId ) ->
-                                    if not (isTopLevelGearRef model.gearSpecs line) && not (isTopLevelAxleRef line) then
+                                    let
+                                        isDrivenAxle =
+                                            List.any (\a -> a.transform == ref.transform && a.file == ref.file) drivenAxles
+                                    in
+                                    if not (isTopLevelGearRef model.gearSpecs line) && not isDrivenAxle then
                                         Just
                                             { file = ref.file
                                             , color = resolveRootColor ref.color
@@ -575,7 +588,7 @@ expandCoaxialConnectivity cache gearSpecs taggedLines gearInstances drivenAxles 
             lineItems
                 |> List.filterMap
                     (\it ->
-                        if not it.isGlued && not it.isGearOrAxle && not (Set.member it.index allAnchoredIndices) && (it.initialDrivingGearId == Nothing) && not (List.isEmpty it.points) then
+                        if not it.isGlued && not (isTopLevelGearRef gearSpecs it.line) && not (Set.member it.index allAnchoredIndices) && (it.initialDrivingGearId == Nothing) && not (List.isEmpty it.points) then
                             Just { index = it.index, points = it.points }
 
                         else

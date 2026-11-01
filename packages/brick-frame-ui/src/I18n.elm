@@ -1,6 +1,7 @@
 module I18n exposing
     ( Language(..)
     , allLanguages
+    , appPlaygroundTitle
     , bomCategory
     , bomColor
     , bomCopyMarkdown
@@ -460,6 +461,16 @@ headerSimulateGears lang =
 
         En ->
             "Simulate gears (P)"
+
+
+appPlaygroundTitle : Language -> String
+appPlaygroundTitle lang =
+    case lang of
+        Fi ->
+            "Palikkaleikkikenttä"
+
+        En ->
+            "Brick Playground"
 
 
 headerPlay : Language -> String

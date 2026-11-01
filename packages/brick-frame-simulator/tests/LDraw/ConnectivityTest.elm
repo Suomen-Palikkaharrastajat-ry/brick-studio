@@ -348,7 +348,7 @@ extractionTests =
                                     (\c ->
                                         case c.connType of
                                             TechnicPinMale { length, friction } ->
-                                                length == 10.0 && friction == False
+                                                length == 10.0 && friction == True
 
                                             _ ->
                                                 False
@@ -367,6 +367,230 @@ extractionTests =
 
                     Nothing ->
                         Expect.fail "Catalog part 4274.dat was not found"
+        , test "knownCatalogPart builds 89678 with friction pin and stud ends" <|
+            \_ ->
+                case knownCatalogPart "89678.dat" of
+                    Just conn ->
+                        let
+                            pins =
+                                List.filter
+                                    (\c ->
+                                        case c.connType of
+                                            TechnicPinMale { length, friction } ->
+                                                length == 10.0 && friction == True
+
+                                            _ ->
+                                                False
+                                    )
+                                    conn.connections
+
+                            studs =
+                                List.filter (\c -> c.connType == Stud) conn.connections
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 2 (List.length conn.connections)
+                            , \_ -> Expect.equal 1 (List.length pins)
+                            , \_ -> Expect.equal 1 (List.length studs)
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Catalog part 89678.dat was not found"
+        , test "knownCatalogPart builds 6587 Axle 3 with Stud" <|
+            \_ ->
+                case knownCatalogPart "6587.dat" of
+                    Just conn ->
+                        let
+                            axles =
+                                List.filter
+                                    (\c ->
+                                        case c.connType of
+                                            TechnicAxleMale _ ->
+                                                True
+
+                                            _ ->
+                                                False
+                                    )
+                                    conn.connections
+
+                            studs =
+                                List.filter (\c -> c.connType == Stud) conn.connections
+
+                            stud =
+                                List.head studs
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 4 (List.length conn.connections)
+                            , \_ -> Expect.equal 3 (List.length axles)
+                            , \_ -> Expect.equal 1 (List.length studs)
+                            , \_ ->
+                                case stud of
+                                    Just s ->
+                                        Expect.all
+                                            [ \_ -> Expect.equal (vec3 30 0 0) s.localPosition
+                                            , \_ -> Expect.equal (vec3 1 0 0) s.normal
+                                            , \_ -> Expect.equal (vec3 0 1 0) s.tangent
+                                            ]
+                                            ()
+
+                                    Nothing ->
+                                        Expect.fail "Expected stud on 6587"
+                            , \_ ->
+                                case conn.boundingBoxes of
+                                    [ box ] ->
+                                        Expect.all
+                                            [ \_ -> Expect.equal (vec3 -30 -4 -4) box.min
+                                            , \_ -> Expect.equal (vec3 34 4 4) box.max
+                                            ]
+                                            ()
+
+                                    _ ->
+                                        Expect.fail "Expected 1 bounding box for 6587"
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Catalog part 6587.dat was not found"
+        , test "knownCatalogPart builds 6541 Technic Brick 1x1 with hole" <|
+            \_ ->
+                case knownCatalogPart "6541.dat" of
+                    Just conn ->
+                        let
+                            studs =
+                                List.filter (\c -> c.connType == Stud) conn.connections
+
+                            antiStuds =
+                                List.filter (\c -> c.connType == AntiStud) conn.connections
+
+                            pinHoles =
+                                List.filter
+                                    (\c ->
+                                        case c.connType of
+                                            TechnicPinFemale _ ->
+                                                True
+
+                                            _ ->
+                                                False
+                                    )
+                                    conn.connections
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 5 (List.length conn.connections)
+                            , \_ -> Expect.equal 1 (List.length studs)
+                            , \_ -> Expect.equal 1 (List.length antiStuds)
+                            , \_ -> Expect.equal 3 (List.length pinHoles)
+                            , \_ ->
+                                case conn.boundingBoxes of
+                                    [ box ] ->
+                                        Expect.all
+                                            [ \_ -> Expect.equal (vec3 -10 -4 -10) box.min
+                                            , \_ -> Expect.equal (vec3 10 24 10) box.max
+                                            ]
+                                            ()
+
+                                    _ ->
+                                        Expect.fail "Expected 1 bounding box for 6541"
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Catalog part 6541.dat was not found"
+        , test "knownCatalogPart builds 3894 Technic Brick 1x6 with 6 studs and 5 holes" <|
+            \_ ->
+                case knownCatalogPart "3894.dat" of
+                    Just conn ->
+                        let
+                            studs =
+                                List.filter (\c -> c.connType == Stud) conn.connections
+
+                            antiStuds =
+                                List.filter (\c -> c.connType == AntiStud) conn.connections
+
+                            pinHoles =
+                                List.filter
+                                    (\c ->
+                                        case c.connType of
+                                            TechnicPinFemale _ ->
+                                                True
+
+                                            _ ->
+                                                False
+                                    )
+                                    conn.connections
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 6 (List.length studs)
+                            , \_ -> Expect.equal 6 (List.length antiStuds)
+                            , \_ -> Expect.equal 15 (List.length pinHoles)
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Catalog part 3894.dat was not found"
+        , test "knownCatalogPart builds 3709b Technic Plate 2x4 with holes" <|
+            \_ ->
+                case knownCatalogPart "3709b.dat" of
+                    Just conn ->
+                        let
+                            studs =
+                                List.filter (\c -> c.connType == Stud) conn.connections
+
+                            antiStuds =
+                                List.filter (\c -> c.connType == AntiStud) conn.connections
+
+                            pinHoles =
+                                List.filter
+                                    (\c ->
+                                        case c.connType of
+                                            TechnicPinFemale _ ->
+                                                True
+
+                                            _ ->
+                                                False
+                                    )
+                                    conn.connections
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 8 (List.length studs)
+                            , \_ -> Expect.equal 8 (List.length antiStuds)
+                            , \_ -> Expect.equal 9 (List.length pinHoles)
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Catalog part 3709b.dat was not found"
+        , test "knownCatalogPart builds 2711 Rotor 2 Blade with 2 studs and axle hole" <|
+            \_ ->
+                case knownCatalogPart "2711.dat" of
+                    Just conn ->
+                        let
+                            studs =
+                                List.filter (\c -> c.connType == Stud) conn.connections
+
+                            antiStuds =
+                                List.filter (\c -> c.connType == AntiStud) conn.connections
+
+                            axleHoles =
+                                List.filter
+                                    (\c ->
+                                        case c.connType of
+                                            TechnicAxleFemale _ ->
+                                                True
+
+                                            _ ->
+                                                False
+                                    )
+                                    conn.connections
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 2 (List.length studs)
+                            , \_ -> Expect.equal 2 (List.length antiStuds)
+                            , \_ -> Expect.equal 3 (List.length axleHoles)
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Catalog part 2711.dat was not found"
         , test "knownCatalogPart builds 32556 and 32556a 3L frictionless pins" <|
             \_ ->
                 case ( knownCatalogPart "32556.dat", knownCatalogPart "32556a.dat" ) of
@@ -502,6 +726,66 @@ extractionTests =
 
                     Nothing ->
                         Expect.fail "Catalog part 3031.dat was not found"
+        , test "knownCatalogPart builds Plate 6x6 (3958) with 36 studs and 36 anti-studs" <|
+            \_ ->
+                case knownCatalogPart "3958.dat" of
+                    Just conn ->
+                        let
+                            studs =
+                                List.filter (\c -> c.connType == Stud) conn.connections
+
+                            antiStuds =
+                                List.filter (\c -> c.connType == AntiStud) conn.connections
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 36 (List.length studs)
+                            , \_ -> Expect.equal 36 (List.length antiStuds)
+                            , \_ ->
+                                case conn.boundingBoxes of
+                                    [ box ] ->
+                                        Expect.all
+                                            [ \_ -> Expect.equal (vec3 -60 -4 -60) box.min
+                                            , \_ -> Expect.equal (vec3 60 8 60) box.max
+                                            ]
+                                            ()
+
+                                    _ ->
+                                        Expect.fail "Expected 1 bounding box for Plate 6x6"
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Catalog part 3958.dat was not found"
+        , test "knownCatalogPart builds Plate 8x8 (41539) with 64 studs and 64 anti-studs" <|
+            \_ ->
+                case knownCatalogPart "41539.dat" of
+                    Just conn ->
+                        let
+                            studs =
+                                List.filter (\c -> c.connType == Stud) conn.connections
+
+                            antiStuds =
+                                List.filter (\c -> c.connType == AntiStud) conn.connections
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 64 (List.length studs)
+                            , \_ -> Expect.equal 64 (List.length antiStuds)
+                            , \_ ->
+                                case conn.boundingBoxes of
+                                    [ box ] ->
+                                        Expect.all
+                                            [ \_ -> Expect.equal (vec3 -80 -4 -80) box.min
+                                            , \_ -> Expect.equal (vec3 80 8 80) box.max
+                                            ]
+                                            ()
+
+                                    _ ->
+                                        Expect.fail "Expected 1 bounding box for Plate 8x8"
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Catalog part 41539.dat was not found"
         , test "knownCatalogPart builds round plates (4073, 6141, 85861) and round brick (3062b)" <|
             \_ ->
                 let
@@ -725,6 +1009,14 @@ extractionTests =
                         , "32009"
                         , "3713"
                         , "4265c"
+                        , "3894"
+                        , "6541"
+                        , "3709b"
+                        , "2711"
+                        , "32125"
+                        , "89678"
+                        , "99009"
+                        , "99010"
                         ]
 
                     missing =

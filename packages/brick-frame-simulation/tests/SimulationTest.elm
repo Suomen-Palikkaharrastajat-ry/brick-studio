@@ -28,6 +28,7 @@ specs =
     , { partFile = "3648.dat", teeth = 24, pitchRadius = 30 }
     , { partFile = "3648b.dat", teeth = 24, pitchRadius = 30 }
     , { partFile = "3649.dat", teeth = 40, pitchRadius = 50 }
+    , { partFile = "99010.dat", teeth = 28, pitchRadius = 35 }
     ]
 
 
@@ -116,13 +117,20 @@ drivenCache =
         [ ( "3648.dat", Loaded [] )
         , ( "3648b.dat", Loaded [] )
         , ( "3649.dat", Loaded [] )
+        , ( "99010.dat", Loaded [] )
         , ( "3705.dat", Loaded [] )
         , ( "2780.dat", Loaded [] )
         , ( "43093.dat", Loaded [] )
+        , ( "4274.dat", Loaded [] )
+        , ( "89678.dat", Loaded [] )
+        , ( "6587.dat", Loaded [] )
+        , ( "2711.dat", Loaded [] )
         , ( "3700.dat", Loaded [] )
         , ( "3701.dat", Loaded [] )
         , ( "3622.dat", Loaded [] )
         , ( "3005.dat", Loaded [] )
+        , ( "3023.dat", Loaded [] )
+        , ( "3024.dat", Loaded [] )
         , ( "32523.dat", Loaded [] )
         ]
 
@@ -851,6 +859,179 @@ suite =
                                 |> Expect.equal [ "43093.dat", "3701.dat", "3622.dat" ]
                         , \_ ->
                             Expect.equal [] analysis.staticLines
+                        ]
+                        ()
+            , test "half-pin with stud 4274 in a gear hole + attached brick rotates with the gear" <|
+                \_ ->
+                    let
+                        gear =
+                            SubFileRef { color = 4, transform = Mat4.identity, file = "3648b.dat" }
+
+                        pinMat =
+                            Mat4.mul (Mat4.makeTranslate3 10 10 -10) (Mat4.makeRotate (pi / 2) (Vec3.vec3 0 1 0))
+
+                        pin =
+                            SubFileRef { color = 0, transform = pinMat, file = "4274.dat" }
+
+                        brickMat =
+                            Mat4.mul (Mat4.makeTranslate3 10 10 -34) (Mat4.makeRotate (pi / 2) (Vec3.vec3 1 0 0))
+
+                        brick =
+                            SubFileRef { color = 14, transform = brickMat, file = "3005.dat" }
+
+                        lines =
+                            [ gear, pin, brick ]
+
+                        ( m, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse { lines = lines, cache = drivenCache }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            drivenPartsFor [ 0 ] m
+                                |> List.map .file
+                                |> Expect.equal [ "4274.dat", "3005.dat" ]
+                        , \_ ->
+                            Expect.equal False (List.member brick analysis.staticLines)
+                        ]
+                        ()
+            , test "friction half-pin with stud 89678 in a gear hole + attached brick rotates with the gear" <|
+                \_ ->
+                    let
+                        gear =
+                            SubFileRef { color = 4, transform = Mat4.identity, file = "3648b.dat" }
+
+                        pinMat =
+                            Mat4.mul (Mat4.makeTranslate3 10 10 -10) (Mat4.makeRotate (pi / 2) (Vec3.vec3 0 1 0))
+
+                        pin =
+                            SubFileRef { color = 0, transform = pinMat, file = "89678.dat" }
+
+                        brickMat =
+                            Mat4.mul (Mat4.makeTranslate3 10 10 -34) (Mat4.makeRotate (pi / 2) (Vec3.vec3 1 0 0))
+
+                        brick =
+                            SubFileRef { color = 14, transform = brickMat, file = "3005.dat" }
+
+                        lines =
+                            [ gear, pin, brick ]
+
+                        ( m, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse { lines = lines, cache = drivenCache }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            drivenPartsFor [ 0 ] m
+                                |> List.map .file
+                                |> Expect.equal [ "89678.dat", "3005.dat" ]
+                        , \_ ->
+                            Expect.equal False (List.member brick analysis.staticLines)
+                        ]
+                        ()
+            , test "axle 3 with stud 6587 in a driven gear + attached plate rotates with the axle" <|
+                \_ ->
+                    let
+                        gear =
+                            SubFileRef { color = 4, transform = Mat4.identity, file = "3648.dat" }
+
+                        axleMat =
+                            Mat4.makeRotate (pi / 2) (Vec3.vec3 0 1 0)
+
+                        axle =
+                            SubFileRef { color = 0, transform = axleMat, file = "6587.dat" }
+
+                        plateMat =
+                            Mat4.mul (Mat4.makeTranslate3 0 0 -38) (Mat4.makeRotate (pi / 2) (Vec3.vec3 1 0 0))
+
+                        plate =
+                            SubFileRef { color = 14, transform = plateMat, file = "3024.dat" }
+
+                        lines =
+                            [ gear, axle, plate ]
+
+                        ( m, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse { lines = lines, cache = drivenCache }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            drivenPartsFor [ 0 ] m
+                                |> List.map .file
+                                |> Expect.equal [ "6587.dat", "3024.dat" ]
+                        , \_ ->
+                            Expect.equal False (List.member plate analysis.staticLines)
+                        ]
+                        ()
+            , test "rotor blade 2711 on a driven axle + attached brick rotates with the axle" <|
+                \_ ->
+                    let
+                        gear =
+                            SubFileRef { color = 4, transform = Mat4.identity, file = "3648.dat" }
+
+                        axle =
+                            axleAlongZ 0 0
+
+                        rotorMat =
+                            Mat4.mul (Mat4.makeTranslate3 0 0 -4) (Mat4.makeRotate (pi / 2) (Vec3.vec3 1 0 0))
+
+                        rotor =
+                            SubFileRef { color = 0, transform = rotorMat, file = "2711.dat" }
+
+                        brickMat =
+                            Mat4.mul (Mat4.makeTranslate3 20 0 -28) (Mat4.makeRotate (pi / 2) (Vec3.vec3 1 0 0))
+
+                        brick =
+                            SubFileRef { color = 14, transform = brickMat, file = "3005.dat" }
+
+                        lines =
+                            [ gear, axle, rotor, brick ]
+
+                        ( m, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse { lines = lines, cache = drivenCache }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            drivenPartsFor [ 0 ] m
+                                |> List.map .file
+                                |> Expect.equal [ "3705.dat", "2711.dat", "3005.dat" ]
+                        , \_ ->
+                            Expect.equal False (List.member brick analysis.staticLines)
+                        ]
+                        ()
+            , test "turntable 28T 99010 as driven gear rotates with attached axle and rotor" <|
+                \_ ->
+                    let
+                        turntable =
+                            SubFileRef { color = 4, transform = Mat4.identity, file = "99010.dat" }
+
+                        axleMat =
+                            Mat4.makeRotate (pi / 2) (Vec3.vec3 0 0 1)
+
+                        axle =
+                            SubFileRef { color = 0, transform = axleMat, file = "3705.dat" }
+
+                        rotorMat =
+                            Mat4.makeTranslate3 0 -4 0
+
+                        rotor =
+                            SubFileRef { color = 0, transform = rotorMat, file = "2711.dat" }
+
+                        lines =
+                            [ turntable, axle, rotor ]
+
+                        ( m, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse { lines = lines, cache = drivenCache }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            drivenPartsFor [ 0 ] m
+                                |> List.map .file
+                                |> Expect.equal [ "3705.dat", "2711.dat" ]
+                        , \_ ->
+                            Expect.equal False (List.member rotor analysis.staticLines)
                         ]
                         ()
             ]

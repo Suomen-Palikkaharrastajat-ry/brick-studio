@@ -1636,6 +1636,14 @@ knownCatalogPart name =
             -- Plate 4 x 4
             Just (makeBrick 4 4 8 "3031.dat")
 
+        "3958" ->
+            -- Plate 6 x 6
+            Just (makeBrick 6 6 8 "3958.dat")
+
+        "41539" ->
+            -- Plate 8 x 8
+            Just (makeBrick 8 8 8 "41539.dat")
+
         "4073" ->
             -- Plate 1 x 1 Round
             Just (makeBrick 1 1 8 "4073.dat")
@@ -1671,6 +1679,75 @@ knownCatalogPart name =
 
         "3703" ->
             Just (makeTechnicBrick 16 "3703.dat")
+
+        "3894" ->
+            Just (makeTechnicBrick 6 "3894.dat")
+
+        "6541" ->
+            Just
+                { part = "6541.dat"
+                , connections =
+                    [ studAt 1 (vec3 0 0 0)
+                    , antiStudAt 100 (vec3 0 24 0)
+                    , { id = 200
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 0 10 0
+                      , normal = vec3 0 0 1
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 201
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 0 10 10
+                      , normal = vec3 0 0 1
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 202
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 0 10 -10
+                      , normal = vec3 0 0 -1
+                      , tangent = vec3 1 0 0
+                      }
+                    ]
+                , boundingBoxes =
+                    [ { min = vec3 -10 -4 -10, max = vec3 10 24 10 } ]
+                }
+
+        "3709b" ->
+            let
+                base =
+                    makeBrick 4 2 8 "3709b.dat"
+
+                pinHoles =
+                    [ -20.0, 0.0, 20.0 ]
+                        |> List.indexedMap
+                            (\i x ->
+                                let
+                                    baseId =
+                                        200 + i * 3
+                                in
+                                [ { id = baseId
+                                  , connType = TechnicPinFemale { length = 8.0 }
+                                  , localPosition = vec3 x 4 0
+                                  , normal = vec3 0 1 0
+                                  , tangent = vec3 1 0 0
+                                  }
+                                , { id = baseId + 1
+                                  , connType = TechnicPinFemale { length = 8.0 }
+                                  , localPosition = vec3 x 0 0
+                                  , normal = vec3 0 -1 0
+                                  , tangent = vec3 1 0 0
+                                  }
+                                , { id = baseId + 2
+                                  , connType = TechnicPinFemale { length = 8.0 }
+                                  , localPosition = vec3 x 8 0
+                                  , normal = vec3 0 1 0
+                                  , tangent = vec3 1 0 0
+                                  }
+                                ]
+                            )
+                        |> List.concat
+            in
+            Just { base | connections = base.connections ++ pinHoles }
 
         "32523" ->
             Just (makeLiftarm 3 "32523.dat")
@@ -1849,7 +1926,38 @@ knownCatalogPart name =
             Just (makeAxle 2 "32062.dat")
 
         "6587" ->
-            Just (makeAxle 3 "6587.dat")
+            -- Technic Axle 3 with Stud
+            Just
+                { part = "6587.dat"
+                , connections =
+                    [ { id = 1
+                      , connType = TechnicAxleMale { length = 60.0 }
+                      , localPosition = vec3 -20 0 0
+                      , normal = vec3 1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    , { id = 2
+                      , connType = TechnicAxleMale { length = 60.0 }
+                      , localPosition = vec3 0 0 0
+                      , normal = vec3 1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    , { id = 3
+                      , connType = TechnicAxleMale { length = 60.0 }
+                      , localPosition = vec3 20 0 0
+                      , normal = vec3 1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    , { id = 4
+                      , connType = Stud
+                      , localPosition = vec3 30 0 0
+                      , normal = vec3 1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    ]
+                , boundingBoxes =
+                    [ { min = vec3 -30 -4 -4, max = vec3 34 4 4 } ]
+                }
 
         "3713" ->
             Just (makeGear 9.0 20.0 "3713.dat")
@@ -1910,7 +2018,7 @@ knownCatalogPart name =
                 { part = "4274.dat"
                 , connections =
                     [ { id = 1
-                      , connType = TechnicPinMale { length = 10.0, friction = False }
+                      , connType = TechnicPinMale { length = 10.0, friction = True }
                       , localPosition = vec3 -10 0 0
                       , normal = vec3 -1 0 0
                       , tangent = vec3 0 1 0
@@ -1924,6 +2032,174 @@ knownCatalogPart name =
                     ]
                 , boundingBoxes =
                     [ { min = vec3 -20 -8 -8, max = vec3 4 8 8 } ]
+                }
+
+        "89678" ->
+            -- Technic Pin 1/2 with Friction
+            Just
+                { part = "89678.dat"
+                , connections =
+                    [ { id = 1
+                      , connType = TechnicPinMale { length = 10.0, friction = True }
+                      , localPosition = vec3 -10 0 0
+                      , normal = vec3 -1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    , { id = 2
+                      , connType = Stud
+                      , localPosition = vec3 0 0 0
+                      , normal = vec3 1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    ]
+                , boundingBoxes =
+                    [ { min = vec3 -20 -8 -8, max = vec3 4 8 8 } ]
+                }
+
+        "2711" ->
+            -- Technic Rotor 2 Blade with 2 Studs
+            Just
+                { part = "2711.dat"
+                , connections =
+                    [ studAt 1 (vec3 20 0 0)
+                    , studAt 2 (vec3 -20 0 0)
+                    , antiStudAt 100 (vec3 20 8 0)
+                    , antiStudAt 101 (vec3 -20 8 0)
+                    , { id = 200
+                      , connType = TechnicAxleFemale { length = 8.0 }
+                      , localPosition = vec3 0 4 0
+                      , normal = vec3 0 1 0
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 201
+                      , connType = TechnicAxleFemale { length = 8.0 }
+                      , localPosition = vec3 0 0 0
+                      , normal = vec3 0 -1 0
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 202
+                      , connType = TechnicAxleFemale { length = 8.0 }
+                      , localPosition = vec3 0 8 0
+                      , normal = vec3 0 1 0
+                      , tangent = vec3 1 0 0
+                      }
+                    ]
+                , boundingBoxes =
+                    [ { min = vec3 -50 -4 -10, max = vec3 50 8 10 } ]
+                }
+
+        "32125" ->
+            -- Technic Rotor 3 Blade Small
+            Just
+                { part = "32125.dat"
+                , connections =
+                    [ studAt 1 (vec3 0 0 30)
+                    , studAt 2 (vec3 0 0 40)
+                    , studAt 3 (vec3 25.98 0 -15)
+                    , studAt 4 (vec3 34.64 0 -20)
+                    , studAt 5 (vec3 -25.98 0 -15)
+                    , studAt 6 (vec3 -34.64 0 -20)
+                    , antiStudAt 100 (vec3 0 8 30)
+                    , antiStudAt 101 (vec3 0 8 40)
+                    , antiStudAt 102 (vec3 25.98 8 -15)
+                    , antiStudAt 103 (vec3 34.64 8 -20)
+                    , antiStudAt 104 (vec3 -25.98 8 -15)
+                    , antiStudAt 105 (vec3 -34.64 8 -20)
+                    , { id = 200
+                      , connType = TechnicAxleFemale { length = 8.0 }
+                      , localPosition = vec3 0 4 0
+                      , normal = vec3 0 1 0
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 201
+                      , connType = TechnicAxleFemale { length = 8.0 }
+                      , localPosition = vec3 0 0 0
+                      , normal = vec3 0 -1 0
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 202
+                      , connType = TechnicAxleFemale { length = 8.0 }
+                      , localPosition = vec3 0 8 0
+                      , normal = vec3 0 1 0
+                      , tangent = vec3 1 0 0
+                      }
+                    ]
+                , boundingBoxes =
+                    [ { min = vec3 -50 -4 -50, max = vec3 50 8 50 } ]
+                }
+
+        "99009" ->
+            -- Technic Turntable 28 Tooth Bottom
+            let
+                pinHoles =
+                    [ { id = 1
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 20 20 0
+                      , normal = vec3 0 0 1
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 2
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 -20 20 0
+                      , normal = vec3 0 0 1
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 3
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 20 20 0
+                      , normal = vec3 0 0 -1
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 4
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 -20 20 0
+                      , normal = vec3 0 0 -1
+                      , tangent = vec3 1 0 0
+                      }
+                    ]
+            in
+            Just
+                { part = "99009.dat"
+                , connections = pinHoles
+                , boundingBoxes =
+                    [ { min = vec3 -35 -4 -35, max = vec3 35 24 35 } ]
+                }
+
+        "99010" ->
+            -- Technic Turntable 28 Tooth Top
+            let
+                pinHoles =
+                    [ { id = 1
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 20 -20 0
+                      , normal = vec3 0 0 1
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 2
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 -20 -20 0
+                      , normal = vec3 0 0 1
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 3
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 20 -20 0
+                      , normal = vec3 0 0 -1
+                      , tangent = vec3 1 0 0
+                      }
+                    , { id = 4
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 -20 -20 0
+                      , normal = vec3 0 0 -1
+                      , tangent = vec3 1 0 0
+                      }
+                    ]
+            in
+            Just
+                { part = "99010.dat"
+                , connections = pinHoles
+                , boundingBoxes =
+                    [ { min = vec3 -35 -24 -35, max = vec3 35 4 35 } ]
                 }
 
         "4085" ->

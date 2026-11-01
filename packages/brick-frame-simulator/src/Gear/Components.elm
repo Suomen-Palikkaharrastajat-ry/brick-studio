@@ -59,6 +59,7 @@ defaultSpecs =
     , { partFile = "3673.dat", kind = AxleLike }
     , { partFile = "3749.dat", kind = AxleLike }
     , { partFile = "4274.dat", kind = AxleLike }
+    , { partFile = "89678.dat", kind = AxleLike }
     , { partFile = "6558.dat", kind = AxleLike }
     , { partFile = "43093.dat", kind = AxleLike }
     , -- Common beams and liftarms
