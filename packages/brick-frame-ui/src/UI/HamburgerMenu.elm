@@ -1,4 +1,4 @@
-module UI.HamburgerMenu exposing (Config, Item, view)
+module UI.HamburgerMenu exposing (Config, Item, view, viewWithLanguage)
 
 {-| The top-left menu of the minimal apps (Brick Play): one
 hamburger button that opens a small dropdown of actions, each with its keyboard
@@ -19,6 +19,7 @@ covers the whole window.
 import Html exposing (Html, button, div, span, text)
 import Html.Attributes as Attr
 import Html.Events exposing (onClick)
+import I18n exposing (Language(..))
 import UI.Icon as Icon
 
 
@@ -44,17 +45,17 @@ type alias Config msg =
     }
 
 
-{-| The hamburger button, and the panel and backdrop while the menu is open.
+{-| The hamburger button, and the panel and backdrop while the menu is open, using the specified language.
 -}
-view : Config msg -> Html msg
-view config =
+viewWithLanguage : Language -> Config msg -> Html msg
+viewWithLanguage lang config =
     div
         [ Attr.style "position" "relative"
         , Attr.style "pointer-events" "auto"
         ]
-        (hamburgerButton config
+        (hamburgerButton lang config
             :: (if config.open then
-                    [ backdrop config.onClose, panel config ]
+                    [ backdrop config.onClose, panel lang config ]
 
                 else
                     []
@@ -62,12 +63,19 @@ view config =
         )
 
 
-hamburgerButton : Config msg -> Html msg
-hamburgerButton config =
+{-| The hamburger button, and the panel and backdrop while the menu is open. Defaults to English.
+-}
+view : Config msg -> Html msg
+view =
+    viewWithLanguage En
+
+
+hamburgerButton : Language -> Config msg -> Html msg
+hamburgerButton lang config =
     button
         [ onClick config.onToggle
-        , Attr.attribute "aria-label" "Menu"
-        , Attr.title "Menu"
+        , Attr.attribute "aria-label" (I18n.headerMenu lang)
+        , Attr.title (I18n.headerMenu lang)
         , Attr.class "touch-target"
         , Attr.attribute "aria-haspopup" "menu"
         , Attr.attribute "aria-expanded"
@@ -111,12 +119,12 @@ backdrop onClose =
         []
 
 
-panel : Config msg -> Html msg
-panel config =
+panel : Language -> Config msg -> Html msg
+panel lang config =
     div
         [ Attr.id config.id
         , Attr.attribute "role" "menu"
-        , Attr.attribute "aria-label" "Menu"
+        , Attr.attribute "aria-label" (I18n.headerMenu lang)
         , Attr.style "position" "absolute"
         , Attr.style "top" "calc(100% + 0.375rem)"
         , Attr.style "left" "0"

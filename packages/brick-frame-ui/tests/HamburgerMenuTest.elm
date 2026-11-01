@@ -6,6 +6,7 @@ picture card (`UI.PartCard.compactView`).
 
 import Expect
 import Html.Attributes as Attr
+import I18n exposing (Language(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Event as Event
 import Test.Html.Query as Query
@@ -64,6 +65,11 @@ suite =
                         , \_ -> html |> Query.findAll [ attr "role" "menu" ] |> Query.count (Expect.equal 0)
                         ]
                         ()
+            , test "viewWithLanguage Fi: hamburger reports Valikko" <|
+                \_ ->
+                    Query.fromHtml (HamburgerMenu.viewWithLanguage Fi (menuConfig False))
+                        |> Query.find [ attr "aria-haspopup" "menu", attr "aria-expanded" "false" ]
+                        |> Query.has [ attr "aria-label" "Valikko" ]
             , test "open: the panel lists each item as a menuitem with its shortcut" <|
                 \_ ->
                     let
