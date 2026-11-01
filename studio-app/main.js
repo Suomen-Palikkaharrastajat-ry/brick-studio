@@ -11,6 +11,25 @@ const siteRoot = new URL(import.meta.env.VITE_SITE_ROOT ?? '../', window.locatio
 const DRAFT_KEY = 'palikkakehys-studio-draft'
 const FAVORITES_KEY = 'palikkakehys-studio-favorites'
 const RECENTS_KEY = 'palikkakehys-studio-recents'
+const LANGUAGE_KEY = 'palikkakehys.language'
+
+function readLanguage() {
+  try {
+    const urlParams = new URLSearchParams(window.location.search)
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    const fromUrl = urlParams.get('lang') || hashParams.get('lang')
+    if (fromUrl) {
+      return fromUrl.toLowerCase().startsWith('en') ? 'en' : 'fi'
+    }
+    const stored = window.localStorage.getItem(LANGUAGE_KEY)
+    if (stored) {
+      return stored.toLowerCase().startsWith('en') ? 'en' : 'fi'
+    }
+    return 'fi'
+  } catch (_) {
+    return 'fi'
+  }
+}
 
 function readStorage(key, fallback = null) {
   try {
@@ -59,7 +78,7 @@ const runtime = initBricksRuntime({
   ldrawFallbackBase: import.meta.env.VITE_LDRAW_FALLBACK_BASE ?? '',
   defaultModel: model,
   loadModelInJs: true,
-  extraFlags: { draft, favorites, recentParts, playBaseUrl },
+  extraFlags: { draft, favorites, recentParts, playBaseUrl, language: readLanguage() },
   initialHash: window.location.hash ?? '',
   syncUrlHash: true,
   useWindowResize: true,
@@ -131,6 +150,12 @@ ports.saveFavorites?.subscribe((favs) => {
 
 ports.saveRecents?.subscribe((recents) => {
   writeStorage(RECENTS_KEY, recents)
+})
+
+ports.storeLanguage?.subscribe((lang) => {
+  try {
+    window.localStorage.setItem(LANGUAGE_KEY, lang)
+  } catch (_) {}
 })
 
 // Thumbnail rendering pipeline & IndexedDB caching (palette cards)

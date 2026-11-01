@@ -12,6 +12,7 @@ import Gear.Phase as Phase
 import Gear.Types exposing (GearInstance)
 import Html.Attributes as HtmlAttr
 import Http
+import I18n exposing (Language(..))
 import LDraw.Connectivity as Connectivity exposing (CollisionMode(..))
 import LDraw.Document as Document
 import LDraw.Export as Export
@@ -65,6 +66,7 @@ flags =
     , favorites = Nothing
     , recentParts = Nothing
     , playBaseUrl = Nothing
+    , language = Just "en"
     }
 
 
@@ -90,6 +92,7 @@ suite =
         , viewDragSuite
         , commitSuite
         , glueSuite
+        , i18nSuite
         , test "starts with an empty document that is ready to show" <|
             \_ ->
                 Expect.all
@@ -4138,4 +4141,58 @@ glueSuite =
                         |> positionOf 2
                         |> Expect.equal (Just 20)
             ]
+        ]
+
+
+i18nSuite : Test
+i18nSuite =
+    describe "Internationalization (i18n)"
+        [ test "initializes with Finnish (Fi) by default when language flag is Nothing" <|
+            \_ ->
+                let
+                    ( model, _ ) =
+                        Workspace.init { flags | language = Nothing }
+                in
+                Expect.equal Fi model.language
+        , test "initializes with English (En) when language flag is Just 'en'" <|
+            \_ ->
+                let
+                    ( model, _ ) =
+                        Workspace.init { flags | language = Just "en" }
+                in
+                Expect.equal En model.language
+        , test "SetLanguage switches model language" <|
+            \_ ->
+                let
+                    ( model0, _ ) =
+                        Workspace.init { flags | language = Just "fi" }
+
+                    ( model1, _ ) =
+                        Workspace.update (SetLanguage En) model0
+                in
+                Expect.equal En model1.language
+        , test "header renders language toggle button" <|
+            \_ ->
+                let
+                    ( model, _ ) =
+                        Workspace.init { flags | language = Just "fi" }
+                in
+                model
+                    |> step (WindowSized 1280 800)
+                    |> Workspace.view
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.attribute (HtmlAttr.id "language-toggle-button") ]
+                    |> Query.has [ Selector.text "FI" ]
+        , test "header renders export button with localized title in Finnish" <|
+            \_ ->
+                let
+                    ( model, _ ) =
+                        Workspace.init { flags | language = Just "fi" }
+                in
+                model
+                    |> step (WindowSized 1280 800)
+                    |> Workspace.view
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.attribute (HtmlAttr.id "export-button") ]
+                    |> Query.has [ Selector.attribute (HtmlAttr.title "Vie") ]
         ]

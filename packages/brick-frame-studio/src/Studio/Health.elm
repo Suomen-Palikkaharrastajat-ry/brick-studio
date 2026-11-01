@@ -4,6 +4,7 @@ module Studio.Health exposing
     , Issue(..)
     , check
     , describe
+    , describeIn
     , plan
     )
 
@@ -52,6 +53,7 @@ the same plan.
 -}
 
 import Dict exposing (Dict)
+import I18n exposing (Language(..))
 import LDraw.Connectivity as Connectivity exposing (ConnectionType(..), OBB, PartConnectivity)
 import LDraw.Document as Document exposing (Document)
 import LDraw.Resolve exposing (PartCache, PartStatus(..))
@@ -220,9 +222,17 @@ plan cache doc glued issues =
 {-| A sentence for a fix, such as "Move 1 x 1 brick half a stud" or "Lift
 2 x 4 brick out of another brick". `titleOf` gives a part's readable name from
 its file name and colour, and `doc` is the document the fix was planned on.
+Defaults to English.
 -}
 describe : (String -> Int -> String) -> Document -> Fix -> String
-describe titleOf doc fix =
+describe =
+    describeIn En
+
+
+{-| A sentence for a fix in the requested language.
+-}
+describeIn : Language -> (String -> Int -> String) -> Document -> Fix -> String
+describeIn lang titleOf doc fix =
     let
         name =
             case Document.getPlacement fix.placement doc of
@@ -230,14 +240,30 @@ describe titleOf doc fix =
                     titleOf placement.part placement.color
 
                 Nothing ->
-                    "part"
+                    case lang of
+                        Fi ->
+                            "palikka"
+
+                        En ->
+                            "part"
     in
     case fix.reason of
         LiftOut _ ->
-            "Lift " ++ name ++ " out of another brick"
+            I18n.healthLiftOut lang name
 
         SnapToStud ->
-            "Move " ++ name ++ " " ++ snapAmount (originShift fix.from fix.to)
+            let
+                shift =
+                    originShift fix.from fix.to
+            in
+            if abs (shift - 10) <= 1 then
+                I18n.healthMoveHalfStud lang name
+
+            else if shift < 9 then
+                I18n.healthMoveFewLdu lang name
+
+            else
+                I18n.healthMoveOntoStuds lang name
 
 
 misalignedId : Issue -> Maybe Int

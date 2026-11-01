@@ -21,6 +21,24 @@ const allowedWorkerModes = new Set(['auto', 'inline', 'external', 'off'])
 const GEOMETRY_FLATTEN_CACHE_LIMIT = 8
 const RESIZE_POLL_INTERVAL_MS = 250
 
+// GitHub Pages serves .mpd files with Content-Type: application/dash+xml.
+// In Firefox, XMLHttpRequest triggers its native XML parser on any +xml MIME type,
+// logging "XML Parsing Error: syntax error" in the console when parsing plain-text LDraw MPD files.
+// Overriding the MIME type to text/plain silences the spurious XML parser warning.
+if (typeof window !== 'undefined' && window.XMLHttpRequest && !window.__ldrawMpdMimePatched) {
+  window.__ldrawMpdMimePatched = true
+  const origOpen = window.XMLHttpRequest.prototype.open
+  window.XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+    const res = origOpen.call(this, method, url, ...rest)
+    if (typeof url === 'string' && (url.endsWith('.mpd') || url.includes('.mpd?') || url.includes('.mpd#'))) {
+      try {
+        this.overrideMimeType('text/plain')
+      } catch {}
+    }
+    return res
+  }
+}
+
 function normalizeMode(rawMode) {
   return String(rawMode ?? '').toLowerCase() === 'viewer' ? 'viewer' : 'simulator'
 }

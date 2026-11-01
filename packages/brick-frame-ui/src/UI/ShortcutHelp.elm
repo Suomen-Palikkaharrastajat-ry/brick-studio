@@ -1,4 +1,4 @@
-module UI.ShortcutHelp exposing (Config, view)
+module UI.ShortcutHelp exposing (Config, view, viewWithLanguage)
 
 {-| The keyboard shortcut reference dialog.
 
@@ -13,6 +13,7 @@ the id `shortcut-help-close` so the host can move focus there on open.
 import Html exposing (Html, button, dd, div, dl, dt, h2, h3, kbd, text)
 import Html.Attributes as Attr
 import Html.Events
+import I18n exposing (Language(..))
 import UI.Icon as Icon
 import UI.Theme as Theme
 import UI.Touch as Touch
@@ -26,14 +27,17 @@ type alias Config msg =
     }
 
 
-{-| The keyboard shortcut reference.
-
-Content comes from `Viewport.Shortcuts.helpRows` so it cannot drift away from the
-bindings it documents.
-
+{-| The keyboard shortcut reference with English defaults.
 -}
 view : Config msg -> Html msg
-view config =
+view =
+    viewWithLanguage En
+
+
+{-| The keyboard shortcut reference rendered in the given language.
+-}
+viewWithLanguage : Language -> Config msg -> Html msg
+viewWithLanguage lang config =
     div
         [ Attr.attribute "role" "dialog"
         , Attr.attribute "aria-modal" "true"
@@ -67,13 +71,13 @@ view config =
                 , Attr.style "font-weight" "600"
                 , Attr.style "font-size" "13px"
                 ]
-                [ text "Keyboard shortcuts" ]
+                [ text (I18n.shortcutsDialogTitle lang) ]
             , button
                 [ Attr.id "shortcut-help-close"
                 , Html.Events.onClick config.onClose
                 , Touch.onTap config.onClose
-                , Attr.title "Close (Esc)"
-                , Attr.attribute "aria-label" "Close"
+                , Attr.title (I18n.shortcutsClose lang ++ " (Esc)")
+                , Attr.attribute "aria-label" (I18n.shortcutsClose lang)
                 , Attr.style "padding" "2px 4px"
                 , Attr.style "background" "transparent"
                 , Attr.style "color" Theme.textMuted
@@ -93,7 +97,7 @@ view config =
             [ Attr.style "margin-top" "12px"
             , Attr.style "color" Theme.textMuted
             ]
-            [ text "Street level flies through walls — there is no collision." ]
+            [ text (I18n.shortcutsFootnote lang) ]
         ]
 
 

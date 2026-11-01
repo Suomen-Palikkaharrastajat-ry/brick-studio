@@ -344,7 +344,7 @@ view model =
         Just modal ->
             div []
                 [ pageContent
-                , SnapshotModal.view
+                , SnapshotModal.viewWithLanguage model.workspace.language
                     { onSave = SnapshotSave
                     , onClose = SnapshotClose
                     }

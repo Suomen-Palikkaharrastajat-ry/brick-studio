@@ -47,6 +47,7 @@ import Html exposing (Html, button, div, span, text)
 import Html.Attributes as Attr
 import Html.Events
 import Http
+import I18n exposing (Language(..))
 import Json.Decode as Decode
 import LDraw.BOM as BOM exposing (ModelBOM)
 import LDraw.Catalog as Catalog exposing (ElementCatalog, PartIndex)
@@ -133,6 +134,7 @@ type alias Flags =
     , favorites : Maybe (List String)
     , recentParts : Maybe (List String)
     , playBaseUrl : Maybe String
+    , language : Maybe String
     }
 
 
@@ -209,6 +211,7 @@ type alias Model =
     , cameraSheet : Bool
     , fineMove : Bool
     , clipboard : Maybe { items : List Edit.NewPart, pasteCount : Int }
+    , language : Language
     }
 
 
@@ -340,6 +343,7 @@ type Msg
     | TurnSelection { direction : StudioShortcuts.TurnDirection, fortyFive : Bool }
     | Request Msg
     | MenuPick Msg
+    | SetLanguage Language
     | NoOp
 
 
@@ -425,6 +429,7 @@ init flags =
             , cameraSheet = False
             , fineMove = False
             , clipboard = Nothing
+            , language = Maybe.map I18n.fromString flags.language |> Maybe.withDefault I18n.defaultLanguage
             }
 
         ( opened, openCmd ) =
@@ -1433,7 +1438,7 @@ updatePage msg model =
             in
             ( { model
                 | exportMenuOpen = False
-                , toast = Just { message = "Link copied to clipboard!", timerId = nextTimerId }
+                , toast = Just { message = I18n.linkCopied model.language, timerId = nextTimerId }
                 , toastCounter = nextTimerId
               }
             , Cmd.batch
@@ -1452,7 +1457,7 @@ updatePage msg model =
             in
             ( { model
                 | exportMenuOpen = False
-                , toast = Just { message = "Link copied to clipboard!", timerId = nextTimerId }
+                , toast = Just { message = I18n.linkCopied model.language, timerId = nextTimerId }
                 , toastCounter = nextTimerId
               }
             , Cmd.batch
@@ -2102,6 +2107,11 @@ updatePage msg model =
 
         MenuPick inner ->
             update inner { model | exportMenuOpen = False }
+
+        SetLanguage lang ->
+            ( { model | language = lang }
+            , Ports.storeLanguage (I18n.toString lang)
+            )
 
         Request inner ->
             ( model, Task.perform identity (Task.succeed inner) )
@@ -5843,7 +5853,7 @@ overlay model =
                         , Html.Events.onClick ToggleHelp
                         ]
                         []
-                    , ShortcutHelp.view
+                    , ShortcutHelp.viewWithLanguage model.language
                         { rows = helpRows
                         , onClose = ToggleHelp
                         }
@@ -6022,9 +6032,9 @@ viewHeader model =
 
           else
             group "File"
-                [ action FeatherIcons.filePlus "New" Nothing NewDocument
-                , action FeatherIcons.folder "Open" (Just "Ctrl O") RequestFileUpload
-                , action FeatherIcons.save "Save" (Just "Ctrl S") Save
+                [ action FeatherIcons.filePlus (I18n.headerNew model.language) Nothing NewDocument
+                , action FeatherIcons.folder (I18n.headerOpen model.language) (Just "Ctrl O") RequestFileUpload
+                , action FeatherIcons.save (I18n.headerSave model.language) (Just "Ctrl S") Save
                 , button
                     [ Attr.type_ "button"
                     , Attr.id "export-button"
@@ -6033,7 +6043,7 @@ viewHeader model =
                     , Attr.attribute "aria-expanded" (boolAttr model.exportMenuOpen)
                     , Attr.attribute "aria-haspopup" "true"
                     , Attr.attribute "aria-controls" "export-menu"
-                    , Attr.title "Export"
+                    , Attr.title (I18n.headerExport model.language)
                     , Attr.style "display" "inline-flex"
                     , Attr.style "align-items" "center"
                     , Attr.style "gap" "6px"
@@ -6063,10 +6073,10 @@ viewHeader model =
                     , Attr.style "cursor" "pointer"
                     ]
                     (if narrow then
-                        [ featherIcon FeatherIcons.share, span [ Attr.class "sr-only" ] [ text "Export" ] ]
+                        [ featherIcon FeatherIcons.share, span [ Attr.class "sr-only" ] [ text (I18n.headerExport model.language) ] ]
 
                      else
-                        [ featherIcon FeatherIcons.share, text "Export", featherIcon FeatherIcons.chevronDown ]
+                        [ featherIcon FeatherIcons.share, text (I18n.headerExport model.language), featherIcon FeatherIcons.chevronDown ]
                     )
                 ]
         , if narrow then
@@ -6081,7 +6091,7 @@ viewHeader model =
             group "Model"
                 [ Button.icon
                     { icon = featherIcon FeatherIcons.sun
-                    , label = "Realistic"
+                    , label = I18n.headerRealistic model.language
                     , shortcut = Nothing
                     , pressed = Just (model.renderQuality == Style.Realistic)
                     , enabled = True
@@ -6089,18 +6099,52 @@ viewHeader model =
                     }
                     ToggleRenderQuality
                 , action FeatherIcons.list
-                    ("Parts list ("
+                    (I18n.menuPartsList model.language
+                        ++ " ("
                         ++ String.fromInt (List.length (Document.placements model.document))
                         ++ ")"
                     )
                     (Just "B")
                     ToggleBOM
-                , action FeatherIcons.bookOpen "Instructions" (Just "I") InstructionsRequested
-                , simulateButton narrow
+                , action FeatherIcons.bookOpen (I18n.headerInstructions model.language) (Just "I") InstructionsRequested
+                , simulateButton model.language narrow
+                ]
+        , if narrow then
+            text ""
+
+          else
+            button
+                [ Attr.type_ "button"
+                , Attr.id "language-toggle-button"
+                , Attr.class "ui-button touch-target"
+                , Html.Events.onClick (SetLanguage (toggleLanguage model.language))
+                , Attr.attribute "aria-label" (I18n.languageChoicePrompt model.language)
+                , Attr.title (I18n.languageChoicePrompt model.language)
+                , Attr.style "display" "inline-flex"
+                , Attr.style "align-items" "center"
+                , Attr.style "justify-content" "center"
+                , Attr.style "height" "36px"
+                , Attr.style "padding" "0 10px"
+                , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+                , Attr.style "border-radius" "6px"
+                , Attr.style "background" Theme.panelSubtleBackground
+                , Attr.style "color" Theme.textPrimary
+                , Attr.style "font-size" "12px"
+                , Attr.style "font-weight" "600"
+                , Attr.style "cursor" "pointer"
+                ]
+                [ text
+                    (case model.language of
+                        Fi ->
+                            "FI"
+
+                        En ->
+                            "EN"
+                    )
                 ]
         , if narrow then
             div [ Attr.style "display" "flex", Attr.style "gap" "6px", Attr.style "flex" "none" ]
-                [ simulateButton narrow
+                [ simulateButton model.language narrow
                 , button
                     [ Attr.type_ "button"
                     , Attr.id "export-button"
@@ -6109,8 +6153,8 @@ viewHeader model =
                     , Attr.attribute "aria-expanded" (boolAttr model.exportMenuOpen)
                     , Attr.attribute "aria-haspopup" "true"
                     , Attr.attribute "aria-controls" "export-menu"
-                    , Attr.attribute "aria-label" "More actions"
-                    , Attr.title "More actions"
+                    , Attr.attribute "aria-label" (I18n.headerMoreActions model.language)
+                    , Attr.title (I18n.headerMoreActions model.language)
                     , Attr.style "display" "inline-flex"
                     , Attr.style "align-items" "center"
                     , Attr.style "justify-content" "center"
@@ -6137,15 +6181,27 @@ viewHeader model =
         ]
 
 
+{-| Toggle between Finnish and English.
+-}
+toggleLanguage : Language -> Language
+toggleLanguage lang =
+    case lang of
+        Fi ->
+            En
+
+        En ->
+            Fi
+
+
 {-| The header's leading action, in the dark brand colour.
 -}
-simulateButton : Bool -> Html Msg
-simulateButton narrow =
+simulateButton : Language -> Bool -> Html Msg
+simulateButton lang narrow =
     button
         [ Attr.type_ "button"
         , Attr.class "ui-button touch-target"
         , Html.Events.onClick SimulateRequested
-        , Attr.title "Simulate gears (P)"
+        , Attr.title (I18n.headerSimulateGears lang)
         , Attr.attribute "aria-keyshortcuts" "P"
         , Attr.style "display" "inline-flex"
         , Attr.style "align-items" "center"
@@ -6169,10 +6225,10 @@ simulateButton narrow =
         , Attr.style "cursor" "pointer"
         ]
         (if narrow then
-            [ featherIcon FeatherIcons.play, span [ Attr.class "sr-only" ] [ text "Simulate" ] ]
+            [ featherIcon FeatherIcons.play, span [ Attr.class "sr-only" ] [ text (I18n.headerSimulate lang) ] ]
 
          else
-            [ featherIcon FeatherIcons.play, text "Simulate" ]
+            [ featherIcon FeatherIcons.play, text (I18n.headerSimulate lang) ]
         )
 
 
@@ -6226,25 +6282,43 @@ viewExportMenu model =
         -- actions live at the top of this menu.
         documentItems =
             if narrow then
-                [ sectionTitle "Document"
-                , item NewDocument "New" "Start an empty model"
-                , item RequestFileUpload "Open…" "An .ldr, .mpd or .io file"
-                , item Save "Save" "Download the model as .ldr"
-                , item ToggleBOM ("Parts list (" ++ String.fromInt (List.length (Document.placements model.document)) ++ ")") "Every part, with BrickLink export"
-                , item InstructionsRequested "Instructions" "Step-by-step building pages"
+                [ sectionTitle (I18n.headerMenu model.language)
+                , item NewDocument (I18n.menuNewDocument model.language) (I18n.menuNewDocumentDesc model.language)
+                , item RequestFileUpload (I18n.menuOpenFile model.language) (I18n.menuOpenFileDesc model.language)
+                , item Save (I18n.menuSaveModel model.language) (I18n.menuSaveModelDesc model.language)
+                , item ToggleBOM (I18n.menuPartsList model.language ++ " (" ++ String.fromInt (List.length (Document.placements model.document)) ++ ")") (I18n.menuPartsListDesc model.language)
+                , item InstructionsRequested (I18n.menuInstructions model.language) (I18n.menuInstructionsDesc model.language)
                 , item ToggleRenderQuality
                     (if model.renderQuality == Style.Realistic then
-                        "Draft rendering"
+                        I18n.menuDraftRendering model.language
 
                      else
-                        "Realistic rendering"
+                        I18n.menuRealisticRendering model.language
                     )
-                    "Glossy highlights and stronger light, slower"
-                , sectionTitle "Export"
+                    (I18n.menuRenderQualityDesc model.language)
+                , item (SetLanguage (toggleLanguage model.language))
+                    (case model.language of
+                        Fi ->
+                            "Kieli: Suomi (In English)"
+
+                        En ->
+                            "Language: English (Suomeksi)"
+                    )
+                    (I18n.languageChoicePrompt model.language)
+                , sectionTitle (I18n.headerExport model.language)
                 ]
 
             else
-                []
+                [ item (SetLanguage (toggleLanguage model.language))
+                    (case model.language of
+                        Fi ->
+                            "Kieli: Suomi (In English)"
+
+                        En ->
+                            "Language: English (Suomeksi)"
+                    )
+                    (I18n.languageChoicePrompt model.language)
+                ]
 
         item msg label description =
             button
@@ -6315,7 +6389,7 @@ viewExportMenu model =
                     [ Attr.type_ "button"
                     , Attr.class "ui-button touch-target"
                     , Html.Events.onClick (MenuPick copyMsg)
-                    , Attr.title "Copy link to clipboard"
+                    , Attr.title (I18n.menuCopyLinkTitle model.language)
                     , Attr.style "font-size" "11px"
                     , Attr.style "font-weight" "500"
                     , Attr.style "padding" "4px 8px"
@@ -6326,7 +6400,7 @@ viewExportMenu model =
                     , Attr.style "cursor" "pointer"
                     , Attr.style "white-space" "nowrap"
                     ]
-                    [ text "Copy Link" ]
+                    [ text (I18n.menuCopyLink model.language) ]
                 ]
     in
     div
@@ -6335,10 +6409,10 @@ viewExportMenu model =
         , Attr.attribute "role" "group"
         , Attr.attribute "aria-label"
             (if narrow then
-                "More actions"
+                I18n.headerMoreActions model.language
 
              else
-                "Export formats"
+                I18n.headerExport model.language
             )
         , Attr.class "scroll-thin"
         , Attr.style "max-height" "calc(100% - 80px)"
@@ -6366,14 +6440,14 @@ viewExportMenu model =
         , Attr.style "z-index" "30"
         ]
         (documentItems
-            ++ [ item (ExportFormat Export.GlTFBinary) "glTF (.glb)" "For three.js, Blender and most 3D tools"
-               , item (ExportFormat Export.BlenderScript) "Blender script (.py)" "Rebuilds the model with bevelled parts"
-               , item (ExportFormat Export.UsdzArchive) "AR model (.usdz)" "Quick Look on iPhone and iPad"
-               , item CaptureSnapshot "Picture (.png)" "A 1080p render of the current view"
+            ++ [ item (ExportFormat Export.GlTFBinary) (I18n.menuExportGltf model.language) (I18n.menuExportGltfDesc model.language)
+               , item (ExportFormat Export.BlenderScript) (I18n.menuExportBlender model.language) (I18n.menuExportBlenderDesc model.language)
+               , item (ExportFormat Export.UsdzArchive) (I18n.menuExportUsdz model.language) (I18n.menuExportUsdzDesc model.language)
+               , item CaptureSnapshot (I18n.menuPicturePng model.language) (I18n.menuPicturePngDesc model.language)
                ]
-            ++ [ sectionTitle "Send to App"
-               , appItem playUrl CopyPlayUrl "Brick Play" ("Free build with this kit of " ++ String.fromInt pieceCount ++ " " ++ pieceWord)
-               , appItem playModelUrl CopyPlayModelUrl "Brick Play with model" ("Simulate & test mechanisms with these " ++ String.fromInt pieceCount ++ " " ++ pieceWord)
+            ++ [ sectionTitle (I18n.menuSendToApp model.language)
+               , appItem playUrl CopyPlayUrl (I18n.menuBrickPlay model.language) (I18n.menuBrickPlayDesc model.language { count = pieceCount })
+               , appItem playModelUrl CopyPlayModelUrl (I18n.menuBrickPlayModel model.language) (I18n.menuBrickPlayModelDesc model.language { count = pieceCount })
                ]
         )
 

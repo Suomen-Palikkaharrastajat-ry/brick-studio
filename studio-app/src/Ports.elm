@@ -19,6 +19,7 @@ port module Ports exposing
     , snapshotFailed
     , snapshotProgress
     , snapshotReady
+    , storeLanguage
     , thumbnailLoaded
     , viewportResized
     )
@@ -145,3 +146,8 @@ port requestThumbnails : List { file : String, color : Int, rgb : List Float } -
 {-| Receive generated or cached thumbnail image data URL from IndexedDB.
 -}
 port thumbnailLoaded : ({ file : String, color : Int, url : String } -> msg) -> Sub msg
+
+
+{-| Persist language preference to localStorage.
+-}
+port storeLanguage : String -> Cmd msg

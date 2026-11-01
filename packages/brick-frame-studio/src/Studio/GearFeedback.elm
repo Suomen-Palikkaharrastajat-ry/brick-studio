@@ -2,8 +2,10 @@ module Studio.GearFeedback exposing
     ( GearFeedback
     , GearRelation(..)
     , feedbackText
+    , feedbackTextIn
     , gearFeedback
     , pill
+    , pillIn
     )
 
 {-| Positioning feedback for a single selected gear: how it sits against its
@@ -24,6 +26,7 @@ import Gear.Detect as Detect
 import Gear.Types exposing (GearInstance, GearSpec)
 import Html exposing (Html, div, text)
 import Html.Attributes as Attr
+import I18n exposing (Language(..))
 import LDraw.Document as Document exposing (Document, Placement)
 import Math.Matrix4 as Mat4
 import Math.Vector3 as Vec3
@@ -181,49 +184,59 @@ gearSpecFor file =
     List.head (List.filter (\spec -> spec.partFile == file) Data.gearParts)
 
 
-{-| A short status line for the feedback pill, e.g.
-`"24T ↔ 24T: 40 LDU apart — needs 60"` or `"Meshes with 24T ✓"`.
+{-| A short status line for the feedback pill with English defaults.
 -}
 feedbackText : GearFeedback -> String
-feedbackText feedback =
+feedbackText =
+    feedbackTextIn En
+
+
+{-| A short status line for the feedback pill in the requested language, e.g.
+`"24T ↔ 24T: 40 LDU apart — needs 60"` or `"Meshes with 24T ✓"`.
+-}
+feedbackTextIn : Language -> GearFeedback -> String
+feedbackTextIn lang feedback =
     let
         other =
             Maybe.withDefault "?" feedback.other
-
-        pair =
-            feedback.gear ++ " ↔ " ++ other ++ ": "
 
         ldu x =
             String.fromInt (round x)
     in
     case feedback.relation of
         Meshes ->
-            "Meshes with " ++ other ++ " ✓"
+            I18n.gearMeshesWith lang other
 
         TooFar { distance, required } ->
-            pair ++ ldu distance ++ " LDU apart — needs " ++ ldu required
+            I18n.gearApartNeeds lang { gear = feedback.gear, other = other, dist = ldu distance, req = ldu required }
 
         TooClose { distance, required } ->
-            pair ++ ldu distance ++ " LDU apart — needs " ++ ldu required
+            I18n.gearApartNeeds lang { gear = feedback.gear, other = other, dist = ldu distance, req = ldu required }
 
         NotParallel ->
-            pair ++ "axles not parallel"
+            I18n.gearNotParallel lang { gear = feedback.gear, other = other }
 
         NotPerpendicular ->
-            pair ++ "axles must be at right angles"
+            I18n.gearNotPerpendicular lang { gear = feedback.gear, other = other }
 
         NotSamePlane { offset } ->
-            pair ++ "not in the same plane (offset " ++ ldu offset ++ ")"
+            I18n.gearNotSamePlane lang { gear = feedback.gear, other = other, offset = ldu offset }
 
         NoOtherGear ->
-            feedback.gear ++ ": add another gear to mesh with"
+            I18n.gearNoOtherGear lang feedback.gear
 
 
-{-| The status pill for the feedback: a rounded line of text that turns to the
-brand yellow border and text once the gear meshes. The host positions it.
+{-| The status pill for the feedback with English defaults.
 -}
 pill : GearFeedback -> Html msg
-pill feedback =
+pill =
+    pillIn En
+
+
+{-| The status pill for the feedback in the requested language.
+-}
+pillIn : Language -> GearFeedback -> Html msg
+pillIn lang feedback =
     let
         meshes =
             feedback.relation == Meshes
@@ -259,4 +272,4 @@ pill feedback =
         , Attr.style "text-overflow" "ellipsis"
         , Attr.style "font-variant-numeric" "tabular-nums"
         ]
-        [ text (feedbackText feedback) ]
+        [ text (feedbackTextIn lang feedback) ]

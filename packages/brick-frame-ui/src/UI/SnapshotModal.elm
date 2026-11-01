@@ -11,6 +11,7 @@ module UI.SnapshotModal exposing
     , setProgress
     , setReady
     , view
+    , viewWithLanguage
     )
 
 {-| Full-screen modal for capturing, previewing, and saving a snapshot of the
@@ -27,6 +28,7 @@ can close the modal at any time, whether or not the image has been saved.
 import Html exposing (Html, button, div, h2, img, p, span, text)
 import Html.Attributes as Attr
 import Html.Events
+import I18n exposing (Language(..))
 import UI.Button as Button
 import UI.Icon as Icon
 import UI.Theme as Theme
@@ -154,14 +156,21 @@ markSaved model =
             model
 
 
-{-| Render the modal overlay.
+{-| Render the modal overlay with English defaults.
 -}
 view : Actions msg -> Model -> Html msg
-view actions model =
+view =
+    viewWithLanguage En
+
+
+{-| Render the modal overlay in the given language.
+-}
+viewWithLanguage : Language -> Actions msg -> Model -> Html msg
+viewWithLanguage lang actions model =
     div
         [ Attr.attribute "role" "dialog"
         , Attr.attribute "aria-modal" "true"
-        , Attr.attribute "aria-label" "Snapshot"
+        , Attr.attribute "aria-label" (I18n.snapshotTitle lang)
         , Attr.style "position" "fixed"
         , Attr.style "inset" "0"
         , Attr.style "z-index" "99999"
@@ -188,9 +197,9 @@ view actions model =
             , Attr.style "flex-direction" "column"
             , Attr.style "overflow" "hidden"
             ]
-            [ viewHeader
-            , viewBody model
-            , viewFooter actions model
+            [ viewHeader lang
+            , viewBody lang model
+            , viewFooter lang actions model
             ]
         ]
 
@@ -229,8 +238,8 @@ viewStyles =
         ]
 
 
-viewHeader : Html msg
-viewHeader =
+viewHeader : Language -> Html msg
+viewHeader lang =
     div
         [ Attr.style "padding" "16px 20px"
         , Attr.style "border-bottom" ("1px solid " ++ Theme.borderDefault)
@@ -245,13 +254,13 @@ viewHeader =
                 , Attr.style "font-weight" "600"
                 , Attr.style "letter-spacing" "-0.01em"
                 ]
-                [ text "Snapshot" ]
+                [ text (I18n.snapshotTitle lang) ]
             , p
                 [ Attr.style "margin" "2px 0 0"
                 , Attr.style "font-size" "12px"
                 , Attr.style "color" Theme.textMuted
                 ]
-                [ text "A 1920 × 1080 PNG of the current view" ]
+                [ text (I18n.snapshotSubtitle lang) ]
             ]
         , span
             [ Attr.style "font-size" "11px"
@@ -266,8 +275,8 @@ viewHeader =
         ]
 
 
-viewBody : Model -> Html msg
-viewBody model =
+viewBody : Language -> Model -> Html msg
+viewBody lang model =
     div
         [ Attr.style "padding" "24px 20px"
         , Attr.style "overflow-y" "auto"
@@ -277,18 +286,18 @@ viewBody model =
         ]
         (case model.phase of
             Rendering ->
-                [ viewRendering model.progress ]
+                [ viewRendering lang model.progress ]
 
             Preview data ->
-                [ viewPreview data ]
+                [ viewPreview lang data ]
 
             Failed message ->
                 [ viewFailed message ]
         )
 
 
-viewRendering : Progress -> Html msg
-viewRendering progress =
+viewRendering : Language -> Progress -> Html msg
+viewRendering lang progress =
     let
         percent =
             round (progress.fraction * 100)
@@ -313,7 +322,7 @@ viewRendering progress =
             [ Attr.style "font-size" "15px"
             , Attr.style "font-weight" "600"
             ]
-            [ text ("Path tracing… " ++ String.fromInt progress.samples ++ " samples") ]
+            [ text (I18n.snapshotPathTracing lang progress.samples) ]
         , div
             [ Attr.attribute "role" "progressbar"
             , Attr.attribute "aria-label" "Path tracing progress"
@@ -341,7 +350,7 @@ viewRendering progress =
             , Attr.style "font-size" "13px"
             , Attr.style "color" Theme.textMuted
             ]
-            [ text "Rendering a path-traced image; this takes about 30 seconds." ]
+            [ text (I18n.snapshotRenderNotice lang) ]
         ]
 
 
@@ -371,8 +380,8 @@ viewFailed message =
         ]
 
 
-viewPreview : PreviewData -> Html msg
-viewPreview data =
+viewPreview : Language -> PreviewData -> Html msg
+viewPreview lang data =
     div
         [ Attr.style "display" "flex"
         , Attr.style "flex-direction" "column"
@@ -414,17 +423,17 @@ viewPreview data =
                     , Attr.style "font-weight" "500"
                     ]
                     [ Icon.featherSized 14 "check"
-                    , text "Saved to downloads"
+                    , text (I18n.snapshotSavedNotice lang)
                     ]
 
               else
-                div [] [ text "Ready to save" ]
+                div [] [ text (I18n.snapshotReadyToSave lang) ]
             ]
         ]
 
 
-viewFooter : Actions msg -> Model -> Html msg
-viewFooter actions model =
+viewFooter : Language -> Actions msg -> Model -> Html msg
+viewFooter lang actions model =
     div
         [ Attr.style "padding" "14px 20px"
         , Attr.style "border-top" ("1px solid " ++ Theme.borderDefault)
@@ -441,8 +450,16 @@ viewFooter actions model =
                     [ Attr.style "font-size" "13px"
                     , Attr.style "color" Theme.textMuted
                     ]
-                    [ text "The image will appear here when it is ready." ]
-                , Button.secondary actions.onClose "Close"
+                    [ text
+                        (case lang of
+                            Fi ->
+                                "Kuva tulee näkyviin tähän, kun se on valmis."
+
+                            En ->
+                                "The image will appear here when it is ready."
+                        )
+                    ]
+                , Button.secondary actions.onClose (I18n.snapshotClose lang)
                 ]
 
             Preview data ->
@@ -451,8 +468,8 @@ viewFooter actions model =
                     , Attr.style "align-items" "center"
                     , Attr.style "gap" "10px"
                     ]
-                    [ saveButton actions data ]
-                , Button.secondary actions.onClose "Close"
+                    [ saveButton lang actions data ]
+                , Button.secondary actions.onClose (I18n.snapshotClose lang)
                 ]
 
             Failed _ ->
@@ -460,14 +477,22 @@ viewFooter actions model =
                     [ Attr.style "font-size" "13px"
                     , Attr.style "color" Theme.textMuted
                     ]
-                    [ text "Nothing was saved." ]
-                , Button.secondary actions.onClose "Close"
+                    [ text
+                        (case lang of
+                            Fi ->
+                                "Mitään ei tallennettu."
+
+                            En ->
+                                "Nothing was saved."
+                        )
+                    ]
+                , Button.secondary actions.onClose (I18n.snapshotClose lang)
                 ]
         )
 
 
-saveButton : Actions msg -> PreviewData -> Html msg
-saveButton actions data =
+saveButton : Language -> Actions msg -> PreviewData -> Html msg
+saveButton lang actions data =
     button
         [ Attr.type_ "button"
         , Html.Events.onClick (actions.onSave { dataUrl = data.dataUrl, filename = data.filename })
@@ -505,9 +530,9 @@ saveButton actions data =
             )
         , text
             (if data.hasSaved then
-                "Saved Image"
+                I18n.snapshotSavedImage lang
 
              else
-                "Save Image"
+                I18n.snapshotSaveImage lang
             )
         ]

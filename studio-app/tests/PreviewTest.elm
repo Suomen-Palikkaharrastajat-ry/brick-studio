@@ -43,6 +43,7 @@ flags =
     , favorites = Nothing
     , recentParts = Nothing
     , playBaseUrl = Nothing
+    , language = Just "en"
     }
 
 
