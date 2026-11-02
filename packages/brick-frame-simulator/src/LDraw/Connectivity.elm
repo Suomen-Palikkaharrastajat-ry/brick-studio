@@ -1299,12 +1299,28 @@ extractRecursive lineResolver depth currentMat lines acc =
                                     :: currentAcc
 
                             Nothing ->
-                                case lineResolver (String.toLower sub.file) of
-                                    Just subLines ->
-                                        extractRecursive lineResolver (depth + 1) comb subLines currentAcc
+                                case knownCatalogPart (String.toLower sub.file) of
+                                    Just catalogPart ->
+                                        List.foldl
+                                            (\point points ->
+                                                { point
+                                                    | id = List.length points + 1
+                                                    , localPosition = Mat4.transform comb point.localPosition
+                                                    , normal = transformDirection comb point.normal
+                                                    , tangent = transformDirection comb point.tangent
+                                                }
+                                                    :: points
+                                            )
+                                            currentAcc
+                                            catalogPart.connections
 
                                     Nothing ->
-                                        currentAcc
+                                        case lineResolver (String.toLower sub.file) of
+                                            Just subLines ->
+                                                extractRecursive lineResolver (depth + 1) comb subLines currentAcc
+
+                                            Nothing ->
+                                                currentAcc
 
                     _ ->
                         currentAcc

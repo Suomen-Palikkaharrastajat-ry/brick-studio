@@ -15,6 +15,7 @@ import LDraw.Connectivity as Connectivity
         , checkCollisions
         , effectiveEnvelope
         , extractConnections
+        , extractPartConnectivity
         , isCompatible
         , isSnapColliding
         , isStudded
@@ -139,6 +140,133 @@ extractionTests =
 
                     _ ->
                         Expect.fail ("Expected 1 connection point, got " ++ String.fromInt (List.length points))
+        , test "recursively grouped standard bricks keep catalog anti-stud spacing" <|
+            \_ ->
+                let
+                    assemblyLines =
+                        [ SubFileRef
+                            { color = 16
+                            , transform = Mat4.makeTranslate3 0 0 -10
+                            , file = "3004.dat"
+                            }
+                        , SubFileRef
+                            { color = 16
+                            , transform = Mat4.makeTranslate3 0 0 10
+                            , file = "3004.dat"
+                            }
+                        ]
+
+                    brickLines =
+                        [ SubFileRef
+                            { color = 16
+                            , transform = Mat4.makeTranslate3 -10 0 0
+                            , file = "stud.dat"
+                            }
+                        , SubFileRef
+                            { color = 16
+                            , transform = Mat4.makeTranslate3 10 0 0
+                            , file = "stud.dat"
+                            }
+                        , SubFileRef
+                            { color = 16
+                            , transform = Mat4.mul (Mat4.makeTranslate3 0 20 0) (Mat4.makeScale3 1 -1 1)
+                            , file = "stud3.dat"
+                            }
+                        ]
+
+                    resolver file =
+                        case file of
+                            "assembly.ldr" ->
+                                Just assemblyLines
+
+                            "3004.dat" ->
+                                Just brickLines
+
+                            _ ->
+                                Nothing
+
+                    antiStudPositions =
+                        extractPartConnectivity "assembly.ldr" resolver
+                            |> .connections
+                            |> List.filter (.connType >> (==) AntiStud)
+                            |> List.map
+                                (\point ->
+                                    ( Vec3.getX point.localPosition
+                                    , Vec3.getY point.localPosition
+                                    , Vec3.getZ point.localPosition
+                                    )
+                                )
+                            |> List.sort
+                in
+                Expect.equal
+                    [ ( -10, 24, -10 )
+                    , ( -10, 24, 10 )
+                    , ( 10, 24, -10 )
+                    , ( 10, 24, 10 )
+                    ]
+                    antiStudPositions
+        , test "recursive catalog contacts transform with a rotated child" <|
+            \_ ->
+                let
+                    rotation =
+                        Mat4.makeRotate (pi / 2) (vec3 1 0 0)
+
+                    resolver name =
+                        if name == "rotated-assembly.ldr" then
+                            Just
+                                [ SubFileRef
+                                    { color = 16
+                                    , transform = rotation
+                                    , file = "3004.dat"
+                                    }
+                                ]
+
+                        else
+                            Nothing
+
+                    catalogAntiStuds =
+                        knownCatalogPart "3004.dat"
+                            |> Maybe.map (.connections >> List.filter (.connType >> (==) AntiStud))
+                            |> Maybe.withDefault []
+
+                    recursiveAntiStuds =
+                        extractPartConnectivity "rotated-assembly.ldr" resolver
+                            |> .connections
+                            |> List.filter (.connType >> (==) AntiStud)
+
+                    positionTuple point =
+                        ( Vec3.getX point.localPosition
+                        , Vec3.getY point.localPosition
+                        , Vec3.getZ point.localPosition
+                        )
+
+                    normalTuple point =
+                        ( Vec3.getX point.normal
+                        , Vec3.getY point.normal
+                        , Vec3.getZ point.normal
+                        )
+
+                    expectedPositions =
+                        catalogAntiStuds
+                            |> List.map (.localPosition >> Mat4.transform rotation >> (\v -> ( Vec3.getX v, Vec3.getY v, Vec3.getZ v )))
+                            |> List.sort
+
+                    actualPositions =
+                        recursiveAntiStuds |> List.map positionTuple |> List.sort
+
+                    expectedNormals =
+                        catalogAntiStuds
+                            |> List.map (.normal >> transformDirection rotation >> (\v -> ( Vec3.getX v, Vec3.getY v, Vec3.getZ v )))
+                            |> List.sort
+
+                    actualNormals =
+                        recursiveAntiStuds |> List.map normalTuple |> List.sort
+                in
+                Expect.all
+                    [ \_ -> Expect.equal expectedPositions actualPositions
+                    , \_ -> Expect.equal expectedNormals actualNormals
+                    ]
+                    ()
         , test "extracts stud4.dat as AntiStud at its open end with normal (0, 1, 0)" <|
             \_ ->
                 let

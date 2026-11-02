@@ -1272,8 +1272,9 @@ groupedAt positions =
     { model | document = doc, viewport = loadedViewport }
 
 
-{-| Two 2×2 assemblies made from pairs of 3004s. Each pair is grouped around
-its centre, so its local child placements are at Z = ±10.
+{-| Two 2×2 assemblies made from pairs of 3004s, matching the Playground
+stacking repro. The upper group starts half a stud off in X and one stud off in
+Z; its local child placements are at Z = ±10.
 -}
 stackedGroups : ( Core.Model, Int, Int )
 stackedGroups =
@@ -1286,10 +1287,10 @@ stackedGroups =
 
         withChildren =
             Document.empty
-                |> addAt (vec3 0 -24 -30)
-                |> addAt (vec3 0 -24 -10)
-                |> addAt (vec3 -10 -48 -30)
-                |> addAt (vec3 -10 -48 -10)
+                |> addAt (vec3 0 -24 30)
+                |> addAt (vec3 0 -24 50)
+                |> addAt (vec3 -10 -48 50)
+                |> addAt (vec3 -10 -48 70)
 
         firstGrouped =
             Document.groupIntoSubmodel "first-group.ldr" [ 0, 1 ] withChildren
@@ -2205,18 +2206,18 @@ magneticSnapCollisionSuite =
                     -- that reference; this avoids assuming which side is
                     -- visible from the auto-fit camera.
                     visibleSurfacePoints =
-                        [ vec3 -15 -48 -30
-                        , vec3 -5 -48 -30
-                        , vec3 -15 -48 -10
-                        , vec3 -5 -48 -10
-                        , vec3 -30 -36 -30
-                        , vec3 10 -36 -30
-                        , vec3 -30 -36 -10
-                        , vec3 10 -36 -10
-                        , vec3 -15 -36 -40
-                        , vec3 -5 -36 -40
-                        , vec3 -15 -36 -20
-                        , vec3 -5 -36 -20
+                        [ vec3 -15 -48 50
+                        , vec3 -5 -48 50
+                        , vec3 -15 -48 70
+                        , vec3 -5 -48 70
+                        , vec3 -30 -36 50
+                        , vec3 10 -36 50
+                        , vec3 -30 -36 70
+                        , vec3 10 -36 70
+                        , vec3 -15 -36 40
+                        , vec3 -5 -36 40
+                        , vec3 -15 -36 60
+                        , vec3 -5 -36 60
                         ]
 
                     projectedPick =
@@ -2249,15 +2250,14 @@ magneticSnapCollisionSuite =
                             )
                             model
 
-                    -- The matching target stud is 10 LDU to the right of the
-                    -- source anti-stud. Move the picked surface point by that
-                    -- render-space delta; projecting this point gives a cursor
-                    -- whose ray intersects the fixed drag plane at the desired
-                    -- point while preserving the real grab offset.
+                    -- Match the target stud in X and Z. Projecting the desired
+                    -- surface point gives a cursor whose ray intersects the
+                    -- fixed drag plane at the intended point while preserving
+                    -- the real grab offset.
                     cursorEndpoint =
                         case picked of
                             Just hit ->
-                                screenAt model (Vec3.add hit.point (vec3 10 0 0))
+                                screenAt model (Vec3.add hit.point (vec3 10 0 -20))
 
                             Nothing ->
                                 ( -1, -1 )
@@ -2297,7 +2297,7 @@ magneticSnapCollisionSuite =
                     , \_ ->
                         case secondPosition of
                             Just position ->
-                                Vec3.distance position (vec3 0 -48 -20)
+                                Vec3.distance position (vec3 0 -48 40)
                                     |> Expect.within (Expect.Absolute 0.01) 0
 
                             Nothing ->
