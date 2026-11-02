@@ -17,6 +17,7 @@ import Math.Matrix4 as Mat4 exposing (Mat4)
 import Math.Vector3 as Vec3 exposing (Vec3, vec3)
 import Render.Camera as Camera
 import Set
+import String
 import Studio.Core as Core
 import Studio.DragPlane as DragPlane
 import Studio.Edit as Edit exposing (Axis(..))
@@ -1141,6 +1142,52 @@ placementSuite =
                         Core.freeSpotFor "3001.dat" model
                 in
                 Vec3.distance spot (vec3 200 0 0) |> Expect.within (Expect.Absolute 0.5) 20
+        , test "free spot ignores submodel-local children of a distant group" <|
+            \_ ->
+                let
+                    model =
+                        groupedAt [ vec3 1000 -24 0, vec3 200 -48 0, vec3 220 -24 0 ]
+
+                    vp =
+                        model.viewport
+
+                    camera =
+                        vp.camera
+
+                    atOrigin =
+                        { model | viewport = { vp | camera = { camera | target = vec3 0 0 0 } } }
+
+                    spot =
+                        Core.freeSpotForPlacement "3001.dat" (Mat4.makeTranslate3 0 -24 0) atOrigin
+                            |> (\matrix -> Mat4.transform matrix (vec3 0 0 0))
+                in
+                Vec3.distance spot (vec3 0 -24 0)
+                    |> Expect.within (Expect.Absolute 0.01) 0
+        , test "a nonzero body drag ignores grouped children as supports and collision targets" <|
+            \_ ->
+                let
+                    model =
+                        groupedAt [ vec3 0 -24 0, vec3 200 -48 0, vec3 220 -24 0 ]
+                            |> grabLead (vec3 0 -24 0)
+                            |> Core.setCollisionMode Connectivity.CollisionStrict
+
+                    moved =
+                        -- At X = -20 the brick overlaps the X/Z footprint of
+                        -- the group's phantom local child at (-10, -12, 0).
+                        moveTo (screenOf model (vec3 -20 0 0)) model |> (\( m, _, _ ) -> m)
+                in
+                Expect.all
+                    [ \m ->
+                        case firstPosition m of
+                            Just position ->
+                                Vec3.distance position (vec3 -20 -24 0)
+                                    |> Expect.within (Expect.Absolute 0.01) 0
+
+                            Nothing ->
+                                Expect.fail "the dragged placement has no position"
+                    , \m -> Expect.equal Set.empty m.collidingPlacements
+                    ]
+                    moved
         , test "freeSpotForPlacement keeps the given height" <|
             \_ ->
                 Core.freeSpotForPlacement "3001.dat" (Mat4.makeTranslate3 0 -60 0) raised
@@ -1204,6 +1251,112 @@ loadedAt positions =
             Viewport.loadDocument doc { vp | partCache = Dict.insert "3001.dat" (Loaded geometry) vp.partCache }
     in
     { model0 | viewport = loadedViewport, document = doc }
+
+
+{-| Three test bricks, with the last two grouped into a distant assembly. Their
+local placements straddle the origin, where treating them as world-space
+placements would create phantom obstacles, supports and collisions.
+-}
+groupedAt : List Vec3 -> Core.Model
+groupedAt positions =
+    let
+        model =
+            loadedAt positions
+
+        doc =
+            Document.groupIntoSubmodel "assembly.ldr" [ 1, 2 ] model.document
+
+        ( loadedViewport, _, _ ) =
+            Viewport.loadDocument doc model.viewport
+    in
+    { model | document = doc, viewport = loadedViewport }
+
+
+{-| Two 2×2 assemblies made from pairs of 3004s. Each pair is grouped around
+its centre, so its local child placements are at Z = ±10.
+-}
+stackedGroups : ( Core.Model, Int, Int )
+stackedGroups =
+    let
+        addAt position doc =
+            Document.addPlacement ""
+                { part = "3004.dat", color = 4, matrix = Mat4.makeTranslate position }
+                doc
+                |> Tuple.first
+
+        withChildren =
+            Document.empty
+                |> addAt (vec3 0 -24 -30)
+                |> addAt (vec3 0 -24 -10)
+                |> addAt (vec3 -10 -48 -30)
+                |> addAt (vec3 -10 -48 -10)
+
+        firstGrouped =
+            Document.groupIntoSubmodel "first-group.ldr" [ 0, 1 ] withChildren
+
+        document =
+            Document.groupIntoSubmodel "second-group.ldr" [ 2, 3 ] firstGrouped
+
+        firstReference =
+            Document.mainPlacements document
+                |> List.filter (.part >> (==) "first-group.ldr")
+                |> List.head
+                |> Maybe.map .id
+                |> Maybe.withDefault -1
+
+        secondReference =
+            Document.mainPlacements document
+                |> List.filter (.part >> (==) "second-group.ldr")
+                |> List.head
+                |> Maybe.map .id
+                |> Maybe.withDefault -1
+
+        ( model0, _ ) =
+            Core.init
+                { ldrawBase = "/ldraw"
+                , ldrawFallbackBase = ""
+                , defaultModelUrl = ""
+                , initialHash = ""
+                , supportsPointerEvents = True
+                , document = Document.empty
+                , gridStep = Just 20
+                , rotateStep = Just 90
+                , snapDistance = Just 24.0
+                , collisionMode = Nothing
+                }
+
+        brickGeometry =
+            Parser.parseFile
+                (String.join "\n"
+                    [ "4 16 -20 0 -10 20 0 -10 20 0 10 -20 0 10"
+                    , "4 16 -20 24 -10 20 24 -10 20 24 10 -20 24 10"
+                    , "1 16 -10 0 0 1 0 0 0 1 0 0 0 1 stud.dat"
+                    , "1 16 10 0 0 1 0 0 0 1 0 0 0 1 stud.dat"
+                    , "1 16 -10 4 0 1 0 0 0 -5 0 0 0 1 stud3.dat"
+                    , "1 16 10 4 0 1 0 0 0 -5 0 0 0 1 stud3.dat"
+                    ]
+                )
+
+        studGeometry =
+            Parser.parseFile "4 16 -6 0 -6 6 0 -6 6 0 6 -6 0 6"
+
+        stud3Geometry =
+            Parser.parseFile "4 16 -6 0 -6 6 0 -6 6 4 6 -6 4 6"
+
+        vp =
+            model0.viewport
+
+        ( loadedViewport, _, _ ) =
+            Viewport.loadDocument document
+                { vp
+                    | partCache =
+                        vp.partCache
+                            |> Dict.insert "3004.dat" (Loaded brickGeometry)
+                            |> Dict.insert "stud.dat" (Loaded studGeometry)
+                            |> Dict.insert "stud3.dat" (Loaded stud3Geometry)
+                }
+    in
+    ( { model0 | document = document, viewport = loadedViewport }, firstReference, secondReference )
 
 
 {-| Bricks loaded at `positions`, the first one grabbed at its top centre (render
@@ -1966,7 +2119,13 @@ grabLeadSnapping lead model =
     let
         firstId =
             Document.placements model.document |> List.head |> Maybe.map .id |> Maybe.withDefault 0
+    in
+    grabPlacementSnapping firstId lead model
 
+
+grabPlacementSnapping : Int -> Vec3 -> Core.Model -> Core.Model
+grabPlacementSnapping placementId lead model =
+    let
         grab =
             Gizmo.toRender lead
 
@@ -1978,13 +2137,13 @@ grabLeadSnapping lead model =
     in
     { model
         | viewport = Viewport.captureDrag { vp | camera = { cam | target = grab }, mousePressed = True }
-        , selection = Set.singleton firstId
+        , selection = Set.singleton placementId
         , altHeld = False
         , drag =
             Just
                 { kind = PlaneDrag grab
                 , plane = Nothing
-                , ids = [ firstId ]
+                , ids = [ placementId ]
                 , start = ( 400, 300 )
                 , lastPoint = ( 400, 300 )
                 , original = model.document
@@ -2035,7 +2194,158 @@ magneticSnapCollisionSuite =
             Connectivity.checkCollisions 0.5 boxes boxes
     in
     describe "magnetic snapping collision avoidance during drags"
-        [ test "dragging a 2x4 near a two-brick stack does not snap inside the stack" <|
+        [ test "a body drag of two grouped 3004 assemblies snaps into a stacked alignment through their main references" <|
+            \_ ->
+                let
+                    ( model, firstReference, secondReference ) =
+                        stackedGroups
+
+                    -- Probe points on the second group's exposed brick faces.
+                    -- Keep only a projected point whose real viewport ray hits
+                    -- that reference; this avoids assuming which side is
+                    -- visible from the auto-fit camera.
+                    visibleSurfacePoints =
+                        [ vec3 -15 -48 -30
+                        , vec3 -5 -48 -30
+                        , vec3 -15 -48 -10
+                        , vec3 -5 -48 -10
+                        , vec3 -30 -36 -30
+                        , vec3 10 -36 -30
+                        , vec3 -30 -36 -10
+                        , vec3 10 -36 -10
+                        , vec3 -15 -36 -40
+                        , vec3 -5 -36 -40
+                        , vec3 -15 -36 -20
+                        , vec3 -5 -36 -20
+                        ]
+
+                    projectedPick =
+                        visibleSurfacePoints
+                            |> List.filterMap
+                                (\surfacePoint ->
+                                    let
+                                        screenPoint =
+                                            screenAt model (Gizmo.toRender surfacePoint)
+                                    in
+                                    Viewport.pickBodyPoint (Tuple.first screenPoint) (Tuple.second screenPoint) model.viewport
+                                        |> Maybe.map (Tuple.pair screenPoint)
+                                )
+                            |> List.filter (Tuple.second >> .source >> (==) secondReference)
+                            |> List.head
+
+                    pressPoint =
+                        projectedPick |> Maybe.map Tuple.first |> Maybe.withDefault ( -1, -1 )
+
+                    picked =
+                        projectedPick |> Maybe.map Tuple.second
+
+                    fixedPlane =
+                        picked |> Maybe.map (\hit -> DragPlane.choose model.viewport.camera hit.point)
+
+                    ( pressed, _, _ ) =
+                        Core.update
+                            (Core.ViewportMsg
+                                (Viewport.MouseButtonDown (Tuple.first pressPoint) (Tuple.second pressPoint) 0 False False)
+                            )
+                            model
+
+                    -- The matching target stud is 10 LDU to the right of the
+                    -- source anti-stud. Move the picked surface point by that
+                    -- render-space delta; projecting this point gives a cursor
+                    -- whose ray intersects the fixed drag plane at the desired
+                    -- point while preserving the real grab offset.
+                    cursorEndpoint =
+                        case picked of
+                            Just hit ->
+                                screenAt model (Vec3.add hit.point (vec3 10 0 0))
+
+                            Nothing ->
+                                ( -1, -1 )
+
+                    ( moved, _, _ ) =
+                        Core.update
+                            (Core.ViewportMsg
+                                (Viewport.MouseMove (Tuple.first cursorEndpoint) (Tuple.second cursorEndpoint))
+                            )
+                            pressed
+
+                    ( dropped, _, _ ) =
+                        Core.update
+                            (Core.ViewportMsg
+                                (Viewport.MouseUp (Tuple.first cursorEndpoint) (Tuple.second cursorEndpoint))
+                            )
+                            moved
+
+                    secondPosition =
+                        Document.getPlacement secondReference dropped.document
+                            |> Maybe.map (\p -> Mat4.transform p.matrix (vec3 0 0 0))
+                in
+                Expect.all
+                    [ \_ -> Expect.equal (Just secondReference) (Maybe.map .source picked)
+                    , \_ -> Expect.equal (Just [ secondReference ]) (Maybe.map .ids pressed.drag)
+                    , \_ -> Expect.equal fixedPlane (Maybe.andThen .plane pressed.drag)
+                    , \_ -> Expect.equal (Just DragPlane.Horizontal) (Maybe.map .mode fixedPlane)
+                    , \_ ->
+                        case Maybe.map .kind pressed.drag of
+                            Just (PlaneDrag _) ->
+                                Expect.pass
+
+                            _ ->
+                                Expect.fail "the projected surface press did not start a body drag"
+                    , \_ -> Expect.equal (Just firstReference) (Maybe.map .targetPlacementId moved.activeSnap)
+                    , \_ -> Expect.equal Nothing dropped.drag
+                    , \_ ->
+                        case secondPosition of
+                            Just position ->
+                                Vec3.distance position (vec3 0 -48 -20)
+                                    |> Expect.within (Expect.Absolute 0.01) 0
+
+                            Nothing ->
+                                Expect.fail "the dragged group reference has no position"
+                    ]
+                    ()
+        , test "with CollisionOff, grouped children do not create phantom snap targets; the group reference still snaps at its world position" <|
+            \_ ->
+                let
+                    model =
+                        groupedAt [ vec3 -80 -24 0, vec3 200 -48 0, vec3 220 -24 0 ]
+
+                    vp =
+                        model.viewport
+
+                    connectedBrick =
+                        Parser.parseFile
+                            "1 16 0 0 0 1 0 0 0 1 0 0 0 1 stud.dat\n4 16 -10 0 -10 10 0 -10 10 0 10 -10 0 10\n4 16 -10 24 -10 10 24 -10 10 24 10 -10 24 10"
+
+                    ( loadedViewport, _, _ ) =
+                        Viewport.loadDocument model.document
+                            { vp | partCache = Dict.insert "3001.dat" (Loaded connectedBrick) vp.partCache }
+
+                    snapping =
+                        { model | viewport = loadedViewport }
+                            |> Core.setCollisionMode Connectivity.CollisionOff
+                            |> grabLeadSnapping (vec3 -80 -24 0)
+
+                    moved =
+                        moveTo (screenAt snapping (vec3 0 24 0)) snapping
+                            |> (\( m, _, _ ) -> m)
+
+                    movedToGroup =
+                        moveTo (screenAt snapping (vec3 220 24 0)) snapping
+                            |> (\( m, _, _ ) -> m)
+
+                    groupReferenceId =
+                        Document.mainPlacements model.document
+                            |> List.filter (.part >> (==) "assembly.ldr")
+                            |> List.head
+                            |> Maybe.map .id
+                in
+                Expect.all
+                    [ \_ -> Expect.equal Nothing moved.activeSnap
+                    , \_ -> Expect.equal groupReferenceId (Maybe.map .targetPlacementId movedToGroup.activeSnap)
+                    ]
+                    ()
+        , test "dragging a 2x4 near a two-brick stack does not snap inside the stack" <|
             \_ ->
                 let
                     -- Bottom brick 1 at (0, -24, 0), top brick 2 at (0, -48, 0). Dragged brick 3 at (60, -24, 0).

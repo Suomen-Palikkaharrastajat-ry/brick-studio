@@ -1885,7 +1885,7 @@ freeSpotForPlacement part matrix model =
         , start = start
         , gridStep = toFloat (max 1 model.gridStep)
         , others =
-            Document.placements model.document
+            Document.mainPlacements model.document
                 |> List.map (\p -> DragPlane.worldBox p.matrix (partLocalBox resolveLines p.part model))
         }
 
@@ -3163,7 +3163,7 @@ movePlaneDrag initialDrag grab ( x, y ) model =
                         |> Maybe.withDefault (placementBox leadP)
 
                 otherBoxes =
-                    Document.placements drag.original
+                    Document.mainPlacements drag.original
                         |> List.filter (\p -> not (List.member p.id drag.ids))
                         |> List.map placementBox
 
@@ -3209,7 +3209,7 @@ movePlaneDrag initialDrag grab ( x, y ) model =
                     Edit.apply (SetMatrix draggedSurfaceUpdates) drag.original
 
                 otherPlacements =
-                    Document.placements gizmoMovedDoc
+                    Document.mainPlacements gizmoMovedDoc
                         |> List.filter (\p -> not (List.member p.id drag.ids))
 
                 effectiveBoxOf placement =
