@@ -402,7 +402,7 @@ suite =
         , noGizmoSuite
         , selectionActionSuite
         , emptyDragPanSuite
-        , shiftFineSuite
+        , shiftSnapSuite
         , restingSuite
         , latticeSuite
         , magneticSnapCollisionSuite
@@ -1272,9 +1272,9 @@ groupedAt positions =
     { model | document = doc, viewport = loadedViewport }
 
 
-{-| Two 2×2 assemblies made from pairs of 3004s, matching the Playground
-stacking repro. The upper group starts half a stud off in X and one stud off in
-Z; its local child placements are at Z = ±10.
+{-| Two 2×2 assemblies made from pairs of 3004s, matching the current Playground
+stacking repro. The upper group starts one stud off in X; its local child
+placements are at Z = ±10.
 -}
 stackedGroups : ( Core.Model, Int, Int )
 stackedGroups =
@@ -1289,8 +1289,8 @@ stackedGroups =
             Document.empty
                 |> addAt (vec3 0 -24 30)
                 |> addAt (vec3 0 -24 50)
-                |> addAt (vec3 -10 -48 50)
-                |> addAt (vec3 -10 -48 70)
+                |> addAt (vec3 -20 -48 30)
+                |> addAt (vec3 -20 -48 50)
 
         firstGrouped =
             Document.groupIntoSubmodel "first-group.ldr" [ 0, 1 ] withChildren
@@ -1608,12 +1608,12 @@ emptyDragPanSuite =
         ]
 
 
-{-| Shift in `DragPartsOrPan` hosts (Play): a Shift + press on a
-part grabs it, holding Shift during a body drag moves on a 1 LDU grid, and a
-Shift + press on empty canvas pans. The default mode keeps Shift + drag as a pan.
+{-| Shift in `DragPartsOrPan` hosts (Play): a Shift + press on a part grabs it
+and body drags prefer the closest snap candidate; a Shift + press on empty
+canvas pans. FineMove is the separate unsnapped 1 LDU mode.
 -}
-shiftFineSuite : Test
-shiftFineSuite =
+shiftSnapSuite : Test
+shiftSnapSuite =
     let
         shiftKey =
             let
@@ -1633,8 +1633,8 @@ shiftFineSuite =
         send msg model =
             Core.update (Core.ViewportMsg msg) model |> (\( m, _, _ ) -> m)
 
-        -- The brick at the origin, grabbed at its top centre on a 20 LDU grid. The
-        -- cursor aims at X = 37: a 1 LDU step lands there, the 20 LDU grid on 40.
+        -- The brick at the origin, grabbed at its top centre on a 20 LDU grid.
+        -- The cursor aims at X = 37, which the regular grid rounds to 40.
         grabbed mode =
             grabbedAt [ vec3 0 -24 0 ]
                 |> Core.setGridStep 20
@@ -1662,18 +1662,18 @@ shiftFineSuite =
         partsOrPan =
             Core.DragPartsOrPan Core.OneFingerOrbits
     in
-    describe "Shift fine moves (DragPartsOrPan)"
-        [ test "Shift held before a body drag moves on a 1 LDU grid" <|
+    describe "Shift snap preference (DragPartsOrPan)"
+        [ test "Shift held before a body drag keeps the regular grid" <|
             \_ ->
                 grabbed partsOrPan
                     |> shiftDown
-                    |> xIs 37
-        , test "Shift pressed mid-drag applies to the next move" <|
+                    |> xIs 40
+        , test "Shift held while dragging keeps the regular grid and avoids bit mode" <|
             \_ ->
                 grabbed partsOrPan
                     |> shiftDown
-                    |> xIs 37
-        , test "releasing Shift returns to the 20 LDU grid" <|
+                    |> xIs 40
+        , test "releasing Shift keeps the 20 LDU grid" <|
             \_ ->
                 grabbed partsOrPan
                     |> shiftDown
@@ -1738,15 +1738,16 @@ shiftFineSuite =
                     , \_ -> Expect.equal Set.empty (clicked base)
                     ]
                     ()
-        , test "setShiftHeld toggles shiftHeld and switches an active drag to 1 LDU" <|
+        , test "setShiftHeld records the snap modifier without enabling bit mode" <|
             \_ ->
                 grabbed partsOrPan
                     |> Core.setShiftHeld True
                     |> Expect.all
                         [ \m -> Expect.equal True (Core.shiftHeld m)
-                        , xIs 37
+                        , \m -> Expect.equal False (Core.fineMove m)
+                        , xIs 40
                         ]
-        , test "when dragging a brick on touch, a second finger acts as Shift for 1 LDU bit-dragging without magnetic snapping" <|
+        , test "when dragging a brick on touch, a second finger selects closest-snap mode without bit-dragging" <|
             \_ ->
                 let
                     base =
@@ -1764,11 +1765,10 @@ shiftFineSuite =
                 in
                 Expect.all
                     [ \m -> Expect.equal True (Core.shiftHeld m)
-                    , \m -> Expect.equal Nothing m.activeSnap
                     , \m ->
                         case firstPosition m of
                             Just pos ->
-                                Expect.within (Expect.Absolute 0.51) 37 (Vec3.getX pos)
+                                Expect.within (Expect.Absolute 0.51) 40 (Vec3.getX pos)
 
                             Nothing ->
                                 Expect.fail "the part vanished"
@@ -2195,7 +2195,7 @@ magneticSnapCollisionSuite =
             Connectivity.checkCollisions 0.5 boxes boxes
     in
     describe "magnetic snapping collision avoidance during drags"
-        [ test "a body drag of two grouped 3004 assemblies snaps into a stacked alignment through their main references" <|
+        [ test "a body drag of two grouped 3004 assemblies aligns all four stud pairs" <|
             \_ ->
                 let
                     ( model, firstReference, secondReference ) =
@@ -2206,18 +2206,18 @@ magneticSnapCollisionSuite =
                     -- that reference; this avoids assuming which side is
                     -- visible from the auto-fit camera.
                     visibleSurfacePoints =
-                        [ vec3 -15 -48 50
-                        , vec3 -5 -48 50
-                        , vec3 -15 -48 70
-                        , vec3 -5 -48 70
-                        , vec3 -30 -36 50
-                        , vec3 10 -36 50
-                        , vec3 -30 -36 70
-                        , vec3 10 -36 70
+                        [ vec3 -25 -48 30
+                        , vec3 -15 -48 30
+                        , vec3 -25 -48 50
+                        , vec3 -15 -48 50
+                        , vec3 -40 -36 30
+                        , vec3 0 -36 30
+                        , vec3 -40 -36 50
+                        , vec3 0 -36 50
+                        , vec3 -25 -36 20
+                        , vec3 -15 -36 20
+                        , vec3 -25 -36 40
                         , vec3 -15 -36 40
-                        , vec3 -5 -36 40
-                        , vec3 -15 -36 60
-                        , vec3 -5 -36 60
                         ]
 
                     projectedPick =
@@ -2250,14 +2250,13 @@ magneticSnapCollisionSuite =
                             )
                             model
 
-                    -- Match the target stud in X and Z. Projecting the desired
-                    -- surface point gives a cursor whose ray intersects the
-                    -- fixed drag plane at the intended point while preserving
-                    -- the real grab offset.
+                    -- Move the upper group one stud in X. The bridge test
+                    -- confirms that this lands all four anti-studs on the
+                    -- corresponding target studs, not just one pair.
                     cursorEndpoint =
                         case picked of
                             Just hit ->
-                                screenAt model (Vec3.add hit.point (vec3 10 0 -20))
+                                screenAt model (Vec3.add hit.point (vec3 20 0 0))
 
                             Nothing ->
                                 ( -1, -1 )

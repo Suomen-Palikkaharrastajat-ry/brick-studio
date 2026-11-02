@@ -7,6 +7,7 @@ module LDraw.Connectivity exposing
     , PartConnectivity
     , SnapCandidate
     , SnapGuide(..)
+    , SnapPriority(..)
     , WorldConnectionPoint
     , checkCollisions
     , defaultSnapDistance
@@ -28,9 +29,12 @@ module LDraw.Connectivity exposing
     , snapReleaseDistance
     , solveSnap
     , solveSnapCandidates
+    , solveSnapCandidatesWithPriority
     , solveSnapWithHysteresis
     , solveSnapWithHysteresisAndPredicate
+    , solveSnapWithHysteresisAndPredicateWithPriority
     , solveSnapWithPredicate
+    , solveSnapWithPredicateWithPriority
     , studOffset
     , testOBB
     , toOBB
@@ -127,6 +131,13 @@ type CollisionMode
     = CollisionStrict
     | CollisionSoft
     | CollisionOff
+
+
+{-| How candidate snaps are ranked when more than one connection is reachable.
+-}
+type SnapPriority
+    = MaximizeContacts
+    | ClosestPoint
 
 
 {-| Visual guide displayed in the WebGL overlay when snapping.
@@ -363,8 +374,49 @@ orthonormalBasis normalRaw tangentHint =
 -- ── Snap Solver ──────────────────────────────────────────────────────────────
 
 
+{-| Number of dragged connector sites that would engage this target placement
+after a candidate transform. Ranking by this before pointer distance makes a
+group snap prefer a full aligned contact grid over a closer one- or two-point
+partial overlap.
+-}
+alignedContactCount : Mat4 -> Int -> List ConnectionPoint -> List WorldConnectionPoint -> Int
+alignedContactCount snapMatrix targetPlacementId draggedPoints targetPoints =
+    let
+        targetsOnPlacement =
+            List.filter (.placementId >> (==) targetPlacementId) targetPoints
+
+        matchesTarget dragged =
+            let
+                draggedPosition =
+                    Mat4.transform snapMatrix dragged.localPosition
+
+                draggedNormal =
+                    transformDirection snapMatrix dragged.normal
+            in
+            List.any
+                (\target ->
+                    if not (isCompatible dragged.connType target.connType) then
+                        False
+
+                    else
+                        let
+                            desiredNormal =
+                                targetDesiredNormal dragged.connType draggedNormal target.worldNormal
+
+                            normalMatches =
+                                not (isDirectional dragged.connType)
+                                    || Vec3.dot draggedNormal desiredNormal
+                                    >= -0.2
+                        in
+                        normalMatches && Vec3.distance draggedPosition target.worldPosition <= 0.5
+                )
+                targetsOnPlacement
+    in
+    List.filter matchesTarget draggedPoints |> List.length
+
+
 {-| Find and score all compatible magnetic snap candidates within `maxDist`,
-sorted in ascending order by score (best candidate first).
+preferring candidates which engage more connector sites, then by score.
 -}
 solveSnapCandidates :
     Float
@@ -374,6 +426,22 @@ solveSnapCandidates :
     -> List WorldConnectionPoint
     -> List SnapCandidate
 solveSnapCandidates maxDist rotationIndex currentMatrix draggedPoints targetPoints =
+    solveSnapCandidatesWithPriority MaximizeContacts maxDist rotationIndex currentMatrix draggedPoints targetPoints
+
+
+{-| Candidate generator with an explicit ranking strategy. `ClosestPoint` is
+used for Shift-drag, which allows a user to choose a nearby staggered contact;
+the default strategy prefers the largest aligned connector grid.
+-}
+solveSnapCandidatesWithPriority :
+    SnapPriority
+    -> Float
+    -> Int
+    -> Mat4
+    -> List ConnectionPoint
+    -> List WorldConnectionPoint
+    -> List SnapCandidate
+solveSnapCandidatesWithPriority priority maxDist rotationIndex currentMatrix draggedPoints targetPoints =
     let
         accessibleTargetPoints =
             List.filter
@@ -450,9 +518,13 @@ solveSnapCandidates maxDist rotationIndex currentMatrix draggedPoints targetPoin
 
                                 guide =
                                     makeGuide draggedLocal.connType targetWorld.worldPosition targetWorld.worldNormal False
+
+                                contactCount =
+                                    alignedContactCount snapMat targetWorld.placementId draggedPoints accessibleTargetPoints
                             in
                             Just
-                                ( score
+                                ( -contactCount
+                                , score
                                 , { draggedPoint = draggedLocal
                                   , targetPoint = targetWorld
                                   , targetPlacementId = targetWorld.placementId
@@ -467,9 +539,16 @@ solveSnapCandidates maxDist rotationIndex currentMatrix draggedPoints targetPoin
         candidates =
             draggedPoints
                 |> List.concatMap (\d -> List.filterMap (evalPair d) accessibleTargetPoints)
-                |> List.sortBy Tuple.first
+
+        rankedCandidates =
+            case priority of
+                MaximizeContacts ->
+                    List.sortBy (\( contactRank, score, _ ) -> ( contactRank, score )) candidates
+
+                ClosestPoint ->
+                    List.sortBy (\( _, score, candidate ) -> ( candidate.distance, score )) candidates
     in
-    List.map Tuple.second candidates
+    List.map (\( _, _, candidate ) -> candidate) rankedCandidates
 
 
 {-| Solve the best magnetic snap transformation satisfying a validation predicate.
@@ -484,7 +563,22 @@ solveSnapWithPredicate :
     -> List WorldConnectionPoint
     -> Maybe SnapCandidate
 solveSnapWithPredicate isValid maxDist rotationIndex currentMatrix draggedPoints targetPoints =
-    findFirst isValid (solveSnapCandidates maxDist rotationIndex currentMatrix draggedPoints targetPoints)
+    solveSnapWithPredicateWithPriority MaximizeContacts isValid maxDist rotationIndex currentMatrix draggedPoints targetPoints
+
+
+{-| Solve the highest-priority magnetic snap candidate satisfying `isValid`.
+-}
+solveSnapWithPredicateWithPriority :
+    SnapPriority
+    -> (SnapCandidate -> Bool)
+    -> Float
+    -> Int
+    -> Mat4
+    -> List ConnectionPoint
+    -> List WorldConnectionPoint
+    -> Maybe SnapCandidate
+solveSnapWithPredicateWithPriority priority isValid maxDist rotationIndex currentMatrix draggedPoints targetPoints =
+    findFirst isValid (solveSnapCandidatesWithPriority priority maxDist rotationIndex currentMatrix draggedPoints targetPoints)
 
 
 findFirst : (a -> Bool) -> List a -> Maybe a
@@ -518,8 +612,10 @@ solveSnap maxDist rotationIndex currentMatrix draggedPoints targetPoints =
 {-| Solve snap with magnetic hysteresis latching and a validation predicate:
 If an active snap candidate is provided and satisfies `isValid`, the connection remains latched
 as long as the dragged connection point stays within `releaseDist` and its orientation remains valid.
-If distance exceeds `releaseDist`, orientation is incompatible, `isValid` fails, or no active snap
-is present, candidate search evaluates candidates within `enterDist` and picks the first that satisfies `isValid`.
+If a candidate within `enterDist` engages more connector sites, it replaces the active candidate even
+inside the release radius. Otherwise, when distance exceeds `releaseDist`, orientation is incompatible,
+`isValid` fails, or no active snap is present, candidate search evaluates candidates within `enterDist`
+and picks the first that satisfies `isValid`.
 -}
 solveSnapWithHysteresisAndPredicate :
     (SnapCandidate -> Bool)
@@ -532,6 +628,25 @@ solveSnapWithHysteresisAndPredicate :
     -> List WorldConnectionPoint
     -> Maybe SnapCandidate
 solveSnapWithHysteresisAndPredicate isValid enterDist releaseDist maybeActive rotationIndex currentMatrix draggedPoints targetPoints =
+    solveSnapWithHysteresisAndPredicateWithPriority MaximizeContacts isValid enterDist releaseDist maybeActive rotationIndex currentMatrix draggedPoints targetPoints
+
+
+{-| Solve with magnetic hysteresis and an explicit candidate ranking strategy.
+The active candidate remains latched while valid and within `releaseDist`; when
+searching, candidates follow `priority`.
+-}
+solveSnapWithHysteresisAndPredicateWithPriority :
+    SnapPriority
+    -> (SnapCandidate -> Bool)
+    -> Float
+    -> Float
+    -> Maybe SnapCandidate
+    -> Int
+    -> Mat4
+    -> List ConnectionPoint
+    -> List WorldConnectionPoint
+    -> Maybe SnapCandidate
+solveSnapWithHysteresisAndPredicateWithPriority priority isValid enterDist releaseDist maybeActive rotationIndex currentMatrix draggedPoints targetPoints =
     case maybeActive of
         Just active ->
             let
@@ -553,7 +668,7 @@ solveSnapWithHysteresisAndPredicate isValid enterDist releaseDist maybeActive ro
                         Vec3.dot draggedWorldNormal desiredNormal
                 in
                 if isDirectional active.draggedPoint.connType && cosAngle < -0.2 then
-                    solveSnapWithPredicate isValid enterDist rotationIndex currentMatrix draggedPoints targetPoints
+                    solveSnapWithPredicateWithPriority priority isValid enterDist rotationIndex currentMatrix draggedPoints targetPoints
 
                 else
                     let
@@ -569,18 +684,38 @@ solveSnapWithHysteresisAndPredicate isValid enterDist releaseDist maybeActive ro
                                 , distance = dist
                                 , guide = guide
                             }
+
+                        maybeMoreAligned =
+                            case priority of
+                                MaximizeContacts ->
+                                    solveSnapWithPredicateWithPriority priority isValid enterDist rotationIndex currentMatrix draggedPoints targetPoints
+
+                                ClosestPoint ->
+                                    Nothing
                     in
                     if isValid candidate then
-                        Just candidate
+                        case maybeMoreAligned of
+                            Just alternative ->
+                                if
+                                    alignedContactCount alternative.snapMatrix alternative.targetPlacementId draggedPoints targetPoints
+                                        > alignedContactCount candidate.snapMatrix candidate.targetPlacementId draggedPoints targetPoints
+                                then
+                                    Just alternative
+
+                                else
+                                    Just candidate
+
+                            Nothing ->
+                                Just candidate
 
                     else
-                        solveSnapWithPredicate isValid enterDist rotationIndex currentMatrix draggedPoints targetPoints
+                        solveSnapWithPredicateWithPriority priority isValid enterDist rotationIndex currentMatrix draggedPoints targetPoints
 
             else
-                solveSnapWithPredicate isValid enterDist rotationIndex currentMatrix draggedPoints targetPoints
+                solveSnapWithPredicateWithPriority priority isValid enterDist rotationIndex currentMatrix draggedPoints targetPoints
 
         Nothing ->
-            solveSnapWithPredicate isValid enterDist rotationIndex currentMatrix draggedPoints targetPoints
+            solveSnapWithPredicateWithPriority priority isValid enterDist rotationIndex currentMatrix draggedPoints targetPoints
 
 
 {-| Solve snap with magnetic hysteresis latching:

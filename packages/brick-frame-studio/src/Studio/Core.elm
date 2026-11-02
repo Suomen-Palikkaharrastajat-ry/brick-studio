@@ -106,6 +106,7 @@ import LDraw.Connectivity as Connectivity
         , CollisionMode(..)
         , SnapCandidate
         , SnapGuide(..)
+        , SnapPriority(..)
         )
 import LDraw.Document as Document exposing (Document, Placement)
 import LDraw.Resolve as Resolve
@@ -199,10 +200,10 @@ type DragMode
     | DragPartsOrPan OneFinger
 
 
-{-| Whether a host in this drag mode gets Shift + drag fine moves: a Shift +
-left press on a part grabs it (see `Viewport.setShiftPressGrabs`), and holding
-Shift during a body drag moves on a 1 LDU grid. `DragPartsOrOrbit` and
-`DragPartsOnly` keep Shift + drag as a pan and the normal grid.
+{-| Whether a host in this drag mode uses Shift + left press to grab a part (see
+`Viewport.setShiftPressGrabs`). During the resulting body drag, Shift prefers the
+closest snap candidate; fine movement remains controlled by `setFineMove`.
+`DragPartsOrOrbit` and `DragPartsOnly` keep Shift + drag as a pan.
 -}
 dragModeGrabsWithShift : DragMode -> Bool
 dragModeGrabsWithShift mode =
@@ -621,8 +622,8 @@ setTwoFingerOrbits enabled model =
 
 {-| Keep the viewport's `secondFingerShift` flag in sync with an active drag in
 `DragPartsOrPan` mode: while a part is being dragged, a second finger on the
-screen acts as Shift for 1-LDU bit-dragging; otherwise, two fingers zoom, pan,
-and orbit the camera.
+screen acts as Shift to prefer the closest snap; otherwise, two fingers zoom,
+pan, and orbit the camera.
 -}
 syncTouchShiftMode : Model -> Model
 syncTouchShiftMode model =
@@ -648,9 +649,9 @@ setDragSettles settles model =
 
 
 {-| Fine mode, for hosts without a Shift key (touch): while on, body drags move on
-the 1 LDU grid and keyboard / action-bar nudges use the fine step. It is OR-ed with
-Shift and changes nothing else (no Shift-click selection toggling). It persists
-until switched off, independent of the selection.
+the 1 LDU grid and keyboard / action-bar nudges use the fine step. Unlike Shift,
+it disables magnetic snapping. It persists until switched off, independent of
+the selection.
 -}
 setFineMove : Bool -> Model -> Model
 setFineMove on model =
@@ -682,8 +683,9 @@ fineMove model =
     model.fineMove
 
 
-{-| Set whether Shift is held (e.g. from a touch Shift toggle during a drag).
-While on in `DragPartsOrPan` mode, body drags move on the 1 LDU grid.
+{-| Set whether Shift is held (e.g. from a touch second finger during a drag).
+While on, body drags prefer the closest magnetic snap candidate. In
+`DragPartsOrPan` mode, Shift still grabs a part or pans empty canvas.
 -}
 setShiftHeld : Bool -> Model -> Model
 setShiftHeld on model =
@@ -3011,15 +3013,15 @@ grabPart ( x, y ) model =
                 )
 
 
-{-| Whether bit-dragging (1 LDU step, free of magnetic snapping) is active.
+{-| Whether explicit fine-move mode (1 LDU step, free of magnetic snapping) is active.
 -}
 isBitDrag : Model -> Bool
 isBitDrag model =
-    model.fineMove || (model.shiftHeld && dragModeGrabsWithShift model.dragMode)
+    model.fineMove
 
 
-{-| The grid step of a body drag on the working plane: 1 LDU while Shift is
-held in a `DragPartsOrPan` host, else the grid.
+{-| The grid step of a body drag on the working plane: 1 LDU in fine-move mode,
+else the configured grid. Shift changes snap ranking, not the move grid.
 -}
 dragGridStep : Model -> Float
 dragGridStep model =
@@ -3030,9 +3032,9 @@ dragGridStep model =
         toFloat (max 1 model.gridStep)
 
 
-{-| Re-run the body drag in progress after Shift went down, so the grid change
-applies without waiting for the mouse to move. Only for a host that grabs with
-Shift (see `dragModeGrabsWithShift`).
+{-| Re-run the body drag in progress after Shift changes, so the snap-ranking
+preference applies without waiting for the mouse to move. Only for a host that
+grabs with Shift (see `dragModeGrabsWithShift`).
 -}
 refreshPlaneDrag : Model -> ( Model, Cmd Msg, List Event )
 refreshPlaneDrag model =
@@ -3330,7 +3332,13 @@ movePlaneDrag initialDrag grab ( x, y ) model =
                                 Nothing
 
                     solveConnectionSnap () =
-                        Connectivity.solveSnapWithHysteresisAndPredicate
+                        Connectivity.solveSnapWithHysteresisAndPredicateWithPriority
+                            (if model.shiftHeld then
+                                ClosestPoint
+
+                             else
+                                MaximizeContacts
+                            )
                             isValidSnap
                             model.snapDistance
                             (model.snapDistance * 1.5)

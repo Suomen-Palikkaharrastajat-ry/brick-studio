@@ -12,6 +12,7 @@ import LDraw.Connectivity as Connectivity
         , ConnectionType(..)
         , OBB
         , SnapCandidate
+        , SnapPriority(..)
         , checkCollisions
         , effectiveEnvelope
         , extractConnections
@@ -27,6 +28,7 @@ import LDraw.Connectivity as Connectivity
         , snapReleaseDistance
         , solveSnap
         , solveSnapCandidates
+        , solveSnapCandidatesWithPriority
         , solveSnapWithHysteresis
         , solveSnapWithHysteresisAndPredicate
         , solveSnapWithPredicate
@@ -203,6 +205,48 @@ extractionTests =
                     , ( -10, 24, 10 )
                     , ( 10, 24, -10 )
                     , ( 10, 24, 10 )
+                    ]
+                    antiStudPositions
+        , test "recursive catalog lookup keeps the full contact grid for a different standard brick" <|
+            \_ ->
+                let
+                    assemblyLines =
+                        [ SubFileRef
+                            { color = 16
+                            , transform = Mat4.identity
+                            , file = "3001.dat"
+                            }
+                        ]
+
+                    resolver name =
+                        if name == "assembly.ldr" then
+                            Just assemblyLines
+
+                        else
+                            Nothing
+
+                    antiStudPositions =
+                        extractPartConnectivity "assembly.ldr" resolver
+                            |> .connections
+                            |> List.filter (.connType >> (==) AntiStud)
+                            |> List.map
+                                (\point ->
+                                    ( Vec3.getX point.localPosition
+                                    , Vec3.getY point.localPosition
+                                    , Vec3.getZ point.localPosition
+                                    )
+                                )
+                            |> List.sort
+                in
+                Expect.equal
+                    [ ( -30, 24, -10 )
+                    , ( -30, 24, 10 )
+                    , ( -10, 24, -10 )
+                    , ( -10, 24, 10 )
+                    , ( 10, 24, -10 )
+                    , ( 10, 24, 10 )
+                    , ( 30, 24, -10 )
+                    , ( 30, 24, 10 )
                     ]
                     antiStudPositions
         , test "recursive catalog contacts transform with a rotated child" <|
@@ -1548,6 +1592,111 @@ snapSolverTests =
 
                     Nothing ->
                         Expect.fail "Snap candidate was not found"
+        , test "prefers a full stud grid over the nearest partial group contact" <|
+            \_ ->
+                case knownCatalogPart "3003.dat" of
+                    Just brick ->
+                        let
+                            draggedAntiStuds =
+                                brick.connections
+                                    |> List.filter (.connType >> (==) AntiStud)
+
+                            targetStuds =
+                                brick.connections
+                                    |> List.filter (.connType >> (==) Stud)
+                                    |> List.map (transformPoint (Mat4.makeTranslate3 0 -24 0) 1)
+
+                            candidates =
+                                solveSnapCandidates 24.0
+                                    0
+                                    (Mat4.makeTranslate3 -20 -48 0)
+                                    draggedAntiStuds
+                                    targetStuds
+
+                            closestCandidates =
+                                solveSnapCandidatesWithPriority ClosestPoint
+                                    24.0
+                                    0
+                                    (Mat4.makeTranslate3 -20 -48 0)
+                                    draggedAntiStuds
+                                    targetStuds
+
+                            closestOrigin =
+                                closestCandidates
+                                    |> List.head
+                                    |> Maybe.map (\snap -> Mat4.transform snap.snapMatrix (vec3 0 0 0))
+                        in
+                        case List.head candidates of
+                            Just snap ->
+                                let
+                                    snappedOrigin =
+                                        Mat4.transform snap.snapMatrix (vec3 0 0 0)
+                                in
+                                Expect.all
+                                    [ \_ ->
+                                        Vec3.distance snappedOrigin (vec3 0 -48 0)
+                                            |> Expect.within (Expect.Absolute 0.01) 0
+                                    , \_ -> Expect.equal 20 snap.distance
+                                    , \_ -> Expect.equal (Just (vec3 -20 -48 0)) closestOrigin
+                                    ]
+                                    ()
+
+                            Nothing ->
+                                Expect.fail "Expected a full-grid snap candidate"
+
+                    Nothing ->
+                        Expect.fail "3003.dat is not in the connectivity catalog"
+        , test "hysteresis upgrades a partial latch when a fuller group snap is in range" <|
+            \_ ->
+                case knownCatalogPart "3003.dat" of
+                    Just brick ->
+                        let
+                            draggedAntiStuds =
+                                brick.connections
+                                    |> List.filter (.connType >> (==) AntiStud)
+
+                            targetStuds =
+                                brick.connections
+                                    |> List.filter (.connType >> (==) Stud)
+                                    |> List.map (transformPoint (Mat4.makeTranslate3 0 -24 0) 1)
+
+                            hoveringAtPartialAlignment =
+                                Mat4.makeTranslate3 -20 -48 0
+
+                            partialLatch =
+                                solveSnapCandidates 0.5 0 hoveringAtPartialAlignment draggedAntiStuds targetStuds
+                                    |> List.head
+
+                            upgraded =
+                                solveSnapWithHysteresisAndPredicate
+                                    (\_ -> True)
+                                    24.0
+                                    18.0
+                                    partialLatch
+                                    0
+                                    hoveringAtPartialAlignment
+                                    draggedAntiStuds
+                                    targetStuds
+                        in
+                        case upgraded of
+                            Just snap ->
+                                let
+                                    snappedOrigin =
+                                        Mat4.transform snap.snapMatrix (vec3 0 0 0)
+                                in
+                                Expect.all
+                                    [ \_ ->
+                                        Vec3.distance snappedOrigin (vec3 0 -48 0)
+                                            |> Expect.within (Expect.Absolute 0.01) 0
+                                    , \_ -> Expect.equal 20 snap.distance
+                                    ]
+                                    ()
+
+                            Nothing ->
+                                Expect.fail "Expected hysteresis to upgrade to the four-contact snap"
+
+                    Nothing ->
+                        Expect.fail "3003.dat is not in the connectivity catalog"
         , test "snaps slope 3039 anti-studs onto target studs of a 2x2 brick" <|
             \_ ->
                 let

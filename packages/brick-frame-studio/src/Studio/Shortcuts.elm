@@ -440,7 +440,7 @@ helpRows =
         , ( "T or M", "Move tool (V select, R rotate)" )
         , ( "Drag a handle", "Move along that axis" )
         , ( "Drag a part (V or T)", "Pick it up and move it with the cursor; it snaps to studs" )
-        , ( "Shift + drag a part", "Move it finely, on a 1 LDU grid" )
+        , ( "Shift + drag a part", "Prefer the closest snap candidate" )
         , ( "Wheel while dragging", "Raise / lower the part: 8 LDU a notch (Shift: one brick, 24 LDU; Alt: 1 LDU)" )
         , ( "Right click mid-drag", "Cancel the drag" )
         , ( "Click a part", "The view slides to centre it and orbits around it; Fit view (F) recentres" )

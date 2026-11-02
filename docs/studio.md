@@ -277,9 +277,10 @@ mode (below) adds the gear chrome to the same view.
 - **Drag mode.** Brick Play uses `DragPartsOrPan OneFingerPans`
   and a camera globe (see
   [rendering.md](rendering.md) § Interaction controls).
-- **Shift fine moves.** In `DragPartsOrPan` a Shift + left press on a part grabs
+- **Shift snap preference.** In `DragPartsOrPan` a Shift + left press on a part grabs
   it (Shift + press on empty canvas pans), and holding Shift during a body drag
-  moves on a 1 LDU grid instead of the move step. Shift + click still toggles the
+  prefers the closest snap candidate. The separate Bit step provides unsnapped
+  1-LDU movement. Shift + click still toggles the
   part in the selection when released without moving. `Core.setDragMode` turns
   `Viewport.setShiftPressGrabs` on for this mode only; the studio workspace keeps
   Shift + drag as a pan.
@@ -334,7 +335,7 @@ mode (below) adds the gear chrome to the same view.
   Msgs as the old toolbar buttons, wrapped in `MenuPicked` so the menu closes first.
   A click outside (a backdrop) or Escape closes it; Escape closes the menu before it
   deselects anything. While the menu is open the studio's editing keys are paused,
-  like the help dialog. All temporary status pills (Shift · Bit, Tidy up, gear mesh
+  like the help dialog. All temporary status pills (Bit step, Tidy up, gear mesh
   status, first-select hint, touch part name, and accomplishment banner) grow
   horizontally in the same top-left toolbar so the vertical space above the dock
   stays completely free.
@@ -566,7 +567,7 @@ The mouse:
   palette part, a click places it on the surface under the point.
 - Left drag on a part moves or turns it (through the gizmo, or the body drag of
   the select and move tools, which follows the cursor relative to the view);
-  Shift + left drag on a part moves it finely, on a 1 LDU grid, and a Shift +
+  Shift + left drag on a part prefers the closest snap candidate, and a Shift +
   press on a part that is released without moving toggles it in the selection.
 - Left drag on empty space pans the camera (`Viewport.panCurrentGesture`); one
   finger does the same on touch, and the camera globe does the orbiting. A click

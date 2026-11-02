@@ -1867,10 +1867,10 @@ ringBitStepTip : Language -> String
 ringBitStepTip lang =
     case lang of
         Fi ->
-            "Pikkuliike: 1 LDU kullakin akselilla (Shift on tilapäinen pikkuliike)"
+            "Pikkuliike: 1 LDU kullakin akselilla ilman magneettista kohdistusta"
 
         En ->
-            "Bit step: 1 LDU on every axis (Shift is a temporary bit step)"
+            "Bit step: 1 LDU on every axis (free movement, no magnetic snap)"
 
 
 ringClipboardGroup : Language -> String
@@ -2217,20 +2217,20 @@ ringShiftBitPill : Language -> String
 ringShiftBitPill lang =
     case lang of
         Fi ->
-            "Shift · Pikkuliike"
+            "Shift · Lähin kohdistus"
 
         En ->
-            "Shift · Bit"
+            "Shift · Closest snap"
 
 
 ringShiftBitTip : Language -> String
 ringShiftBitTip lang =
     case lang of
         Fi ->
-            "Shift: siirrä 1 LDU ilman kohdistusta"
+            "Shift: suosi lähintä magneettista kohdistusta"
 
         En ->
-            "Shift: drag by 1 LDU without snapping (bit-dragging)"
+            "Shift: prefer the closest magnetic snap candidate"
 
 
 ringMoveThePart : Language -> String
