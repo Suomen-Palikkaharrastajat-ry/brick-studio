@@ -919,7 +919,17 @@ updatePage msg model =
                 ( opened, Cmd.batch [ openCmd, Ports.saveDraft "" ] )
 
         GlobePressed point ->
-            ( { model | globeDrag = Just (CameraGlobe.startDrag model.viewport.camera point) }, Cmd.none )
+            ( { model
+                | globeDrag =
+                    Just
+                        (CameraGlobe.startDragWithLight
+                            model.viewport.camera
+                            (Viewport.lightDirection model.viewport)
+                            point
+                        )
+              }
+            , Cmd.none
+            )
 
         GlobeMoved point ->
             case model.globeDrag of
@@ -927,8 +937,16 @@ updatePage msg model =
                     let
                         ( ( azimuthDelta, elevationDelta ), next ) =
                             CameraGlobe.moveDrag drag point
+
+                        viewportMsg =
+                            case CameraGlobe.dragTarget drag of
+                                CameraGlobe.LightTarget ->
+                                    Viewport.OrbitLightBy azimuthDelta elevationDelta
+
+                                CameraGlobe.CameraTarget ->
+                                    Viewport.RotateCameraBy azimuthDelta elevationDelta
                     in
-                    update (ViewportMsg (Viewport.RotateCameraBy azimuthDelta elevationDelta))
+                    update (ViewportMsg viewportMsg)
                         { model | globeDrag = Just next }
 
                 Nothing ->
@@ -939,9 +957,27 @@ updatePage msg model =
                 released =
                     { model | globeDrag = Nothing }
             in
-            case model.globeDrag |> Maybe.andThen (CameraGlobe.releaseDrag model.viewport.camera) of
-                Just ( azimuthDelta, elevationDelta ) ->
-                    update (ViewportMsg (Viewport.RotateCameraBy azimuthDelta elevationDelta)) released
+            case model.globeDrag of
+                Just drag ->
+                    case CameraGlobe.dragTarget drag of
+                        CameraGlobe.LightTarget ->
+                            case
+                                Viewport.lightDirection model.viewport
+                                    |> Maybe.andThen (\dir -> CameraGlobe.releaseLightDrag dir drag)
+                            of
+                                Just ( azimuthDelta, elevationDelta ) ->
+                                    update (ViewportMsg (Viewport.OrbitLightBy azimuthDelta elevationDelta)) released
+
+                                Nothing ->
+                                    ( released, Cmd.none )
+
+                        CameraGlobe.CameraTarget ->
+                            case CameraGlobe.releaseDrag model.viewport.camera drag of
+                                Just ( azimuthDelta, elevationDelta ) ->
+                                    update (ViewportMsg (Viewport.RotateCameraBy azimuthDelta elevationDelta)) released
+
+                                Nothing ->
+                                    ( released, Cmd.none )
 
                 Nothing ->
                     ( released, Cmd.none )
@@ -5707,15 +5743,7 @@ cameraToggle model =
         , Attr.style "width" "48px"
         , Attr.style "min-height" "44px"
         , Attr.style "border" "none"
-        , Attr.style "border-top"
-            ("3px solid "
-                ++ (if model.cameraSheet then
-                        Theme.brandYellow
-
-                    else
-                        "transparent"
-                   )
-            )
+        , Attr.style "border-top" "3px solid transparent"
         , Attr.style "background" "transparent"
         , Attr.style "color"
             (if model.cameraSheet then
@@ -5803,6 +5831,7 @@ viewCameraSheet model =
             { camera = model.viewport.camera
             , helpOpen = model.helpOpen
             , renderQuality = model.renderQuality
+            , lightDirection = Viewport.lightDirection model.viewport
             }
         ]
 
@@ -6894,6 +6923,7 @@ viewCamera model =
         { camera = model.viewport.camera
         , helpOpen = model.helpOpen
         , renderQuality = model.renderQuality
+        , lightDirection = Viewport.lightDirection model.viewport
         }
 
 

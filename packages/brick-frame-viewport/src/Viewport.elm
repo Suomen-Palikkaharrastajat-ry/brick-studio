@@ -15,6 +15,7 @@ module Viewport exposing
     , groundIntersection
     , init
     , isTouchGesture
+    , lightDirection
     , loadDocument
     , needsAnimationFrame
     , panCurrentGesture
@@ -472,6 +473,7 @@ type Msg
     | ToggleWalkMode
     | SetViewPreset ViewPreset
     | SetRenderQuality Style.Quality
+    | OrbitLightBy Float Float
     | KeyPressed Shortcuts.KeyEvent
     | KeyReleased String
     | AllKeysReleased
@@ -1065,6 +1067,12 @@ updateInner msg model =
 
         SetRenderQuality quality ->
             ( applyRenderQuality quality model, Cmd.none, [] )
+
+        OrbitLightBy azimuthDelta elevationDelta ->
+            ( { model | renderStyle = Style.orbitLightBy azimuthDelta elevationDelta model.renderStyle }
+            , Cmd.none
+            , []
+            )
 
         KeyPressed event ->
             if Shortcuts.isTextEntryTarget event || Shortcuts.isWidgetKey event then
@@ -3379,9 +3387,10 @@ triangle, from e.g. `Simulation.snapshotTriangles`) for host-owned moving parts.
 -}
 snapshotRequest : { filename : String, extraTriangles : List Float } -> Model -> Encode.Value
 snapshotRequest config model =
-    Snapshot.encodeRequest
+    Snapshot.encodeRequestWithLight
         { filename = config.filename
         , camera = model.camera
+        , lightDirection = lightDirection model
         , triangles =
             Snapshot.sceneTriangles
                 { scene = model.scene
@@ -3461,6 +3470,19 @@ label here, independent of the style's values.
 renderQuality : Model -> Style.Quality
 renderQuality model =
     model.renderQuality
+
+
+{-| The active key light direction when Realistic render quality is active, or
+`Nothing` in Draft mode (where flat ambient lighting is used).
+-}
+lightDirection : Model -> Maybe Vec3.Vec3
+lightDirection model =
+    case model.renderQuality of
+        Style.Realistic ->
+            Just model.renderStyle.lightDirection
+
+        Style.Draft ->
+            Nothing
 
 
 {-| Set both the quality preset and the style it maps to.

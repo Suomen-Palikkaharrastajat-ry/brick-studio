@@ -42,6 +42,7 @@ module Studio.Core exposing
     , init
     , isDragging
     , isGlued
+    , lightDirection
     , lowerSelected
     , partBox
     , partOrder
@@ -755,6 +756,14 @@ setRenderQuality quality model =
 renderQuality : Model -> Style.Quality
 renderQuality model =
     Viewport.renderQuality model.viewport
+
+
+{-| The active key light direction of the studio viewport when Realistic render
+quality is active, or `Nothing` in Draft mode.
+-}
+lightDirection : Model -> Maybe Vec3
+lightDirection model =
+    Viewport.lightDirection model.viewport
 
 
 {-| Turn tooth alignment of newly meshed gears on or off. When on, a committed

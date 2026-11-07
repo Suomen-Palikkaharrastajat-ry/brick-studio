@@ -432,7 +432,17 @@ update msg model =
             ( { model | helpOpen = not model.helpOpen }, Cmd.none )
 
         GlobePressed point ->
-            ( { model | globeDrag = Just (CameraGlobe.startDrag model.viewport.camera point) }, Cmd.none )
+            ( { model
+                | globeDrag =
+                    Just
+                        (CameraGlobe.startDragWithLight
+                            model.viewport.camera
+                            (Viewport.lightDirection model.viewport)
+                            point
+                        )
+              }
+            , Cmd.none
+            )
 
         GlobeMoved point ->
             case model.globeDrag of
@@ -440,8 +450,16 @@ update msg model =
                     let
                         ( ( azimuthDelta, elevationDelta ), next ) =
                             CameraGlobe.moveDrag drag point
+
+                        viewportMsg =
+                            case CameraGlobe.dragTarget drag of
+                                CameraGlobe.LightTarget ->
+                                    Viewport.OrbitLightBy azimuthDelta elevationDelta
+
+                                CameraGlobe.CameraTarget ->
+                                    Viewport.RotateCameraBy azimuthDelta elevationDelta
                     in
-                    update (ViewportMsg (Viewport.RotateCameraBy azimuthDelta elevationDelta))
+                    update (ViewportMsg viewportMsg)
                         { model | globeDrag = Just next }
 
                 Nothing ->
@@ -452,9 +470,27 @@ update msg model =
                 released =
                     { model | globeDrag = Nothing }
             in
-            case model.globeDrag |> Maybe.andThen (CameraGlobe.releaseDrag model.viewport.camera) of
-                Just ( azimuthDelta, elevationDelta ) ->
-                    update (ViewportMsg (Viewport.RotateCameraBy azimuthDelta elevationDelta)) released
+            case model.globeDrag of
+                Just drag ->
+                    case CameraGlobe.dragTarget drag of
+                        CameraGlobe.LightTarget ->
+                            case
+                                Viewport.lightDirection model.viewport
+                                    |> Maybe.andThen (\dir -> CameraGlobe.releaseLightDrag dir drag)
+                            of
+                                Just ( azimuthDelta, elevationDelta ) ->
+                                    update (ViewportMsg (Viewport.OrbitLightBy azimuthDelta elevationDelta)) released
+
+                                Nothing ->
+                                    ( released, Cmd.none )
+
+                        CameraGlobe.CameraTarget ->
+                            case CameraGlobe.releaseDrag model.viewport.camera drag of
+                                Just ( azimuthDelta, elevationDelta ) ->
+                                    update (ViewportMsg (Viewport.RotateCameraBy azimuthDelta elevationDelta)) released
+
+                                Nothing ->
+                                    ( released, Cmd.none )
 
                 Nothing ->
                     ( released, Cmd.none )
@@ -1106,6 +1142,7 @@ viewCamera model =
         { camera = model.viewport.camera
         , helpOpen = model.helpOpen
         , renderQuality = model.renderQuality
+        , lightDirection = Viewport.lightDirection model.viewport
         }
 
 

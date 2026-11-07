@@ -1,4 +1,11 @@
-module Viewport.Snapshot exposing (encodeRequest, imageHeight, imageWidth, sceneTriangles, timeBudgetMs)
+module Viewport.Snapshot exposing
+    ( encodeRequest
+    , encodeRequestWithLight
+    , imageHeight
+    , imageWidth
+    , sceneTriangles
+    , timeBudgetMs
+    )
 
 {-| The request a host sends to the offline path tracer (`captureRender`).
 
@@ -117,14 +124,42 @@ isGhost activeSources source =
 -}
 encodeRequest : { filename : String, camera : Camera, triangles : List Float } -> Encode.Value
 encodeRequest config =
+    encodeRequestWithLight
+        { filename = config.filename
+        , camera = config.camera
+        , lightDirection = Nothing
+        , triangles = config.triangles
+        }
+
+
+{-| The JSON object `captureRender` takes, with an optional key light direction
+for the path tracer.
+-}
+encodeRequestWithLight :
+    { filename : String
+    , camera : Camera
+    , lightDirection : Maybe Vec3
+    , triangles : List Float
+    }
+    -> Encode.Value
+encodeRequestWithLight config =
+    let
+        lightFields =
+            case config.lightDirection of
+                Just dir ->
+                    [ ( "lightDirection", encodeVec3 dir ) ]
+
+                Nothing ->
+                    []
+    in
     Encode.object
-        [ ( "width", Encode.int imageWidth )
-        , ( "height", Encode.int imageHeight )
-        , ( "transparent", Encode.bool True )
-        , ( "filename", Encode.string config.filename )
-        , ( "timeBudgetMs", Encode.int timeBudgetMs )
-        , ( "camera"
-          , Encode.object
+        ([ ( "width", Encode.int imageWidth )
+         , ( "height", Encode.int imageHeight )
+         , ( "transparent", Encode.bool True )
+         , ( "filename", Encode.string config.filename )
+         , ( "timeBudgetMs", Encode.int timeBudgetMs )
+         , ( "camera"
+           , Encode.object
                 [ ( "position", encodeVec3 (Camera.position config.camera) )
                 , ( "target", encodeVec3 (Camera.lookTarget config.camera) )
 
@@ -132,9 +167,11 @@ encodeRequest config =
                 , ( "up", encodeVec3 (Vec3.vec3 0 1 0) )
                 , ( "fovYDegrees", Encode.float Camera.fovYDegrees )
                 ]
-          )
-        , ( "triangles", Encode.list Encode.float config.triangles )
-        ]
+           )
+         ]
+            ++ lightFields
+            ++ [ ( "triangles", Encode.list Encode.float config.triangles ) ]
+        )
 
 
 encodeVec3 : Vec3 -> Encode.Value

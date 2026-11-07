@@ -7,6 +7,7 @@ module Render.Style exposing
     , draftStyle
     , fromLight
     , fromQuality
+    , orbitLightBy
     , realisticStyle
     )
 
@@ -150,6 +151,31 @@ fromQuality quality =
 
         Realistic ->
             realisticStyle
+
+
+{-| Orbit the key light direction by azimuth and elevation deltas (radians),
+clamping elevation to `[degrees -15, degrees 88]` so the sun stays above the
+deep under-floor horizon and below the zenith singularity.
+-}
+orbitLightBy : Float -> Float -> Style -> Style
+orbitLightBy dAzimuth dElevation style =
+    let
+        u =
+            normalizedDirection style.lightDirection
+
+        azimuth =
+            atan2 (Vec3.getX u) (Vec3.getZ u) + dAzimuth
+
+        elevation =
+            clamp (degrees -15) (degrees 88) (asin (clamp -1 1 (Vec3.getY u)) + dElevation)
+
+        nextDir =
+            vec3
+                (sin azimuth * cos elevation)
+                (sin elevation)
+                (cos azimuth * cos elevation)
+    in
+    { style | lightDirection = Vec3.normalize nextDir }
 
 
 {-| Build a full `Style` from legacy light uniforms.

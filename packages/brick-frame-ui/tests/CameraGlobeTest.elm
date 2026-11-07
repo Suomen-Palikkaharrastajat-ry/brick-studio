@@ -8,7 +8,7 @@ turns the camera from pointer moves or a tap.
 import Expect
 import Render.Camera as Camera
 import Test exposing (Test, describe, test)
-import UI.CameraGlobe as CameraGlobe
+import UI.CameraGlobe as CameraGlobe exposing (DragTarget(..))
 
 
 suite : Test
@@ -102,5 +102,73 @@ suite =
                         , \_ -> Expect.within (Expect.Absolute 1.0e-6) 44 next.travel
                         ]
                         ()
+            ]
+        , describe "Positioning the key light (sun)"
+            [ test "lightAngles and lightDirectionFromAngles round-trip" <|
+                \_ ->
+                    let
+                        vec =
+                            CameraGlobe.lightDirectionFromAngles 0.65 0.9
+
+                        angles =
+                            CameraGlobe.lightAngles vec
+                    in
+                    Expect.all
+                        [ \_ -> Expect.within (Expect.Absolute 1.0e-6) 0.65 angles.azimuth
+                        , \_ -> Expect.within (Expect.Absolute 1.0e-6) 0.9 angles.elevation
+                        ]
+                        ()
+            , test "pressing near the sun marker grabs LightTarget; pressing near the camera grabs CameraTarget" <|
+                \_ ->
+                    let
+                        baseCam =
+                            Camera.init
+
+                        camera =
+                            { baseCam
+                                | azimuth = -0.8
+                                , elevation = 0.25
+                            }
+
+                        lightDir =
+                            CameraGlobe.lightDirectionFromAngles 0.75 0.85
+
+                        sunPos =
+                            CameraGlobe.markerPosition 0.75 0.85
+
+                        camPos =
+                            CameraGlobe.markerPosition camera.azimuth camera.elevation
+
+                        sunDrag =
+                            CameraGlobe.startDragWithLight camera (Just lightDir) ( sunPos.x + 3, sunPos.y - 2 )
+
+                        camDrag =
+                            CameraGlobe.startDragWithLight camera (Just lightDir) ( camPos.x, camPos.y )
+                    in
+                    Expect.equal
+                        ( LightTarget, CameraTarget )
+                        ( CameraGlobe.dragTarget sunDrag, CameraGlobe.dragTarget camDrag )
+            , test "a tap on a light drag computes the delta from the current sun angles" <|
+                \_ ->
+                    let
+                        lightDir =
+                            CameraGlobe.lightDirectionFromAngles 0.2 0.5
+
+                        targetMarker =
+                            CameraGlobe.markerPosition 0.9 0.7
+
+                        drag =
+                            CameraGlobe.startDragWithLight Camera.init (Just lightDir) ( targetMarker.x, targetMarker.y )
+                    in
+                    case CameraGlobe.releaseLightDrag lightDir drag of
+                        Just ( dAz, dEl ) ->
+                            Expect.all
+                                [ \_ -> Expect.within (Expect.Absolute 1.0e-6) (0.9 - 0.2) dAz
+                                , \_ -> Expect.within (Expect.Absolute 1.0e-6) (0.7 - 0.5) dEl
+                                ]
+                                ()
+
+                        Nothing ->
+                            Expect.fail "expected a light tap delta"
             ]
         ]

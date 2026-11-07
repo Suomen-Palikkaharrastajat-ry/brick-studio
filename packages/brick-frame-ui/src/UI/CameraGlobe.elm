@@ -1,16 +1,23 @@
 module UI.CameraGlobe exposing
     ( Config
     , Drag
+    , DragTarget(..)
     , directionAt
     , dragOrbit
+    , dragTarget
     , facingSign
     , flyToDelta
+    , lightAngles
+    , lightDirectionFromAngles
     , markerPosition
     , moveDrag
     , releaseDrag
+    , releaseLightDrag
     , resetButtonId
     , startDrag
+    , startDragWithLight
     , view
+    , viewWithLight
     , wheelDeltaForZoom
     , zoomLevel
     , zoomSliderId
@@ -36,6 +43,7 @@ import Html exposing (Html, div)
 import Html.Attributes as Attr
 import Html.Events
 import Json.Decode as Decode
+import Math.Vector3 as Vec3 exposing (Vec3)
 import Render.Camera exposing (Camera)
 import Svg
 import Svg.Attributes as SvgAttr
@@ -67,27 +75,114 @@ type alias Config msg =
     }
 
 
+{-| Which globe marker a drag moves: the camera or the key light (sun).
+-}
+type DragTarget
+    = CameraTarget
+    | LightTarget
+
+
 {-| A press on the globe in progress: where it started and last was (relative to
-the globe's centre), how far it has travelled, and which way a horizontal drag
-turns the camera (fixed for the whole drag, so crossing the globe's edge does not
-flip it).
+the globe's centre), how far it has travelled, which way a horizontal drag
+turns the marker (fixed for the whole drag, so crossing the globe's edge does not
+flip it), and whether the press grabbed the camera or the key light.
 -}
 type alias Drag =
     { start : ( Float, Float )
     , last : ( Float, Float )
     , travel : Float
     , azimuthSign : Float
+    , target : DragTarget
     }
+
+
+{-| Which target (`CameraTarget` or `LightTarget`) a drag is moving.
+-}
+dragTarget : Drag -> DragTarget
+dragTarget drag =
+    drag.target
+
+
+{-| Azimuth and elevation (radians) of a light direction vector on the globe.
+-}
+lightAngles : Vec3 -> { azimuth : Float, elevation : Float }
+lightAngles v =
+    let
+        u =
+            if Vec3.length v < 1.0e-6 then
+                Vec3.vec3 0 1 0
+
+            else
+                Vec3.normalize v
+    in
+    { azimuth = atan2 (Vec3.getX u) (Vec3.getZ u)
+    , elevation = asin (clamp -1 1 (Vec3.getY u))
+    }
+
+
+{-| Unit light direction vector from globe azimuth and elevation (radians).
+-}
+lightDirectionFromAngles : Float -> Float -> Vec3
+lightDirectionFromAngles azimuth elevation =
+    Vec3.vec3
+        (sin azimuth * cos elevation)
+        (sin elevation)
+        (cos azimuth * cos elevation)
 
 
 {-| Begin a drag at a pointer press on the globe.
 -}
 startDrag : Camera -> ( Float, Float ) -> Drag
 startDrag camera point =
+    startDragWithLight camera Nothing point
+
+
+{-| Begin a drag at a pointer press on the globe, grabbing the sun marker when
+a key light is shown and the press lands within 16 px of the sun marker (and at
+least as close to the sun as to the camera marker).
+-}
+startDragWithLight : Camera -> Maybe Vec3 -> ( Float, Float ) -> Drag
+startDragWithLight camera maybeLight (( pointerX, pointerY ) as point) =
+    let
+        ( target, sign ) =
+            case maybeLight of
+                Just lightDir ->
+                    let
+                        sunAngles =
+                            lightAngles lightDir
+
+                        sunPos =
+                            markerPosition sunAngles.azimuth sunAngles.elevation
+
+                        camPos =
+                            markerPosition camera.azimuth camera.elevation
+
+                        dSun =
+                            sqrt ((pointerX - sunPos.x) ^ 2 + (pointerY - sunPos.y) ^ 2)
+
+                        dCam =
+                            sqrt ((pointerX - camPos.x) ^ 2 + (pointerY - camPos.y) ^ 2)
+                    in
+                    if dSun <= 16 && dSun <= dCam then
+                        ( LightTarget
+                        , if sunPos.front then
+                            1
+
+                          else
+                            -1
+                        )
+
+                    else
+                        ( CameraTarget, facingSign camera )
+
+                Nothing ->
+                    ( CameraTarget, facingSign camera )
+    in
     { start = point
     , last = point
     , travel = 0
-    , azimuthSign = facingSign camera
+    , azimuthSign = sign
+    , target = target
     }
 
 
@@ -117,6 +212,28 @@ releaseDrag : Camera -> Drag -> Maybe ( Float, Float )
 releaseDrag camera drag =
     if drag.travel < 3 then
         flyToDelta camera drag.start
+
+    else
+        Nothing
+
+
+{-| The orbit for releasing a light drag. A tap when positioning the key light
+jumps the sun to the globe point pressed on.
+-}
+releaseLightDrag : Vec3 -> Drag -> Maybe ( Float, Float )
+releaseLightDrag lightDir drag =
+    if drag.travel < 3 then
+        let
+            sunAngles =
+                lightAngles lightDir
+        in
+        directionAt drag.start
+            |> Maybe.map
+                (\target ->
+                    ( wrapAngle (target.azimuth - sunAngles.azimuth)
+                    , target.elevation - sunAngles.elevation
+                    )
+                )
 
     else
         Nothing
@@ -287,6 +404,14 @@ wheelDeltaForZoom camera level =
 -}
 view : Config msg -> Html msg
 view config =
+    viewWithLight Nothing config
+
+
+{-| The globe (with an optional sun marker for the key light direction) and,
+beside it, the zoom slider.
+-}
+viewWithLight : Maybe Vec3 -> Config msg -> Html msg
+viewWithLight maybeLight config =
     div
         [ Attr.attribute "role" "group"
         , Attr.attribute "aria-label" "Camera"
@@ -302,7 +427,7 @@ view config =
         ]
         ([ div
             [ Attr.style "position" "relative" ]
-            [ globe config
+            [ globe maybeLight config
             , resetButton config.onReset
             ]
          , zoomSlider config
@@ -328,8 +453,8 @@ extrasColumn extras =
         ]
 
 
-globe : Config msg -> Html msg
-globe config =
+globe : Maybe Vec3 -> Config msg -> Html msg
+globe maybeLight config =
     let
         half =
             size / 2
@@ -367,7 +492,7 @@ globe config =
             , Attr.style "display" "block"
             ]
             [ Svg.g [ SvgAttr.transform ("translate(" ++ String.fromFloat half ++ " " ++ String.fromFloat half ++ ")") ]
-                (globeShapes config.camera)
+                (globeShapes maybeLight config.camera)
             ]
         ]
 
@@ -405,8 +530,8 @@ resetButton onReset =
         [ Icon.feather "maximize" ]
 
 
-globeShapes : Camera -> List (Svg.Svg msg)
-globeShapes camera =
+globeShapes : Maybe Vec3 -> Camera -> List (Svg.Svg msg)
+globeShapes maybeLight camera =
     let
         marker =
             markerPosition camera.azimuth camera.elevation
@@ -420,6 +545,62 @@ globeShapes camera =
 
         line =
             "rgba(255, 255, 255, 0.25)"
+
+        lightShapes =
+            case maybeLight of
+                Nothing ->
+                    []
+
+                Just lightDir ->
+                    let
+                        sunAngles =
+                            lightAngles lightDir
+
+                        sunMarker =
+                            markerPosition sunAngles.azimuth sunAngles.elevation
+
+                        ( sunOpacity, sunDash ) =
+                            if sunMarker.front then
+                                ( "1", "2 2" )
+
+                            else
+                                ( "0.45", "3 3" )
+                    in
+                    [ Svg.g
+                        [ Attr.attribute "data-testid" "globe-light-marker"
+                        , SvgAttr.opacity sunOpacity
+                        ]
+                        [ Svg.line
+                            [ SvgAttr.x1 (String.fromFloat sunMarker.x)
+                            , SvgAttr.y1 (String.fromFloat sunMarker.y)
+                            , SvgAttr.x2 "0"
+                            , SvgAttr.y2 "0"
+                            , SvgAttr.stroke "rgba(255, 224, 130, 0.75)"
+                            , SvgAttr.strokeWidth "1.25"
+                            , SvgAttr.strokeDasharray sunDash
+                            ]
+                            []
+                        , Svg.circle
+                            [ SvgAttr.cx (String.fromFloat sunMarker.x)
+                            , SvgAttr.cy (String.fromFloat sunMarker.y)
+                            , SvgAttr.r "8"
+                            , SvgAttr.fill "none"
+                            , SvgAttr.stroke "rgba(255, 213, 79, 0.85)"
+                            , SvgAttr.strokeWidth "1.5"
+                            , SvgAttr.strokeDasharray "2 2"
+                            ]
+                            []
+                        , Svg.circle
+                            [ SvgAttr.cx (String.fromFloat sunMarker.x)
+                            , SvgAttr.cy (String.fromFloat sunMarker.y)
+                            , SvgAttr.r "5"
+                            , SvgAttr.fill "#FFF3C4"
+                            , SvgAttr.stroke "#F59E0B"
+                            , SvgAttr.strokeWidth "1.5"
+                            ]
+                            []
+                        ]
+                    ]
     in
     [ Svg.circle
         [ SvgAttr.r (String.fromFloat radius)
@@ -457,30 +638,31 @@ globeShapes camera =
         , SvgAttr.fill "var(--color-text-subtle)"
         ]
         []
-
-    -- Line of sight from the camera to the model
-    , Svg.line
-        [ SvgAttr.x1 (String.fromFloat marker.x)
-        , SvgAttr.y1 (String.fromFloat marker.y)
-        , SvgAttr.x2 "0"
-        , SvgAttr.y2 "0"
-        , SvgAttr.stroke "var(--color-brand-yellow)"
-        , SvgAttr.strokeWidth "1.5"
-        , SvgAttr.strokeDasharray sightDash
-        , SvgAttr.opacity markerOpacity
-        ]
-        []
-    , Svg.circle
-        [ SvgAttr.cx (String.fromFloat marker.x)
-        , SvgAttr.cy (String.fromFloat marker.y)
-        , SvgAttr.r "7"
-        , SvgAttr.fill "var(--color-brand-yellow)"
-        , SvgAttr.stroke "var(--color-brand)"
-        , SvgAttr.strokeWidth "2"
-        , SvgAttr.opacity markerOpacity
-        ]
-        []
     ]
+        ++ lightShapes
+        ++ [ -- Line of sight from the camera to the model
+             Svg.line
+                [ SvgAttr.x1 (String.fromFloat marker.x)
+                , SvgAttr.y1 (String.fromFloat marker.y)
+                , SvgAttr.x2 "0"
+                , SvgAttr.y2 "0"
+                , SvgAttr.stroke "var(--color-brand-yellow)"
+                , SvgAttr.strokeWidth "1.5"
+                , SvgAttr.strokeDasharray sightDash
+                , SvgAttr.opacity markerOpacity
+                ]
+                []
+           , Svg.circle
+                [ SvgAttr.cx (String.fromFloat marker.x)
+                , SvgAttr.cy (String.fromFloat marker.y)
+                , SvgAttr.r "7"
+                , SvgAttr.fill "var(--color-brand-yellow)"
+                , SvgAttr.stroke "var(--color-brand)"
+                , SvgAttr.strokeWidth "2"
+                , SvgAttr.opacity markerOpacity
+                ]
+                []
+           ]
 
 
 zoomSlider : Config msg -> Html msg

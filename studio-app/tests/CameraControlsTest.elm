@@ -7,6 +7,7 @@ toggle.
 
 import Expect
 import Html.Attributes as HtmlAttr
+import Math.Vector3 as Vec3
 import Render.Camera as Camera
 import Render.Style as Style
 import Studio.CameraControls as CameraControls
@@ -15,6 +16,8 @@ import Studio.Workspace as Workspace exposing (Msg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import UI.CameraGlobe as CameraGlobe
+import Viewport
 
 
 flags : Workspace.Flags
@@ -84,7 +87,11 @@ suite =
                     , onSnapshot = ()
                     , noOp = ()
                     }
-                    { camera = Camera.init, helpOpen = False, renderQuality = Style.Draft }
+                    { camera = Camera.init
+                    , helpOpen = False
+                    , renderQuality = Style.Draft
+                    , lightDirection = Nothing
+                    }
                     |> Query.fromHtml
                     |> Expect.all
                         [ Query.has [ Selector.attribute (HtmlAttr.attribute "aria-label" "Camera") ]
@@ -134,7 +141,10 @@ suite =
                     , \_ ->
                         viewOf onCamera
                             |> Query.find [ Selector.attribute (HtmlAttr.attribute "aria-label" "Camera controls") ]
-                            |> Query.has [ Selector.attribute (HtmlAttr.attribute "aria-pressed" "true") ]
+                            |> Query.has
+                                [ Selector.attribute (HtmlAttr.attribute "aria-pressed" "true")
+                                , Selector.style "border-top" "3px solid transparent"
+                                ]
                     , \_ ->
                         viewOf (step ToggleCameraSheet onCamera)
                             |> Query.find [ Selector.id "panel-sheet" ]
@@ -159,4 +169,51 @@ suite =
             \_ ->
                 ( phone.fineMove, (step ToggleFineMove phone).fineMove )
                     |> Expect.equal ( False, True )
+        , test "realistic mode shows the sun marker on the globe and dragging it orbits the light without moving the camera" <|
+            \_ ->
+                let
+                    wideDraft =
+                        sized 1280 800
+
+                    wideRealistic =
+                        step ToggleRenderQuality wideDraft
+
+                    initialCamAz =
+                        wideRealistic.viewport.camera.azimuth
+
+                    initialLight =
+                        Viewport.lightDirection wideRealistic.viewport
+                            |> Maybe.withDefault (Vec3.vec3 0 1 0)
+
+                    sunAngles =
+                        CameraGlobe.lightAngles initialLight
+
+                    sunPos =
+                        CameraGlobe.markerPosition sunAngles.azimuth sunAngles.elevation
+
+                    afterSunDrag =
+                        wideRealistic
+                            |> step (GlobePressed ( sunPos.x, sunPos.y ))
+                            |> step (GlobeMoved ( sunPos.x + 18, sunPos.y - 10 ))
+                            |> step GlobeReleased
+
+                    nextLight =
+                        Viewport.lightDirection afterSunDrag.viewport
+                            |> Maybe.withDefault initialLight
+                in
+                Expect.all
+                    [ \_ ->
+                        Workspace.view wideDraft
+                            |> Query.fromHtml
+                            |> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "globe-light-marker") ]
+                    , \_ ->
+                        Workspace.view wideRealistic
+                            |> Query.fromHtml
+                            |> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "globe-light-marker") ]
+                    , \_ ->
+                        Expect.within (Expect.Absolute 1.0e-6) initialCamAz afterSunDrag.viewport.camera.azimuth
+                    , \_ ->
+                        Expect.greaterThan 0.1 (Vec3.distance initialLight nextLight)
+                    ]
+                    ()
         ]

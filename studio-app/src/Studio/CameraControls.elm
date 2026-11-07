@@ -8,6 +8,7 @@ module only arranges the controls and tags each one with the page's messages.
 
 import Html exposing (Html, div)
 import Html.Attributes as Attr
+import Math.Vector3 exposing (Vec3)
 import Render.Camera as Camera exposing (Camera)
 import Render.Style as Style
 import UI.Button as Button
@@ -35,11 +36,19 @@ type alias Actions msg =
     }
 
 
+type alias State =
+    { camera : Camera
+    , helpOpen : Bool
+    , renderQuality : Style.Quality
+    , lightDirection : Maybe Vec3
+    }
+
+
 {-| The globe and its buttons, to sit where the page puts them.
 -}
-view : Actions msg -> { camera : Camera, helpOpen : Bool, renderQuality : Style.Quality } -> Html msg
+view : Actions msg -> State -> Html msg
 view actions state =
-    CameraGlobe.view
+    CameraGlobe.viewWithLight state.lightDirection
         { camera = state.camera
         , onPress = actions.onPress
         , onMove = actions.onMove
@@ -53,7 +62,7 @@ view actions state =
 
 {-| `view` pinned to the bottom-right corner of the canvas, as the pads were.
 -}
-floating : Actions msg -> { camera : Camera, helpOpen : Bool, renderQuality : Style.Quality } -> Html msg
+floating : Actions msg -> State -> Html msg
 floating actions state =
     div
         [ Attr.style "position" "absolute"
@@ -63,7 +72,7 @@ floating actions state =
         [ view actions state ]
 
 
-extraButtons : Actions msg -> { camera : Camera, helpOpen : Bool, renderQuality : Style.Quality } -> Html msg
+extraButtons : Actions msg -> State -> Html msg
 extraButtons actions state =
     div
         [ Focus.keepFocusOnCanvas actions.noOp
