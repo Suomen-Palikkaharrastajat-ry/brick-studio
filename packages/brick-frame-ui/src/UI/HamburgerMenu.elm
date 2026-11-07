@@ -41,6 +41,7 @@ type alias Config msg =
     , open : Bool
     , onToggle : msg
     , onClose : msg
+    , languageToggle : Maybe { current : Language, onSelect : Language -> msg }
     , items : List (Item msg)
     }
 
@@ -140,7 +141,90 @@ panel lang config =
         , Attr.style "border-radius" "0.625rem"
         , Attr.style "box-shadow" "0 20px 25px -5px rgba(0, 0, 0, 0.5)"
         ]
-        (List.map item config.items)
+        (case config.languageToggle of
+            Just toggle ->
+                viewLanguageToggle toggle :: List.map item config.items
+
+            Nothing ->
+                List.map item config.items
+        )
+
+
+viewLanguageToggle : { current : Language, onSelect : Language -> msg } -> Html msg
+viewLanguageToggle toggle =
+    div
+        [ Attr.attribute "role" "group"
+        , Attr.attribute "aria-label" "Language"
+        , Attr.style "display" "flex"
+        , Attr.style "align-items" "center"
+        , Attr.style "justify-content" "space-between"
+        , Attr.style "padding" "0.125rem 0.25rem 0.25rem 0.25rem"
+        , Attr.style "margin-bottom" "0.125rem"
+        , Attr.style "border-bottom" "1px solid rgba(255, 255, 255, 0.1)"
+        ]
+        [ div
+            [ Attr.style "display" "inline-flex"
+            , Attr.style "width" "100%"
+            , Attr.style "background" "rgba(255, 255, 255, 0.08)"
+            , Attr.style "border-radius" "0.375rem"
+            , Attr.style "padding" "2px"
+            , Attr.style "gap" "2px"
+            ]
+            [ languageSegment (toggle.current == Fi) "Suomi" (toggle.onSelect Fi)
+            , languageSegment (toggle.current == En) "In English" (toggle.onSelect En)
+            ]
+        ]
+
+
+languageSegment : Bool -> String -> msg -> Html msg
+languageSegment active label onSelect =
+    button
+        [ onClick onSelect
+        , Attr.type_ "button"
+        , Attr.attribute "aria-pressed"
+            (if active then
+                "true"
+
+             else
+                "false"
+            )
+        , Attr.style "flex" "1"
+        , Attr.style "padding" "0.3125rem 0.5rem"
+        , Attr.style "border" "none"
+        , Attr.style "border-radius" "0.25rem"
+        , Attr.style "font-size" "0.75rem"
+        , Attr.style "font-weight"
+            (if active then
+                "600"
+
+             else
+                "500"
+            )
+        , Attr.style "cursor" "pointer"
+        , Attr.style "transition" "all 150ms ease"
+        , Attr.style "background"
+            (if active then
+                "rgba(255, 255, 255, 0.22)"
+
+             else
+                "transparent"
+            )
+        , Attr.style "color"
+            (if active then
+                "var(--color-text-on-dark)"
+
+             else
+                "rgba(255, 255, 255, 0.6)"
+            )
+        , Attr.style "box-shadow"
+            (if active then
+                "0 1px 2px rgba(0, 0, 0, 0.25)"
+
+             else
+                "none"
+            )
+        ]
+        [ text label ]
 
 
 item : Item msg -> Html msg

@@ -24,6 +24,7 @@ type Msg
     = Toggle
     | Close
     | Pick String
+    | PickLang Language
 
 
 menuConfig : Bool -> HamburgerMenu.Config Msg
@@ -32,6 +33,7 @@ menuConfig open =
     , open = open
     , onToggle = Toggle
     , onClose = Close
+    , languageToggle = Nothing
     , items =
         [ { label = "Undo", shortcut = "Ctrl+Z", enabled = True, onSelect = Pick "undo" }
         , { label = "Redo", shortcut = "", enabled = False, onSelect = Pick "redo" }
@@ -105,6 +107,53 @@ suite =
                         |> Query.find [ Selector.tag "div", attr "aria-hidden" "true" ]
                         |> Event.simulate Event.click
                         |> Event.expect Close
+            , test "language toggle renders Suomi as pressed and In English as unpressed when Fi active" <|
+                \_ ->
+                    let
+                        config =
+                            let
+                                base =
+                                    menuConfig True
+                            in
+                            { base
+                                | languageToggle =
+                                    Just
+                                        { current = Fi
+                                        , onSelect = PickLang
+                                        }
+                            }
+                    in
+                    Query.fromHtml (HamburgerMenu.view config)
+                        |> Expect.all
+                            [ \html ->
+                                html
+                                    |> Query.find [ Selector.containing [ Selector.text "Suomi" ], attr "aria-pressed" "true" ]
+                                    |> Query.has []
+                            , \html ->
+                                html
+                                    |> Query.find [ Selector.containing [ Selector.text "In English" ], attr "aria-pressed" "false" ]
+                                    |> Query.has []
+                            ]
+            , test "clicking In English on language toggle emits selection message" <|
+                \_ ->
+                    let
+                        config =
+                            let
+                                base =
+                                    menuConfig True
+                            in
+                            { base
+                                | languageToggle =
+                                    Just
+                                        { current = Fi
+                                        , onSelect = PickLang
+                                        }
+                            }
+                    in
+                    Query.fromHtml (HamburgerMenu.view config)
+                        |> Query.find [ Selector.tag "button", Selector.containing [ Selector.text "In English" ] ]
+                        |> Event.simulate Event.click
+                        |> Event.expect (PickLang En)
             ]
         , describe "compact part card"
             [ test "the card is named by its accessible label and tooltip, with its count on the image" <|

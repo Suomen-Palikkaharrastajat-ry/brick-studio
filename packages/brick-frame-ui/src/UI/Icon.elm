@@ -128,6 +128,12 @@ featherSized size name =
                 "layers" ->
                     FeatherIcons.layers
 
+                "share" ->
+                    FeatherIcons.share2
+
+                "share-2" ->
+                    FeatherIcons.share2
+
                 _ ->
                     FeatherIcons.play
     in

@@ -3,7 +3,7 @@
  *
  * Materials (the contract's `material` codes, plus MATTE for the ground):
  * - PLASTIC (0): Lambert base in the linear colour under a GGX clear coat
- *   (IOR 1.46, F0 0.04, roughness 0.15). The coat is chosen stochastically
+ *   (IOR 1.46, F0 0.04, roughness 0.10). The coat is chosen stochastically
  *   by its Fresnel weight.
  * - TRANSPARENT (1): smooth dielectric (IOR 1.49). Reflection or refraction
  *   is picked by Fresnel; the Beer–Lambert tint is applied by the integrator
@@ -36,7 +36,7 @@ export const TRANSPARENT_IOR = 1.49
 const COAT_F0 = ((COAT_IOR - 1) / (COAT_IOR + 1)) ** 2
 const RUBBER_F0 = 0.02
 const PEARL_TINT = 0.35
-const PLASTIC_ROUGHNESS = 0.15
+const PLASTIC_ROUGHNESS = 0.10
 const PEARL_ROUGHNESS = 0.3
 const RUBBER_ROUGHNESS = 0.6
 const CHROME_ROUGHNESS = 0.08

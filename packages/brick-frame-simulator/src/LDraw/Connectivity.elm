@@ -2676,6 +2676,14 @@ knownCatalogPart name =
             -- Slope Brick 33 3 x 2
             Just (makeSlope 2 3 24 "3298.dat")
 
+        "54200" ->
+            -- Slope Brick 31 1 x 1 x 2/3 (cheese slope)
+            Just
+                { part = "54200.dat"
+                , connections = [ antiStudAt 100 (vec3 0 0 0) ]
+                , boundingBoxes = [ { min = vec3 -10 -16 -10, max = vec3 10 0 10 } ]
+                }
+
         "14417" ->
             -- Plate 1 x 2 with Ball
             let

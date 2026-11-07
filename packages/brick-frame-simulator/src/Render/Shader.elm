@@ -122,15 +122,19 @@ fragmentShader =
             float specular = 0.0;
             if (specularStrength > 0.0001) {
                 vec3 halfDir = normalize(lightDir + viewDir);
-                specular = pow(max(dot(norm, halfDir), 0.0), specularPower) * specularStrength;
+                float NdotH = max(dot(norm, halfDir), 0.0);
+                float VdotH = max(dot(viewDir, halfDir), 0.0);
+                float fresnel = 0.04 + 0.96 * pow(1.0 - VdotH, 5.0);
+                specular = pow(NdotH, specularPower) * specularStrength * fresnel;
             }
 
             float rim = 0.0;
             if (rimStrength > 0.0001) {
-                rim = pow(1.0 - max(dot(norm, viewDir), 0.0), rimPower) * rimStrength;
+                float facingLight = max(0.05, dot(norm, lightDir));
+                rim = pow(1.0 - max(dot(norm, viewDir), 0.0), rimPower) * rimStrength * facingLight;
             }
 
-            vec3 litColor = vColor.rgb * light + vec3(specular + rim);
+            vec3 litColor = vColor.rgb * (light * (1.0 - specular)) + vec3(specular + rim);
             if (abs(vibrance) > 0.0001) {
                 float luma = dot(litColor, vec3(0.2126, 0.7152, 0.0722));
                 litColor = mix(vec3(luma), litColor, 1.0 + clamp(vibrance, -0.5, 0.5));
