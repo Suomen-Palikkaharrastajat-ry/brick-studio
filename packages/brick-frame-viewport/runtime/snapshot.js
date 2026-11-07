@@ -70,7 +70,7 @@ function fillBackground(ctx, width, height) {
 }
 
 /** Fallback: copies the on-screen WebGL canvas. */
-function captureCanvasCopy(ports, { width, height, transparent, filename }) {
+function captureCanvasCopy(ports, { width, height, transparent = true, filename }) {
   const canvas = largestVisibleCanvas(document)
   if (!canvas) return
 

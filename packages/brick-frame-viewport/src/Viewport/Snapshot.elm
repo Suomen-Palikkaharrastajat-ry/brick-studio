@@ -120,7 +120,7 @@ encodeRequest config =
     Encode.object
         [ ( "width", Encode.int imageWidth )
         , ( "height", Encode.int imageHeight )
-        , ( "transparent", Encode.bool False )
+        , ( "transparent", Encode.bool True )
         , ( "filename", Encode.string config.filename )
         , ( "timeBudgetMs", Encode.int timeBudgetMs )
         , ( "camera"

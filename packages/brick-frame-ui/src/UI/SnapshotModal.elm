@@ -391,6 +391,8 @@ viewPreview lang data =
             [ Attr.style "display" "flex"
             , Attr.style "justify-content" "center"
             , Attr.style "background" previewBackground
+            , Attr.style "background-image" "radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)"
+            , Attr.style "background-size" "16px 16px"
             , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
             , Attr.style "border-radius" "8px"
             , Attr.style "overflow" "hidden"

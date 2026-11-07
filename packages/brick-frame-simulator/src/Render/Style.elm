@@ -127,14 +127,14 @@ glossy plastic sheen (specular and rim) on top of the draft lighting.
 -}
 realisticStyle : Style
 realisticStyle =
-    { lightDirection = Vec3.normalize (vec3 0.3 1.0 0.4)
-    , lightStrength = 0.72
+    { lightDirection = Vec3.normalize (vec3 0.35 1.0 0.45)
+    , lightStrength = 0.74
     , ambientStrength = 0.28
-    , specularStrength = 0.45
-    , specularPower = 36.0
-    , rimStrength = 0.12
-    , rimPower = 3.0
-    , vibrance = 0.18
+    , specularStrength = 0.48
+    , specularPower = 38.0
+    , rimStrength = 0.14
+    , rimPower = 3.2
+    , vibrance = 0.16
     , edgeColor = vec3 0.1 0.1 0.1
     , edgeWidth = 1.0
     }

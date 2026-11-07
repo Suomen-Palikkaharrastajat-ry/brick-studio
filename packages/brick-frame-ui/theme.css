@@ -202,6 +202,7 @@ button:not(:disabled):active {
 /* Strips that scroll sideways on a phone: swipeable, without a scrollbar. */
 .scroll-none {
   scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 .scroll-none::-webkit-scrollbar {
   display: none;

@@ -116,8 +116,19 @@ fragmentShader =
 
             vec3 lightDir = normalize(lightDirection);
             vec3 viewDir = normalize(viewPosition - vPositionWorld);
-            float diffuse = max(0.0, dot(norm, lightDir));
-            float light = ambientStrength + lightStrength * diffuse;
+
+            // Physical hemisphere lighting: cool sky from above, warm bounce from ground
+            float hemi = norm.y * 0.5 + 0.5;
+            vec3 skyAmb = vec3(0.95, 0.98, 1.05) * ambientStrength;
+            vec3 gndBounce = vec3(1.05, 0.96, 0.88) * (ambientStrength * 0.7);
+            vec3 ambColor = mix(gndBounce, skyAmb, hemi);
+
+            // Soft wrap diffuse around rounded plastic contours & cylindrical studs
+            float wrap = 0.12;
+            float rawDiff = dot(norm, lightDir);
+            float diffuse = max(0.0, (rawDiff + wrap) / (1.0 + wrap));
+            vec3 sunColor = vec3(1.02, 0.99, 0.95);
+            vec3 lightColor = ambColor + sunColor * (lightStrength * diffuse);
 
             float specular = 0.0;
             if (specularStrength > 0.0001) {
@@ -125,16 +136,19 @@ fragmentShader =
                 float NdotH = max(dot(norm, halfDir), 0.0);
                 float VdotH = max(dot(viewDir, halfDir), 0.0);
                 float fresnel = 0.04 + 0.96 * pow(1.0 - VdotH, 5.0);
-                specular = pow(NdotH, specularPower) * specularStrength * fresnel;
+                // Dual-lobe ABS plastic specular: sharp core highlight + soft glossy shoulder
+                float sharpSpec = pow(NdotH, specularPower * 1.5) * 0.75;
+                float broadSpec = pow(NdotH, max(4.0, specularPower * 0.25)) * 0.25;
+                specular = (sharpSpec + broadSpec) * specularStrength * fresnel;
             }
 
             float rim = 0.0;
             if (rimStrength > 0.0001) {
-                float facingLight = max(0.05, dot(norm, lightDir));
+                float facingLight = max(0.08, dot(norm, lightDir));
                 rim = pow(1.0 - max(dot(norm, viewDir), 0.0), rimPower) * rimStrength * facingLight;
             }
 
-            vec3 litColor = vColor.rgb * (light * (1.0 - specular)) + vec3(specular + rim);
+            vec3 litColor = vColor.rgb * (lightColor * (1.0 - specular)) + vec3(specular + rim);
             if (abs(vibrance) > 0.0001) {
                 float luma = dot(litColor, vec3(0.2126, 0.7152, 0.0722));
                 litColor = mix(vec3(luma), litColor, 1.0 + clamp(vibrance, -0.5, 0.5));
