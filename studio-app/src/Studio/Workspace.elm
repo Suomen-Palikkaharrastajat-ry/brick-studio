@@ -2688,7 +2688,7 @@ may touch. Glued parts stay put (`0 !PALIKKA GLUED`).
 -}
 movableIds : Model -> List Int
 movableIds model =
-    Set.toList (Set.diff model.selection (Document.gluedIds model.document))
+    Set.toList (Set.diff model.selection (Document.gluedPlacementIds model.document))
 
 
 {-| Where a part added from the palette goes, in document space: the nearest
@@ -3768,7 +3768,7 @@ grabPart ( x, y ) model =
             |> Maybe.andThen
                 (\hit ->
                     -- A glued part is an obstacle, not something to grab: a press on it does not drag.
-                    if Document.isGlued hit.source model.document then
+                    if Document.isPlacementGlued hit.source model.document then
                         Nothing
 
                     else

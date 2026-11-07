@@ -238,10 +238,41 @@ apply command doc =
                 gluedNow =
                     Document.gluedIds doc
 
+                explicitIds =
+                    Set.fromList (List.map Tuple.first pairs)
+
+                ( _, expandedPairsRev ) =
+                    List.foldl
+                        (\( id, glued ) ( seen0, rev0 ) ->
+                            let
+                                ( seen1, rev1 ) =
+                                    if Set.member id seen0 then
+                                        ( seen0, rev0 )
+
+                                    else
+                                        ( Set.insert id seen0, ( id, glued ) :: rev0 )
+                            in
+                            List.foldl
+                                (\p ( seen, rev ) ->
+                                    if Set.member p.id seen || Set.member p.id explicitIds then
+                                        ( seen, rev )
+
+                                    else
+                                        ( Set.insert p.id seen, ( p.id, glued ) :: rev )
+                                )
+                                ( seen1, rev1 )
+                                (Document.constituentPlacements id doc)
+                        )
+                        ( Set.empty, [] )
+                        pairs
+
+                expandedPairs =
+                    List.reverse expandedPairsRev
+
                 inverse =
-                    List.map (\( id, _ ) -> ( id, Set.member id gluedNow )) pairs
+                    List.map (\( id, _ ) -> ( id, Set.member id gluedNow )) expandedPairs
             in
-            ( List.foldl (\( id, glued ) d -> Document.setGlued glued id d) doc pairs
+            ( List.foldl (\( id, glued ) d -> Document.setGlued glued id d) doc expandedPairs
             , SetGlued inverse
             )
 

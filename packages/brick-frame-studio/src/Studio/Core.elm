@@ -904,8 +904,33 @@ setGlued glued model =
         gluedNow =
             Document.gluedIds model.document
 
+        selectedAndConstituents =
+            model.selection
+                |> Set.toList
+                |> List.concatMap (\id -> Document.constituentPlacements id model.document)
+                |> List.map .id
+                |> Set.fromList
+
+        enclosingAndConstituents =
+            if glued then
+                Set.empty
+
+            else
+                Document.placements model.document
+                    |> List.filter
+                        (\p ->
+                            Document.constituentPlacements p.id model.document
+                                |> List.any (\c -> Set.member c.id selectedAndConstituents)
+                        )
+                    |> List.concatMap (\p -> Document.constituentPlacements p.id model.document)
+                    |> List.map .id
+                    |> Set.fromList
+
+        candidateIds =
+            Set.union selectedAndConstituents enclosingAndConstituents
+
         targets =
-            Set.toList (Set.filter (\id -> Set.member id gluedNow /= glued) model.selection)
+            Set.toList (Set.filter (\id -> Set.member id gluedNow /= glued) candidateIds)
     in
     if not model.glueEditable || List.isEmpty targets then
         ( model, Cmd.none, [] )
@@ -1767,7 +1792,7 @@ addPartAt partFile color matrix model =
             recordEdit (Add [ newPart ]) model
 
         newPlacement =
-            List.head (List.reverse (Document.placements newDoc))
+            List.head (List.reverse (Document.mainPlacements newDoc))
 
         newSelection =
             case newPlacement of

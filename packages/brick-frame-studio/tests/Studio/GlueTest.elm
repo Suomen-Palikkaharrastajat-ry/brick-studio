@@ -346,6 +346,82 @@ coreSuite =
                     , \_ -> Expect.equal True (Core.isGlued 4 cleared)
                     ]
                     ()
+        , test "unlocking a group unlocks all constituent bricks and undo restores prior glue" <|
+            \_ ->
+                let
+                    -- In boardText, placement 0 is glued, placements 1 and 2 are unglued.
+                    -- Group placement 0 and 1 together: the resulting group is selected and glued.
+                    ( grouped, _, _ ) =
+                        Core.groupSelection (select [ 0, 1 ] (modelWith boardText))
+
+                    ( unlocked, _, _ ) =
+                        Core.setGlued False grouped
+
+                    ( nudged, _, _ ) =
+                        Core.update nudgeRight unlocked
+
+                    ( ungrouped, _, _ ) =
+                        Core.explodeSelection unlocked
+
+                    ( undone, _, _ ) =
+                        Core.undo unlocked
+                in
+                Expect.all
+                    [ \_ -> Expect.equal True (Core.selectionGlued grouped)
+                    , \_ -> Expect.equal False (Core.selectionGlued unlocked)
+                    , \_ -> Expect.equal [] (List.filter (\id -> Core.isGlued id unlocked) (idsOf unlocked))
+                    , \_ -> Expect.notEqual (written unlocked) (written nudged)
+                    , \_ -> Expect.equal [] (List.filter (\id -> Core.isGlued id ungrouped) (idsOf ungrouped))
+                    , \_ -> Expect.equal (written grouped) (written undone)
+                    ]
+                    ()
+        , test "unlocking unlocks all selected bricks whether they are part of a group or not" <|
+            \_ ->
+                let
+                    -- Group 0 (glued) and 1 (unglued), and also glue standalone brick 2.
+                    ( grouped, _, _ ) =
+                        Core.groupSelection (select [ 0, 1 ] (modelWith boardText))
+
+                    ( allGlued, _, _ ) =
+                        Core.setGlued True (Core.selectAll grouped)
+
+                    ( allUnlocked, _, _ ) =
+                        Core.setGlued False (Core.selectAll allGlued)
+                in
+                Expect.all
+                    [ \_ -> Expect.equal True (Core.selectionGlued allGlued)
+                    , \_ -> Expect.equal False (Core.selectionGlued allUnlocked)
+                    , \_ -> Expect.equal [] (List.filter (\id -> Core.isGlued id allUnlocked) (idsOf allUnlocked))
+                    ]
+                    ()
+        , test "unlocking a group whose glue line is only on a constituent brick unlocks the group" <|
+            \_ ->
+                let
+                    mpd =
+                        String.join "\n"
+                            [ "0 FILE main.ldr"
+                            , "1 16 0 0 0 1 0 0 0 1 0 0 0 1 submodel1.ldr"
+                            , "0 !PALIKKA GLUED"
+                            , "1 4 100 0 0 1 0 0 0 1 0 0 0 1 3001.dat"
+                            , "0 FILE submodel1.ldr"
+                            , "0 !PALIKKA GLUED"
+                            , "1 4 0 0 0 1 0 0 0 1 0 0 0 1 3003.dat"
+                            , "1 4 40 0 0 1 0 0 0 1 0 0 0 1 3003.dat"
+                            , ""
+                            ]
+
+                    model =
+                        Core.selectAll (modelWith mpd)
+
+                    ( unlocked, _, _ ) =
+                        Core.setGlued False model
+                in
+                Expect.all
+                    [ \_ -> Expect.equal True (Core.selectionGlued model)
+                    , \_ -> Expect.equal False (Core.selectionGlued unlocked)
+                    , \_ -> Expect.equal [] (List.filter (\id -> Core.isGlued id unlocked) (idsOf unlocked))
+                    ]
+                    ()
         ]
 
 
