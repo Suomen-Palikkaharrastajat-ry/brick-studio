@@ -29,14 +29,19 @@ export const MATERIAL = Object.freeze({
   MATTE: 5,
 })
 
-/** Index of refraction of the clear coat / plastic. */
-const COAT_IOR = 1.46
-/** Index of refraction of transparent LEGO plastic. */
+/** Index of refraction of the clear coat / ABS plastic. */
+const COAT_IOR = 1.53
+/** Index of refraction of transparent LEGO plastic (polycarbonate / MABS). */
 export const TRANSPARENT_IOR = 1.49
 const COAT_F0 = ((COAT_IOR - 1) / (COAT_IOR + 1)) ** 2
 const RUBBER_F0 = 0.02
 const PEARL_TINT = 0.35
-const PLASTIC_ROUGHNESS = 0.08
+const PLASTIC_ROUGHNESS = 0.045
+const PLASTIC_SHOULDER_ROUGHNESS = 0.18
+const PLASTIC_CORE_WEIGHT = 0.72
+const PLASTIC_SHOULDER_WEIGHT = 1 - PLASTIC_CORE_WEIGHT
+const SSS_WRAP = 0.18
+const SSS_CHROMA_BOOST = 0.15
 const PEARL_ROUGHNESS = 0.3
 const RUBBER_ROUGHNESS = 0.6
 const CHROME_ROUGHNESS = 0.08
@@ -175,8 +180,6 @@ export function evalSurface(material, albedo, frame, wo, wi, out) {
   }
 
   const roughness = materialParams(material, albedo)
-  const alpha = roughness * roughness
-  const a2 = alpha * alpha
   // Half vector in local space.
   let hx = lo[0] + li[0]
   let hy = lo[1] + li[1]
@@ -191,14 +194,31 @@ export function evalSurface(material, albedo, frame, wo, wi, out) {
   const nh = Math.max(0, hz)
   const vh = Math.max(1e-6, dot3(lo, lh))
 
-  const d = ggxD(a2, nh)
-  const g = ggxG1(a2, nv) * ggxG1(a2, nl)
+  let specScale
+  let specPdf
+  if (material === MATERIAL.PLASTIC) {
+    const aCore = PLASTIC_ROUGHNESS * PLASTIC_ROUGHNESS
+    const a2Core = aCore * aCore
+    const dCore = ggxD(a2Core, nh)
+    const gCore = ggxG1(a2Core, nv) * ggxG1(a2Core, nl)
+    const aShoulder = PLASTIC_SHOULDER_ROUGHNESS * PLASTIC_SHOULDER_ROUGHNESS
+    const a2Shoulder = aShoulder * aShoulder
+    const dShoulder = ggxD(a2Shoulder, nh)
+    const gShoulder = ggxG1(a2Shoulder, nv) * ggxG1(a2Shoulder, nl)
+    specScale = (PLASTIC_CORE_WEIGHT * dCore * gCore + PLASTIC_SHOULDER_WEIGHT * dShoulder * gShoulder) / (4 * nv * nl)
+    specPdf = ((PLASTIC_CORE_WEIGHT * dCore + PLASTIC_SHOULDER_WEIGHT * dShoulder) * nh) / (4 * vh)
+  } else {
+    const alpha = roughness * roughness
+    const a2 = alpha * alpha
+    const d = ggxD(a2, nh)
+    const g = ggxG1(a2, nv) * ggxG1(a2, nl)
+    specScale = (d * g) / (4 * nv * nl)
+    specPdf = (d * nh) / (4 * vh)
+  }
   const f0avg = (f0v[0] + f0v[1] + f0v[2]) / 3
   for (let i = 0; i < 3; i++) {
     fcol[i] = schlick(vh, f0v[i])
   }
-  const specScale = d * g / (4 * nv * nl)
-  const specPdf = (d * nh) / (4 * vh)
 
   if (material === MATERIAL.CHROME) {
     for (let i = 0; i < 3; i++) out.f[i] = specScale * fcol[i]
@@ -206,13 +226,23 @@ export function evalSurface(material, albedo, frame, wo, wi, out) {
     return out
   }
 
-  // Clear coat over a Lambert base.
+  // Clear coat over a subsurface / Lambert base.
   const pCoat = coatProbability(nv, f0avg)
   const fvAvg = schlick(nv, f0avg)
   const flAvg = schlick(nl, f0avg)
-  const diffuseScale = (1 - fvAvg) * (1 - flAvg) * INV_PI
-  for (let i = 0; i < 3; i++) {
-    out.f[i] = specScale * fcol[i] + diffuseScale * albedo[i]
+  if (material === MATERIAL.PLASTIC) {
+    const wrapFactor = 1 + SSS_WRAP * (0.5 - nl)
+    const diffuseScale = (1 - fvAvg) * (1 - flAvg) * wrapFactor * INV_PI
+    const meanAlb = (albedo[0] + albedo[1] + albedo[2]) / 3
+    for (let i = 0; i < 3; i++) {
+      const sssAlb = Math.min(1, Math.max(0, albedo[i] * (1 + SSS_CHROMA_BOOST * (albedo[i] - meanAlb))))
+      out.f[i] = specScale * fcol[i] + diffuseScale * sssAlb
+    }
+  } else {
+    const diffuseScale = (1 - fvAvg) * (1 - flAvg) * INV_PI
+    for (let i = 0; i < 3; i++) {
+      out.f[i] = specScale * fcol[i] + diffuseScale * albedo[i]
+    }
   }
   out.pdf = pCoat * specPdf + (1 - pCoat) * nl * INV_PI
   return out
@@ -243,9 +273,20 @@ export function sampleSurface(material, albedo, frame, wo, rng, out) {
     sampleLocal[2] = Math.sqrt(Math.max(0, 1 - u1))
   } else {
     // GGX half vector, then reflect wo about it.
-    const alpha = roughness * roughness
+    let lobeRoughness = roughness
+    let uLobe = u1
+    if (material === MATERIAL.PLASTIC) {
+      if (u1 < PLASTIC_CORE_WEIGHT) {
+        lobeRoughness = PLASTIC_ROUGHNESS
+        uLobe = u1 / PLASTIC_CORE_WEIGHT
+      } else {
+        lobeRoughness = PLASTIC_SHOULDER_ROUGHNESS
+        uLobe = (u1 - PLASTIC_CORE_WEIGHT) / PLASTIC_SHOULDER_WEIGHT
+      }
+    }
+    const alpha = lobeRoughness * lobeRoughness
     const a2 = alpha * alpha
-    const cosT = Math.sqrt((1 - u1) / (1 + (a2 - 1) * u1))
+    const cosT = Math.sqrt((1 - uLobe) / (1 + (a2 - 1) * uLobe))
     const sinT = Math.sqrt(Math.max(0, 1 - cosT * cosT))
     const phi = 2 * Math.PI * u2
     const hx = sinT * Math.cos(phi)

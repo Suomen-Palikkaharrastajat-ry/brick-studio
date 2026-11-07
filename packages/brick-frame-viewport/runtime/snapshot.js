@@ -26,6 +26,7 @@
 import { renderSnapshot } from './pathtracer/index.js'
 
 const DEFAULT_FILENAME = 'palikkakehys-render.png'
+const REVOKE_DELAY_MS = 60000
 
 /** The render currently in flight, or null. */
 let activeRender = null
@@ -135,13 +136,54 @@ function captureSnapshot(ports, request) {
   }
 }
 
+/**
+ * Converts a `data:` URL into a `Blob` synchronously so mobile browsers
+ * (notably iOS Safari) can download or preview it via a `blob:` object URL.
+ */
+export function dataUrlToBlob(dataUrl) {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return null
+  const commaIndex = dataUrl.indexOf(',')
+  if (commaIndex < 0) return null
+  const header = dataUrl.slice(5, commaIndex)
+  const body = dataUrl.slice(commaIndex + 1)
+  const parts = header.split(';')
+  const mime = parts[0] || 'image/png'
+  const isBase64 = parts.includes('base64')
+  try {
+    if (isBase64) {
+      const binary = atob(body)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i)
+      }
+      return new Blob([bytes], { type: mime })
+    }
+    return new Blob([decodeURIComponent(body)], { type: mime })
+  } catch {
+    return null
+  }
+}
+
 function downloadSnapshot({ dataUrl, filename }) {
+  if (!dataUrl || typeof document === 'undefined') return
+  const blob = dataUrlToBlob(dataUrl)
+  const objectUrl =
+    blob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+      ? URL.createObjectURL(blob)
+      : null
   const link = document.createElement('a')
-  link.href = dataUrl
+  link.href = objectUrl || dataUrl
   link.download = filename || DEFAULT_FILENAME
+  if (link.style) link.style.display = 'none'
   document.body.appendChild(link)
   link.click()
-  link.remove()
+  const timer = setTimeout(() => {
+    link.remove()
+    if (objectUrl && typeof URL.revokeObjectURL === 'function') {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }, REVOKE_DELAY_MS)
+  timer?.unref?.()
 }
 
 /** Wire the snapshot ports of a host app. Ports the host does not declare are skipped. */

@@ -208,3 +208,121 @@ test('direct and sky light on the ground match the analytic Lambert estimate (MI
   const measured = sum / n
   assert.ok(Math.abs(measured - expected) / expected < 0.03, `ground ${measured} vs analytic ${expected}`)
 })
+
+test('horizontal Red (#B40000) and Black (#1B2A34) plastic bricks retain rich saturated colour without softbox washout', () => {
+  function renderHorizontalPlastic(rSrgb, gSrgb, bSrgb) {
+    const h = 60
+    const y = 30
+    const a = [-h, y, -h]
+    const b = [h, y, -h]
+    const c = [h, y, h]
+    const d = [-h, y, h]
+    const triangles = [
+      ...a, ...b, ...c, rSrgb, gSrgb, bSrgb, 1, 0,
+      ...a, ...c, ...d, rSrgb, gSrgb, bSrgb, 1, 0,
+    ]
+    const scene = sceneFor(8, 8, { triangles })
+    const rng = createRng(19)
+    const ray = primaryRay(scene, 3, 3, 1, 1, createRay())
+    const out = new Float64Array(4)
+    const sum = new Float32Array(3)
+    const samples = 512
+    for (let i = 0; i < samples; i++) {
+      tracePath(scene, rng, ray, out)
+      sum[0] += out[0] / samples
+      sum[1] += out[1] / samples
+      sum[2] += out[2] / samples
+    }
+    return toRgba8(sum, new Float32Array([1]), 1, 1)
+  }
+
+  // Red #B40000 = (180/255, 0, 0)
+  const redRgba = renderHorizontalPlastic(180 / 255, 0, 0)
+  assert.ok(redRgba[0] >= 145, `Red brick R channel should be strong, got ${redRgba[0]}`)
+  assert.ok(redRgba[1] < 65 && redRgba[2] < 65, `Red brick G/B should not bleach to pink, got (${redRgba[0]}, ${redRgba[1]}, ${redRgba[2]})`)
+  assert.ok(redRgba[0] > 2.5 * redRgba[1], `Red brick R/G ratio should be >= 2.5x, got (${redRgba[0]}, ${redRgba[1]}, ${redRgba[2]})`)
+
+  // Black #1B2A34 = (27/255, 42/255, 52/255)
+  const blackRgba = renderHorizontalPlastic(27 / 255, 42 / 255, 52 / 255)
+  assert.ok(
+    blackRgba[0] < 75 && blackRgba[1] < 85 && blackRgba[2] < 95,
+    `Black brick should stay dark instead of washing out to grey, got (${blackRgba[0]}, ${blackRgba[1]}, ${blackRgba[2]})`,
+  )
+})
+
+test('smooth vertex normals interpolate across 16-sided cylindrical studs while keeping 90-degree rims sharp', () => {
+  // Build two adjacent facets of a 16-sided cylinder of radius 6 (height 0..4) plus a flat top cap triangle at y = 4.
+  const r = 6
+  const segs = 16
+  const pt = (k, y) => {
+    const a = (k * 2 * Math.PI) / segs
+    return [r * Math.sin(a), y, r * Math.cos(a)]
+  }
+  const p0b = pt(0, 0)
+  const p1b = pt(1, 0)
+  const p2b = pt(2, 0)
+  const p0t = pt(0, 4)
+  const p1t = pt(1, 4)
+  const p2t = pt(2, 4)
+  const centerTop = [0, 4, 0]
+  const col = [0.8, 0.1, 0.1, 1, 0]
+  const triangles = [
+    // Facet 0
+    ...p0b, ...p1b, ...p1t, ...col,
+    ...p0b, ...p1t, ...p0t, ...col,
+    // Facet 1 (shares edge p1b-p1t at 22.5° < 35°)
+    ...p1b, ...p2b, ...p2t, ...col,
+    ...p1b, ...p2t, ...p1t, ...col,
+    // Top cap (shares edge p0t-p1t at 90° > 35°)
+    ...centerTop, ...p0t, ...p1t, ...col,
+  ]
+  const scene = sceneFor(8, 8, { triangles })
+  // Find the top cap slot (face normal +Y)
+  for (let slot = 0; slot < scene.bvh.count; slot++) {
+    const vn = scene.vertexNormals.subarray(slot * 9, (slot + 1) * 9)
+    if (vn[1] > 0.9) {
+      // All 3 corners of the top cap must stay strictly vertical (0, 1, 0)
+      assert.ok(vn[1] > 0.999 && vn[4] > 0.999 && vn[7] > 0.999, `top cap normal leaked wall normal: ${vn}`)
+    }
+  }
+  // Ray aimed across the shared vertical edge p1 at height y = 2 should produce a smooth normal aligned with p1's radial direction
+  const radial1 = norm([p1b[0], 0, p1b[2]])
+  const ray = {
+    ox: p1b[0] * 3,
+    oy: 2,
+    oz: p1b[2] * 3,
+    dx: -radial1[0],
+    dy: 0,
+    dz: -radial1[2],
+    tMin: 0,
+    tMax: Infinity,
+  }
+  const hit = intersect(scene.bvh, ray, createHit())
+  assert.ok(hit, 'ray should hit the stud cylinder wall near vertex 1')
+  const o = hit.slot * 9
+  const vn = scene.vertexNormals
+  const w = 1 - hit.u - hit.v
+  const nx = w * vn[o] + hit.u * vn[o + 3] + hit.v * vn[o + 6]
+  const ny = w * vn[o + 1] + hit.u * vn[o + 4] + hit.v * vn[o + 7]
+  const nz = w * vn[o + 2] + hit.u * vn[o + 5] + hit.v * vn[o + 8]
+  const nInterp = norm([nx, ny, nz])
+  assert.ok(
+    dot(nInterp, radial1) > 0.998,
+    `smoothed cylinder normal at shared edge should match radial normal (${dot(nInterp, radial1)})`,
+  )
+})
+
+test('prepareScene respects custom lightDirection when provided', () => {
+  const customDir = [0, 1, 0]
+  const scene = prepareScene({
+    width: 8,
+    height: 8,
+    transparent: false,
+    lightDirection: customDir,
+    camera: { position: [0, 80, 300], target: [0, 30, 0], up: [0, 1, 0], fovYDegrees: 45 },
+    triangles: Float32Array.from(squareAt(40)),
+  })
+  const key = scene.lights[0]
+  assert.equal(key.kind, 'cone')
+  assert.ok(Math.abs(key.dir[0]) < 1e-6 && Math.abs(key.dir[1] - 1) < 1e-6 && Math.abs(key.dir[2]) < 1e-6)
+})

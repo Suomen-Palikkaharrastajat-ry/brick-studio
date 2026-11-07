@@ -56,9 +56,13 @@ const BAND_WIDTH = 0.3
  * `irradiance` over the solid angle, so a small, bright box adds little light.
  */
 const SOFTBOXES = [
-  { h: 0.9, r: -0.5, u: 1, hint: 'right', ha: 0.5, hb: 0.3, irradiance: 0.35 },
-  { h: -1, r: 0, u: 0.36, hint: 'up', ha: 0.4, hb: 0.08, irradiance: 0.25 },
+  { h: 0.9, r: -0.5, u: 1, hint: 'right', ha: 0.5, hb: 0.3, irradiance: 0.35, plasticScale: 0.08 },
+  { h: -1, r: 0, u: 0.36, hint: 'up', ha: 0.4, hb: 0.08, irradiance: 0.25, plasticScale: 0 },
 ]
+/** Default attenuation of softbox emitters on dielectric plastic/rubber to prevent washout while keeping full chrome reflections. */
+const SOFTBOX_PLASTIC_SCALE = 0.08
+/** Cosine of the 35° crease angle threshold for smooth vertex normals on studs and curved slopes. */
+const SMOOTH_COS = Math.cos((35 * Math.PI) / 180)
 /** Linear albedo of the studio ground: a slightly warm light grey. */
 export const GROUND_ALBEDO = [0.6, 0.58, 0.55]
 /** The ground sits this far (LDU) below the model's lowest point. */
@@ -128,7 +132,7 @@ function makeLight(dir, coneDeg, irradiance) {
   const b = cross3(d, t)
   const cosMax = Math.cos((coneDeg * Math.PI) / 180)
   const solidAngle = 2 * Math.PI * (1 - cosMax)
-  return { kind: 'cone', dir: d, t, b, cosMax, solidAngle, irradiance }
+  return { kind: 'cone', dir: d, t, b, cosMax, solidAngle, irradiance, plasticScale: 1 }
 }
 
 /** Solid angle of a rectangle with half-sizes ha, hb seen from unit distance at its centre. */
@@ -140,7 +144,7 @@ function rectSolidAngle(ha, hb) {
  * A rectangular softbox facing `dir`, its long axis along `hint`. Points on
  * it are `dir + x·t + y·b` (at unit distance) with |x| ≤ ha and |y| ≤ hb.
  */
-function makeRect(dir, hint, ha, hb, irradiance) {
+function makeRect(dir, hint, ha, hb, irradiance, plasticScale = SOFTBOX_PLASTIC_SCALE) {
   const c = normalize3(dir)
   const along = dot3(hint, c)
   const t = normalize3([hint[0] - along * c[0], hint[1] - along * c[1], hint[2] - along * c[2]])
@@ -155,6 +159,7 @@ function makeRect(dir, hint, ha, hb, irradiance) {
     area: 4 * ha * hb,
     solidAngle: rectSolidAngle(ha, hb),
     irradiance,
+    plasticScale,
   }
 }
 
@@ -209,7 +214,7 @@ export function lightPdf(light, x, y, z) {
  * Key and fill lights placed relative to the camera, so the model is lit
  * from the same side the user sees it.
  */
-export function studioLights(camera) {
+export function studioLights(camera, customLightDir) {
   const toCam = [-camera.forward[0], -camera.forward[1], -camera.forward[2]]
   const upDot = dot3(toCam, camera.up)
   const toCamH = normalize3([
@@ -218,11 +223,23 @@ export function studioLights(camera) {
     toCam[2] - camera.up[2] * upDot,
   ])
   const { right, up } = camera
-  const key = makeLight(
-    [0.6 * toCamH[0] + 0.9 * right[0] + 1.0 * up[0], 0.6 * toCamH[1] + 0.9 * right[1] + 1.0 * up[1], 0.6 * toCamH[2] + 0.9 * right[2] + 1.0 * up[2]],
-    KEY_CONE_DEG,
-    KEY_IRRADIANCE,
-  )
+  let keyDir = [
+    0.6 * toCamH[0] + 0.9 * right[0] + 1.0 * up[0],
+    0.6 * toCamH[1] + 0.9 * right[1] + 1.0 * up[1],
+    0.6 * toCamH[2] + 0.9 * right[2] + 1.0 * up[2],
+  ]
+  if (
+    (Array.isArray(customLightDir) || ArrayBuffer.isView(customLightDir)) &&
+    customLightDir.length === 3
+  ) {
+    const lx = Number(customLightDir[0])
+    const ly = Number(customLightDir[1])
+    const lz = Number(customLightDir[2])
+    if (Math.hypot(lx, ly, lz) > 1e-6) {
+      keyDir = [lx, ly, lz]
+    }
+  }
+  const key = makeLight(keyDir, KEY_CONE_DEG, KEY_IRRADIANCE)
   const fill = makeLight(
     [0.6 * toCamH[0] - 0.9 * right[0] + 0.6 * up[0], 0.6 * toCamH[1] - 0.9 * right[1] + 0.6 * up[1], 0.6 * toCamH[2] - 0.9 * right[2] + 0.6 * up[2]],
     FILL_CONE_DEG,
@@ -230,7 +247,7 @@ export function studioLights(camera) {
   )
   const softboxes = SOFTBOXES.map((s) => {
     const dir = [0, 1, 2].map((i) => s.h * toCamH[i] + s.r * right[i] + s.u * up[i])
-    return makeRect(dir, s.hint === 'up' ? up : right, s.ha, s.hb, s.irradiance)
+    return makeRect(dir, s.hint === 'up' ? up : right, s.ha, s.hb, s.irradiance, s.plasticScale)
   })
   return [key, fill, ...softboxes]
 }
@@ -278,6 +295,105 @@ function environmentIrradiance() {
 /** Irradiance of the reflection environment, used by the shadow catcher's sky sample. */
 export const ENV_IRRADIANCE = environmentIrradiance()
 
+function quantizeVertex(x, y, z) {
+  return `${Math.round(x * 1000) + 0},${Math.round(y * 1000) + 0},${Math.round(z * 1000) + 0}`
+}
+
+/**
+ * Computes smoothed per-corner vertex normals (3 corners × 3 floats per BVH
+ * slot) by averaging distinct face normals at coincident vertices whose angle
+ * with the triangle's own face normal is < 35°. Keeps 90° brick edges sharp
+ * while smoothing 16-sided cylindrical studs and curved slopes.
+ */
+function computeVertexNormals(triangles, bvh) {
+  const count = bvh.count
+  const faceNormals = new Float32Array(count * 3)
+  const vertexNormals = new Float32Array(count * 9)
+  const vertexMap = new Map()
+  const cornerKeys = new Array(count * 3)
+
+  for (let slot = 0; slot < count; slot++) {
+    const o = slot * 9
+    const tris = bvh.tris
+    const e1x = tris[o + 3]
+    const e1y = tris[o + 4]
+    const e1z = tris[o + 5]
+    const e2x = tris[o + 6]
+    const e2y = tris[o + 7]
+    const e2z = tris[o + 8]
+    let nx = e1y * e2z - e1z * e2y
+    let ny = e1z * e2x - e1x * e2z
+    let nz = e1x * e2y - e1y * e2x
+    const nl = Math.hypot(nx, ny, nz) || 1
+    nx /= nl
+    ny /= nl
+    nz /= nl
+    faceNormals[slot * 3] = nx
+    faceNormals[slot * 3 + 1] = ny
+    faceNormals[slot * 3 + 2] = nz
+
+    const base = bvh.prims[slot] * STRIDE
+    for (let c = 0; c < 3; c++) {
+      const vx = triangles[base + c * 3]
+      const vy = triangles[base + c * 3 + 1]
+      const vz = triangles[base + c * 3 + 2]
+      const key = quantizeVertex(vx, vy, vz)
+      cornerKeys[slot * 3 + c] = key
+      let list = vertexMap.get(key)
+      if (!list) {
+        list = []
+        vertexMap.set(key, list)
+      }
+      let duplicate = false
+      for (let k = 0; k < list.length; k += 3) {
+        if (list[k] * nx + list[k + 1] * ny + list[k + 2] * nz > 0.9999) {
+          duplicate = true
+          break
+        }
+      }
+      if (!duplicate) {
+        list.push(nx, ny, nz)
+      }
+    }
+  }
+
+  for (let slot = 0; slot < count; slot++) {
+    const fnx = faceNormals[slot * 3]
+    const fny = faceNormals[slot * 3 + 1]
+    const fnz = faceNormals[slot * 3 + 2]
+    const outBase = slot * 9
+    for (let c = 0; c < 3; c++) {
+      const list = vertexMap.get(cornerKeys[slot * 3 + c])
+      let sx = 0
+      let sy = 0
+      let sz = 0
+      for (let k = 0; k < list.length; k += 3) {
+        const onx = list[k]
+        const ony = list[k + 1]
+        const onz = list[k + 2]
+        if (fnx * onx + fny * ony + fnz * onz > SMOOTH_COS) {
+          sx += onx
+          sy += ony
+          sz += onz
+        }
+      }
+      const len = Math.hypot(sx, sy, sz)
+      const co = outBase + c * 3
+      if (len > 1e-6) {
+        vertexNormals[co] = sx / len
+        vertexNormals[co + 1] = sy / len
+        vertexNormals[co + 2] = sz / len
+      } else {
+        vertexNormals[co] = fnx
+        vertexNormals[co + 1] = fny
+        vertexNormals[co + 2] = fnz
+      }
+    }
+  }
+
+  return vertexNormals
+}
+
 /**
  * Turns a contract request into everything the integrator reads. Throws if
  * there are no triangles. Triangle colours are converted to linear here. Per-triangle data is indexed by BVH slot, so a
@@ -309,16 +425,19 @@ export function prepareScene(request) {
   }
 
   const camera = makeCamera(request.camera, width, height)
+  const customLightDir = request.lightDirection ?? request.camera?.lightDirection
   const edges = extractSharpEdges(triangles)
+  const vertexNormals = computeVertexNormals(triangles, bvh)
   return {
     width,
     height,
     transparent: Boolean(request.transparent),
     camera,
-    lights: studioLights(camera),
+    lights: studioLights(camera, customLightDir),
     bvh,
     albedo,
     material,
+    vertexNormals,
     edges,
     groundY: minY - GROUND_OFFSET,
     skyIrradiance: ENV_IRRADIANCE,

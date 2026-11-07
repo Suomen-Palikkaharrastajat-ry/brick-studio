@@ -151,6 +151,7 @@ export async function renderSnapshot(request, options = {}) {
     height,
     transparent: Boolean(request.transparent),
     camera: request.camera,
+    lightDirection: request.lightDirection,
   }
   const camera = makeCamera(request.camera, width, height)
   const edges = extractSharpEdges(triangles)

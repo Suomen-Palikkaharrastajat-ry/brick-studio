@@ -168,6 +168,61 @@ function groundLitFraction(scene, rng, p) {
 }
 
 /**
+ * Interpolates the smoothed vertex normal at `hit`, aligned to face incoming ray `r`.
+ * Falls back to the geometric normal at extreme grazing angles so `dot(n, -r) > 0`.
+ */
+function shadingNormal(scene, hit, r, out) {
+  const slot = hit.slot
+  const o = slot * 9
+  const tris = scene.bvh.tris
+  const e1x = tris[o + 3]
+  const e1y = tris[o + 4]
+  const e1z = tris[o + 5]
+  const e2x = tris[o + 6]
+  const e2y = tris[o + 7]
+  const e2z = tris[o + 8]
+  let gnx = e1y * e2z - e1z * e2y
+  let gny = e1z * e2x - e1x * e2z
+  let gnz = e1x * e2y - e1y * e2x
+  const gnl = Math.sqrt(gnx * gnx + gny * gny + gnz * gnz) || 1
+  gnx /= gnl
+  gny /= gnl
+  gnz /= gnl
+  const sign = gnx * r.dx + gny * r.dy + gnz * r.dz > 0 ? -1 : 1
+  gnx *= sign
+  gny *= sign
+  gnz *= sign
+
+  const vn = scene.vertexNormals
+  if (vn) {
+    const u = hit.u
+    const v = hit.v
+    const w = 1 - u - v
+    let nx = sign * (w * vn[o] + u * vn[o + 3] + v * vn[o + 6])
+    let ny = sign * (w * vn[o + 1] + u * vn[o + 4] + v * vn[o + 7])
+    let nz = sign * (w * vn[o + 2] + u * vn[o + 5] + v * vn[o + 8])
+    const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1
+    nx /= nl
+    ny /= nl
+    nz /= nl
+    if (nx * r.dx + ny * r.dy + nz * r.dz < -1e-5) {
+      out[0] = nx
+      out[1] = ny
+      out[2] = nz
+      return out
+    }
+  }
+  out[0] = gnx
+  out[1] = gny
+  out[2] = gnz
+  return out
+}
+
+function lightScaleForMaterial(light, mat) {
+  return mat === MATERIAL.PLASTIC || mat === MATERIAL.RUBBER ? (light.plasticScale ?? 1) : 1
+}
+
+/**
  * Accumulates one path for primary ray `primary` into `out` (premultiplied
  * RGBA). Returns `out`.
  */
@@ -186,6 +241,7 @@ export function tracePath(scene, rng, primary, out) {
 
   let specular = true
   let lastPdf = 0
+  let lastMat = MATERIAL.MATTE
   let inside = false
   let insideDist = 0
   const bvh = scene.bvh
@@ -213,7 +269,7 @@ export function tracePath(scene, rng, primary, out) {
           if (!(pl > 0)) continue
           // BSDF-side MIS weight: the light's NEE already holds the complementary share.
           const w = specular ? 1 : (lastPdf * lastPdf) / (pl * pl + lastPdf * lastPdf)
-          const le = (light.irradiance / light.solidAngle) * w
+          const le = (light.irradiance / light.solidAngle) * w * lightScaleForMaterial(light, lastMat)
           addClamped(out, beta[0] * le, beta[1] * le, beta[2] * le, true)
         }
       }
@@ -248,30 +304,10 @@ export function tracePath(scene, rng, primary, out) {
       pos[0] = ray.ox + ray.dx * tHit
       pos[1] = ray.oy + ray.dy * tHit
       pos[2] = ray.oz + ray.dz * tHit
-      // Geometric normal from the precomputed edges, flipped to face the viewer.
-      const o = slot * 9
-      const tris = bvh.tris
-      const e1x = tris[o + 3]
-      const e1y = tris[o + 4]
-      const e1z = tris[o + 5]
-      const e2x = tris[o + 6]
-      const e2y = tris[o + 7]
-      const e2z = tris[o + 8]
-      let nx = e1y * e2z - e1z * e2y
-      let ny = e1z * e2x - e1x * e2z
-      let nz = e1x * e2y - e1y * e2x
-      const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1
-      nx /= nl
-      ny /= nl
-      nz /= nl
-      if (nx * ray.dx + ny * ray.dy + nz * ray.dz > 0) {
-        nx = -nx
-        ny = -ny
-        nz = -nz
-      }
-      surfNormal[0] = nx
-      surfNormal[1] = ny
-      surfNormal[2] = nz
+      shadingNormal(scene, hit, ray, surfNormal)
+      const nx = surfNormal[0]
+      const ny = surfNormal[1]
+      const nz = surfNormal[2]
       mat = scene.material[slot]
       albedoRow[0] = scene.albedo[slot * 3]
       albedoRow[1] = scene.albedo[slot * 3 + 1]
@@ -299,6 +335,7 @@ export function tracePath(scene, rng, primary, out) {
           }
         }
         specular = true
+        lastMat = mat
         spawn(ray, pos, surfNormal, dielOut.dir)
         if (!applyRoulette(bounce, rng)) break
         continue
@@ -322,7 +359,7 @@ export function tracePath(scene, rng, primary, out) {
       if (!(evalOut.pdf > 0)) continue
       const w = (pl * pl) / (pl * pl + evalOut.pdf * evalOut.pdf)
       // f · L · cos · w / pdf, with L = E / solid angle.
-      const k = ((light.irradiance / light.solidAngle) * cosL * w) / pl
+      const k = (((light.irradiance / light.solidAngle) * cosL * w) / pl) * lightScaleForMaterial(light, mat)
       addClamped(out, beta[0] * evalOut.f[0] * k, beta[1] * evalOut.f[1] * k, beta[2] * evalOut.f[2] * k, indirect)
     }
 
@@ -332,6 +369,7 @@ export function tracePath(scene, rng, primary, out) {
     beta[1] *= sampleOut.weight[1]
     beta[2] *= sampleOut.weight[2]
     lastPdf = sampleOut.pdf
+    lastMat = mat
     specular = false
     spawn(ray, pos, surfNormal, sampleOut.wi)
     if (!applyRoulette(bounce, rng)) break
@@ -425,16 +463,10 @@ export function captureGuide(scene, y, albedo, normal, depth) {
       albedo[o] = scene.albedo[hit.slot * 3]
       albedo[o + 1] = scene.albedo[hit.slot * 3 + 1]
       albedo[o + 2] = scene.albedo[hit.slot * 3 + 2]
-      const e = hit.slot * 9
-      const tris = bvh.tris
-      const nx = tris[e + 4] * tris[e + 8] - tris[e + 5] * tris[e + 7]
-      const ny = tris[e + 5] * tris[e + 6] - tris[e + 3] * tris[e + 8]
-      const nz = tris[e + 3] * tris[e + 7] - tris[e + 4] * tris[e + 6]
-      const len = Math.hypot(nx, ny, nz) || 1
-      const s = nx * ray.dx + ny * ray.dy + nz * ray.dz > 0 ? -1 : 1
-      normal[o] = (s * nx) / len
-      normal[o + 1] = (s * ny) / len
-      normal[o + 2] = (s * nz) / len
+      shadingNormal(scene, hit, ray, surfNormal)
+      normal[o] = surfNormal[0]
+      normal[o + 1] = surfNormal[1]
+      normal[o + 2] = surfNormal[2]
     }
   }
 }
