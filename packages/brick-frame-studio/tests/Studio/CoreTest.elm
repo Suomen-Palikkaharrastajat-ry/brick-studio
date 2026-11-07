@@ -1740,6 +1740,55 @@ shiftSnapSuite =
                     , \_ -> Expect.equal Set.empty (clicked base)
                     ]
                     ()
+        , test "a Shift + press retains existing selection during press" <|
+            \_ ->
+                let
+                    base =
+                        aimed partsOrPan
+
+                    firstId =
+                        Core.getPlacements base |> List.head |> Maybe.map .id |> Maybe.withDefault -1
+
+                    initialSel =
+                        Set.singleton 99
+
+                    withSel =
+                        { base | selection = initialSel }
+
+                    pressed =
+                        withSel
+                            |> send (Viewport.MouseButtonDown 400 300 0 True False)
+                in
+                Expect.all
+                    [ \m -> Expect.equal initialSel m.selection
+                    , \m -> Expect.equal (Just ( firstId, initialSel )) (m.drag |> Maybe.andThen .shiftToggle)
+                    ]
+                    pressed
+        , test "Shift key held retains existing selection during press" <|
+            \_ ->
+                let
+                    base =
+                        aimed partsOrPan
+
+                    firstId =
+                        Core.getPlacements base |> List.head |> Maybe.map .id |> Maybe.withDefault -1
+
+                    initialSel =
+                        Set.singleton 99
+
+                    withSel =
+                        { base | selection = initialSel }
+
+                    pressed =
+                        withSel
+                            |> shiftDown
+                            |> send (Viewport.MouseButtonDown 400 300 0 False False)
+                in
+                Expect.all
+                    [ \m -> Expect.equal initialSel m.selection
+                    , \m -> Expect.equal (Just ( firstId, initialSel )) (m.drag |> Maybe.andThen .shiftToggle)
+                    ]
+                    pressed
         , test "setShiftHeld records the snap modifier without enabling bit mode" <|
             \_ ->
                 grabbed partsOrPan

@@ -302,6 +302,154 @@ suite =
                         , \_ -> Expect.equal 2 (List.length (Document.placementsOf "inner.ldr" grouped))
                         ]
                         ()
+            , test "grouping two groups flattens into a single submodel and prunes unreferenced submodels" <|
+                \_ ->
+                    let
+                        rawModel =
+                            String.join "\n"
+                                [ "1 4 10 0 0 1 0 0 0 1 0 0 0 1 3001.dat"
+                                , "1 14 30 0 0 1 0 0 0 1 0 0 0 1 3002.dat"
+                                , "1 1 50 0 0 1 0 0 0 1 0 0 0 1 3003.dat"
+                                , "1 2 70 0 0 1 0 0 0 1 0 0 0 1 3004.dat"
+                                , ""
+                                ]
+
+                        doc =
+                            Document.parse rawModel
+
+                        -- Group first two bricks (ids 0, 1) into g1.ldr
+                        g1Doc =
+                            Document.groupIntoSubmodel "g1.ldr" [ 0, 1 ] doc
+
+                        -- In g1Doc, main.ldr has g1.ldr (id 4), brick 3003.dat (id 2), brick 3004.dat (id 3)
+                        -- Group bricks (ids 2, 3) into g2.ldr
+                        g2Doc =
+                            Document.groupIntoSubmodel "g2.ldr" [ 2, 3 ] g1Doc
+
+                        -- In g2Doc, main.ldr has g1.ldr (id 4) and g2.ldr (id 5)
+                        -- Now group g1 and g2 together:
+                        merged =
+                            Document.groupIntoSubmodel "merged.ldr" [ 4, 5 ] g2Doc
+
+                        submodelNames =
+                            List.map .name merged.submodels
+
+                        mainParts =
+                            List.map .part (Document.mainPlacements merged)
+
+                        mergedPlacements =
+                            Document.placementsOf "merged.ldr" merged
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal [ "main.ldr", "merged.ldr" ] submodelNames
+                        , \_ -> Expect.equal [ "merged.ldr" ] mainParts
+                        , \_ -> Expect.equal [ "3001.dat", "3002.dat", "3003.dat", "3004.dat" ] (List.map .part mergedPlacements)
+                        ]
+                        ()
+            , test "grouping a group and a brick flattens into a single submodel and prunes the old group" <|
+                \_ ->
+                    let
+                        rawModel =
+                            String.join "\n"
+                                [ "1 4 10 0 0 1 0 0 0 1 0 0 0 1 3001.dat"
+                                , "1 14 30 0 0 1 0 0 0 1 0 0 0 1 3002.dat"
+                                , "1 1 50 0 0 1 0 0 0 1 0 0 0 1 3003.dat"
+                                , ""
+                                ]
+
+                        doc =
+                            Document.parse rawModel
+
+                        -- Group bricks 0 and 1 into sub.ldr (id 3)
+                        grouped1 =
+                            Document.groupIntoSubmodel "sub.ldr" [ 0, 1 ] doc
+
+                        -- Group sub.ldr (id 3) and brick 3003.dat (id 2) into combo.ldr
+                        combo =
+                            Document.groupIntoSubmodel "combo.ldr" [ 3, 2 ] grouped1
+
+                        submodelNames =
+                            List.map .name combo.submodels
+
+                        comboPlacements =
+                            Document.placementsOf "combo.ldr" combo
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal [ "main.ldr", "combo.ldr" ] submodelNames
+                        , \_ -> Expect.equal [ "combo.ldr" ] (List.map .part (Document.mainPlacements combo))
+                        , \_ -> Expect.equal [ "3001.dat", "3002.dat", "3003.dat" ] (List.map .part comboPlacements)
+                        ]
+                        ()
+            , test "grouping preserves world positions, colors, and glued status" <|
+                \_ ->
+                    let
+                        rawModel =
+                            String.join "\n"
+                                [ "0 !PALIKKA GLUED"
+                                , "1 4 10 0 0 1 0 0 0 1 0 0 0 1 3001.dat"
+                                , "1 14 30 0 0 1 0 0 0 1 0 0 0 1 3002.dat"
+                                , "1 1 50 0 0 1 0 0 0 1 0 0 0 1 3003.dat"
+                                , ""
+                                ]
+
+                        doc =
+                            Document.parse rawModel
+
+                        -- First group has glued 3001.dat and unglued 3002.dat
+                        g1Doc =
+                            Document.groupIntoSubmodel "g1.ldr" [ 0, 1 ] doc
+
+                        -- Merge g1 (id 3) and brick 3003.dat (id 2)
+                        merged =
+                            Document.groupIntoSubmodel "merged.ldr" [ 3, 2 ] g1Doc
+
+                        mainPlacement =
+                            List.head (Document.mainPlacements merged)
+
+                        mergedPlacements =
+                            Document.placementsOf "merged.ldr" merged
+
+                        worldPositions =
+                            case mainPlacement of
+                                Just parentP ->
+                                    List.map
+                                        (\childP ->
+                                            Mat4.transform (Mat4.mul parentP.matrix childP.matrix) (Vec3.vec3 0 0 0)
+                                        )
+                                        mergedPlacements
+
+                                Nothing ->
+                                    []
+
+                        hasGluedChild =
+                            mergedPlacements
+                                |> List.filter (\p -> Document.isGlued p.id merged)
+                                |> List.map .part
+                    in
+                    Expect.all
+                        [ \_ ->
+                            case worldPositions of
+                                [ p0, p1, p2 ] ->
+                                    Expect.all
+                                        [ \_ -> Expect.within (Expect.Absolute 0.001) 10 (Vec3.getX p0)
+                                        , \_ -> Expect.within (Expect.Absolute 0.001) 30 (Vec3.getX p1)
+                                        , \_ -> Expect.within (Expect.Absolute 0.001) 50 (Vec3.getX p2)
+                                        ]
+                                        ()
+
+                                _ ->
+                                    Expect.fail "expected 3 world positions"
+                        , \_ -> Expect.equal [ "3001.dat", "3002.dat" ] hasGluedChild
+                        , \_ -> Expect.equal [ 4, 14, 1 ] (List.map .color mergedPlacements)
+                        , \_ ->
+                            case mainPlacement of
+                                Just p ->
+                                    Expect.equal True (Document.isGlued p.id merged)
+
+                                Nothing ->
+                                    Expect.fail "main placement not found"
+                        ]
+                        ()
             , test "constituentPlacements returns nested submodel placements and handles glued members" <|
                 \_ ->
                     let

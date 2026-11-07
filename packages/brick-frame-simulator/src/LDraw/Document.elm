@@ -909,113 +909,201 @@ groupIntoSubmodel name inputIds doc =
 
             else
                 let
-                    positions =
-                        List.map (\p -> Mat4.transform p.matrix (Vec3.vec3 0 0 0)) selectedPlacements
-
-                    count =
-                        toFloat (List.length positions)
-
-                    center =
-                        Vec3.scale (1 / count) (List.foldl Vec3.add (Vec3.vec3 0 0 0) positions)
-
-                    tInv =
-                        Mat4.makeTranslate (Vec3.negate center)
-
                     gluedNow =
                         gluedIds doc
 
-                    -- A moved part keeps its glue line, so it stays glued inside the group.
-                    localEntries =
-                        selectedPlacements
-                            |> List.concatMap
-                                (\p ->
-                                    glueEntries (Set.member p.id gluedNow)
-                                        ++ [ PlacementEntry { p | matrix = cleanMatrix (Mat4.mul tInv p.matrix) } ]
-                                )
+                    unpackSubmodel refPlacement currentMatrix currentColor currentGlued visited ( acc, nextId ) =
+                        let
+                            norm =
+                                normalise refPlacement.part
+                        in
+                        if Set.member norm visited then
+                            ( acc, nextId )
 
-                    newPlacementId =
-                        doc.nextId
+                        else
+                            case submodelByName refPlacement.part doc of
+                                Nothing ->
+                                    ( acc, nextId )
 
-                    -- A group with a glued member is glued, so the glued part stays on the board.
-                    newPlacement =
-                        { id = newPlacementId
-                        , part = normalise submodelName
-                        , fileText = submodelName
-                        , color = 16
-                        , matrix = Mat4.makeTranslate center
-                        , extra = []
-                        }
+                                Just submodel ->
+                                    let
+                                        visitedNow =
+                                            Set.insert norm visited
 
-                    groupEntries =
-                        glueEntries (List.any (\p -> Set.member p.id gluedNow) selectedPlacements)
-                            ++ [ PlacementEntry newPlacement ]
+                                        step entry ( accInner, nextIdInner ) =
+                                            case entry of
+                                                PlacementEntry childP ->
+                                                    let
+                                                        childWorldMatrix =
+                                                            cleanMatrix (Mat4.mul currentMatrix childP.matrix)
 
-                    selectedIdSet =
-                        Set.fromList (List.map .id selectedPlacements)
+                                                        childColor =
+                                                            if childP.color == 16 then
+                                                                currentColor
 
-                    isSelected block =
-                        blockPlacementId block
-                            |> Maybe.map (\id -> Set.member id selectedIdSet)
-                            |> Maybe.withDefault False
+                                                            else
+                                                                childP.color
 
-                    -- The group goes where the first selected block was; the other selected blocks are dropped.
-                    newParentEntries =
-                        blocksOf parentSubmodel.entries
-                            |> List.foldl
-                                (\block ( acc, placed ) ->
-                                    if isSelected block then
-                                        if placed then
-                                            ( acc, True )
+                                                        childGlued =
+                                                            currentGlued || Set.member childP.id gluedNow
+                                                    in
+                                                    if isSubmodelReference childP doc then
+                                                        unpackSubmodel childP childWorldMatrix childColor childGlued visitedNow ( accInner, nextIdInner )
+
+                                                    else
+                                                        let
+                                                            leafPlacement =
+                                                                { childP
+                                                                    | id = nextIdInner
+                                                                    , color = childColor
+                                                                    , matrix = childWorldMatrix
+                                                                }
+                                                        in
+                                                        ( { placement = leafPlacement, isGlued = childGlued } :: accInner
+                                                        , nextIdInner + 1
+                                                        )
+
+                                                Raw _ ->
+                                                    ( accInner, nextIdInner )
+                                    in
+                                    List.foldl step ( acc, nextId ) submodel.entries
+
+                    collectPlacements targetPlacements =
+                        let
+                            step p ( acc, nextId ) =
+                                if isSubmodelReference p doc then
+                                    unpackSubmodel p p.matrix p.color (Set.member p.id gluedNow) Set.empty ( acc, nextId )
+
+                                else
+                                    ( { placement = p, isGlued = Set.member p.id gluedNow } :: acc, nextId )
+
+                            ( reversed, finalNextId ) =
+                                List.foldl step ( [], doc.nextId ) targetPlacements
+                        in
+                        ( List.reverse reversed, finalNextId )
+
+                    ( unpackedPlacements, nextIdAfterUnpack ) =
+                        collectPlacements selectedPlacements
+                in
+                if List.isEmpty unpackedPlacements then
+                    doc
+
+                else
+                    let
+                        positions =
+                            List.map (\u -> Mat4.transform u.placement.matrix (Vec3.vec3 0 0 0)) unpackedPlacements
+
+                        count =
+                            toFloat (List.length positions)
+
+                        center =
+                            Vec3.scale (1 / count) (List.foldl Vec3.add (Vec3.vec3 0 0 0) positions)
+
+                        tInv =
+                            Mat4.makeTranslate (Vec3.negate center)
+
+                        -- A moved part keeps its glue line, so it stays glued inside the group.
+                        localEntries =
+                            unpackedPlacements
+                                |> List.concatMap
+                                    (\u ->
+                                        let
+                                            p =
+                                                u.placement
+                                        in
+                                        glueEntries u.isGlued
+                                            ++ [ PlacementEntry { p | matrix = cleanMatrix (Mat4.mul tInv p.matrix) } ]
+                                    )
+
+                        newPlacementId =
+                            nextIdAfterUnpack
+
+                        -- A group with a glued member is glued, so the glued part stays on the board.
+                        newPlacement =
+                            { id = newPlacementId
+                            , part = normalise submodelName
+                            , fileText = submodelName
+                            , color = 16
+                            , matrix = Mat4.makeTranslate center
+                            , extra = []
+                            }
+
+                        groupEntries =
+                            glueEntries (List.any .isGlued unpackedPlacements)
+                                ++ [ PlacementEntry newPlacement ]
+
+                        selectedIdSet =
+                            Set.fromList (List.map .id selectedPlacements)
+
+                        isSelected block =
+                            blockPlacementId block
+                                |> Maybe.map (\id -> Set.member id selectedIdSet)
+                                |> Maybe.withDefault False
+
+                        -- The group goes where the first selected block was; the other selected blocks are dropped.
+                        newParentEntries =
+                            blocksOf parentSubmodel.entries
+                                |> List.foldl
+                                    (\block ( acc, placed ) ->
+                                        if isSelected block then
+                                            if placed then
+                                                ( acc, True )
+
+                                            else
+                                                ( List.reverse groupEntries ++ acc, True )
 
                                         else
-                                            ( List.reverse groupEntries ++ acc, True )
+                                            ( List.reverse block ++ acc, placed )
+                                    )
+                                    ( [], False )
+                                |> Tuple.first
+                                |> List.reverse
 
-                                    else
-                                        ( List.reverse block ++ acc, placed )
-                                )
-                                ( [], False )
-                            |> Tuple.first
-                            |> List.reverse
+                        newSubmodel =
+                            { name = submodelName
+                            , entries = localEntries
+                            }
 
-                    newSubmodel =
-                        { name = submodelName
-                        , entries = localEntries
-                        }
+                        isFirstUnnamed s =
+                            s.name == "" && List.head doc.submodels == Just s
 
-                    isFirstUnnamed s =
-                        s.name == "" && List.head doc.submodels == Just s
+                        parentNorm =
+                            normalise parentSubmodel.name
 
-                    parentNorm =
-                        normalise parentSubmodel.name
+                        updatedSubmodels =
+                            doc.submodels
+                                |> List.map
+                                    (\s ->
+                                        if normalise s.name == parentNorm then
+                                            { s
+                                                | name =
+                                                    if isFirstUnnamed s then
+                                                        "main.ldr"
 
-                    updatedSubmodels =
-                        doc.submodels
-                            |> List.map
-                                (\s ->
-                                    if normalise s.name == parentNorm then
-                                        { s
-                                            | name =
-                                                if isFirstUnnamed s then
-                                                    "main.ldr"
+                                                    else
+                                                        s.name
+                                                , entries = newParentEntries
+                                            }
 
-                                                else
-                                                    s.name
-                                            , entries = newParentEntries
-                                        }
+                                        else
+                                            s
+                                    )
+                                |> (\subs -> subs ++ [ newSubmodel ])
 
-                                    else
-                                        s
-                                )
-                            |> (\subs -> subs ++ [ newSubmodel ])
+                        unpackedIds =
+                            List.map (.id << .placement) unpackedPlacements
 
-                    touchedIds =
-                        Set.insert newPlacementId (Set.union selectedIdSet doc.touched)
-                in
-                { doc
-                    | submodels = updatedSubmodels
-                    , nextId = newPlacementId + 1
-                    , touched = touchedIds
-                }
+                        touchedIds =
+                            List.foldl Set.insert (Set.union selectedIdSet doc.touched) (newPlacementId :: unpackedIds)
+
+                        updatedDoc =
+                            { doc
+                                | submodels = updatedSubmodels
+                                , nextId = newPlacementId + 1
+                                , touched = touchedIds
+                            }
+                    in
+                    pruneUnreferencedSubmodels updatedDoc
 
 
 {-| Explode / inline a submodel placement into its parent submodel.

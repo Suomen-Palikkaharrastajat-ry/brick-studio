@@ -2770,21 +2770,31 @@ handleViewportEvent event ( model, cmds, outEvents ) =
 
                     else
                         model
+
+                isShiftHeld =
+                    shiftPress || pressModel.shiftHeld
             in
             case startDrag ( x, y ) pressModel of
                 Just drag0 ->
                     let
                         drag =
-                            case ( shiftPress, drag0.kind, Viewport.pickSource x y model.viewport ) of
-                                ( True, PlaneDrag _, Just hit ) ->
-                                    { drag0 | shiftToggle = Just ( hit, model.selection ) }
+                            if isShiftHeld then
+                                case ( drag0.kind, Viewport.pickSource x y model.viewport ) of
+                                    ( PlaneDrag _, Just hit ) ->
+                                        { drag0 | shiftToggle = Just ( hit, model.selection ) }
 
-                                _ ->
-                                    drag0
+                                    _ ->
+                                        drag0
+
+                            else
+                                drag0
 
                         -- Grabbing part of the selection keeps all of it, glued parts included.
                         dragSel =
-                            if Set.isEmpty (Set.intersect (Set.fromList drag.ids) model.selection) then
+                            if isShiftHeld then
+                                model.selection
+
+                            else if Set.isEmpty (Set.intersect (Set.fromList drag.ids) model.selection) then
                                 Set.fromList drag.ids
 
                             else
