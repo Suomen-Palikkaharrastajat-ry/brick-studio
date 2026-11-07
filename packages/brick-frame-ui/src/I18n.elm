@@ -133,6 +133,7 @@ module I18n exposing
     , menuSaveModel
     , menuSaveModelDesc
     , menuSendToApp
+    , menuShare
     , menuShareEditable
     , menuShareFixed
     , menuSharePartsSet
@@ -197,6 +198,19 @@ module I18n exposing
     , ringTurnRightTip
     , ringUngroup
     , ringUngroupTip
+    , shareClose
+    , shareCopiedLink
+    , shareCopyLink
+    , shareModalTitle
+    , shareOptionFixedModel
+    , shareOptionFixedModelDesc
+    , shareOptionFreeBuilding
+    , shareOptionFreeBuildingDesc
+    , shareOptionPartialSet
+    , shareOptionPartialSetDesc
+    , shareOptionPartsSet
+    , shareOptionPartsSetDesc
+    , shareScanQrHint
     , shortcutsClose
     , shortcutsDialogTitle
     , shortcutsFootnote
@@ -840,6 +854,16 @@ menuCopyLinkTitle lang =
 
         En ->
             "Copy link to clipboard"
+
+
+menuShare : Language -> String
+menuShare lang =
+    case lang of
+        Fi ->
+            "Jaa..."
+
+        En ->
+            "Share..."
 
 
 menuShareEditable : Language -> String
@@ -3095,6 +3119,136 @@ snapshotReadyToSave lang =
 
 snapshotClose : Language -> String
 snapshotClose lang =
+    case lang of
+        Fi ->
+            "Sulje"
+
+        En ->
+            "Close"
+
+
+shareModalTitle : Language -> String
+shareModalTitle lang =
+    case lang of
+        Fi ->
+            "Jaa rakennelma"
+
+        En ->
+            "Share build"
+
+
+shareOptionFreeBuilding : Language -> String
+shareOptionFreeBuilding lang =
+    case lang of
+        Fi ->
+            "Vapaa rakentaminen"
+
+        En ->
+            "Free building"
+
+
+shareOptionFreeBuildingDesc : Language -> String
+shareOptionFreeBuildingDesc lang =
+    case lang of
+        Fi ->
+            "Koko osavalikoima ja vapaa muokkaus"
+
+        En ->
+            "Full parts catalog and unrestricted editing"
+
+
+shareOptionPartsSet : Language -> String
+shareOptionPartsSet lang =
+    case lang of
+        Fi ->
+            "Osasarja"
+
+        En ->
+            "Parts set"
+
+
+shareOptionPartsSetDesc : Language -> String
+shareOptionPartsSetDesc lang =
+    case lang of
+        Fi ->
+            "Liimatut osat alustalla, loput osat laskettuna sarjana"
+
+        En ->
+            "Glued base on the board, remaining pieces in the dock"
+
+
+shareOptionPartialSet : Language -> String
+shareOptionPartialSet lang =
+    case lang of
+        Fi ->
+            "Keskeneräinen sarja"
+
+        En ->
+            "Partially built set"
+
+
+shareOptionPartialSetDesc : Language -> String
+shareOptionPartialSetDesc lang =
+    case lang of
+        Fi ->
+            "Säilyttää asetetut osat ja jättää loput osat sarjavalikoimaan"
+
+        En ->
+            "Preserves placed parts and leaves remaining kit pieces in the dock"
+
+
+shareOptionFixedModel : Language -> String
+shareOptionFixedModel lang =
+    case lang of
+        Fi ->
+            "Lukittu malli"
+
+        En ->
+            "Fixed model"
+
+
+shareOptionFixedModelDesc : Language -> String
+shareOptionFixedModelDesc lang =
+    case lang of
+        Fi ->
+            "Kaikki osat lukittuina ilman osaluetteloa"
+
+        En ->
+            "All parts locked in place with no catalog"
+
+
+shareCopyLink : Language -> String
+shareCopyLink lang =
+    case lang of
+        Fi ->
+            "Kopioi linkki"
+
+        En ->
+            "Copy link"
+
+
+shareCopiedLink : Language -> String
+shareCopiedLink lang =
+    case lang of
+        Fi ->
+            "Kopioitu!"
+
+        En ->
+            "Copied!"
+
+
+shareScanQrHint : Language -> String
+shareScanQrHint lang =
+    case lang of
+        Fi ->
+            "Lue puhelimen kameralla avataksesi suoraan"
+
+        En ->
+            "Scan with a phone camera to open instantly"
+
+
+shareClose : Language -> String
+shareClose lang =
     case lang of
         Fi ->
             "Sulje"
