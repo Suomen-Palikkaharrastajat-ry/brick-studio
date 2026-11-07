@@ -208,7 +208,7 @@ suite =
                     Expect.equal [ True, True, True, True, True, True, True ]
                         [ decodes (Decode.field "width" Decode.int) 1920
                         , decodes (Decode.field "height" Decode.int) 1080
-                        , decodes (Decode.field "transparent" Decode.bool) False
+                        , decodes (Decode.field "transparent" Decode.bool) True
                         , decodes (Decode.field "filename" Decode.string) "render.png"
                         , decodes (Decode.field "timeBudgetMs" Decode.int) 30000
                         , decodes (Decode.at [ "camera", "fovYDegrees" ] Decode.float) Camera.fovYDegrees
