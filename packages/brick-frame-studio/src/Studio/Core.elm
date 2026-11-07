@@ -259,8 +259,8 @@ translation glide, no rotation or zoom). Nothing else moves the pivot: not addin
 a part, keyboard or action-bar moves, drag drops, undo/redo or `selectAll`.
 Deselecting keeps the last pivot; `fitView` recentres on the model.
 
-`dragSettles` (default `True`, see `setDragSettles`) makes a horizontal-plane
-body drag rest the part on whatever supports it; with `False` the part keeps
+`dragSettles` (default `False`, see `setDragSettles`) makes a horizontal-plane
+body drag rest the part on whatever supports it; with `False` (the default) the part keeps
 its press-time height.
 
 `fitAfterAdd` is the part just added (`addPartAt`) while the camera was still
@@ -414,7 +414,7 @@ init config =
             , dragMode = DragPartsOrOrbit
             , helpVisible = False
             , gizmoStyle = MoveGizmo
-            , dragSettles = True
+            , dragSettles = False
             , fitAfterAdd = Nothing
             , gearAlignment = False
             , glueEditable = True
@@ -3307,7 +3307,7 @@ movePlaneDrag initialDrag grab ( x, y ) model =
                                         model.snapRotationStep
                                         sideReach
                                         ray
-                                        leadP.matrix
+                                        leadSurfaceMatrix
                                         leadConn.connections
                                         targetWorldPoints
                                 )

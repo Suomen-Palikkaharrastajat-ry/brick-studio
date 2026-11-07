@@ -473,6 +473,7 @@ bodyDragSuite =
                     -- lead at 0, a two-brick column (top at Y = -52) at x = 100
                     model =
                         grabbedAt [ vec3 0 -24 0, vec3 100 -24 0, vec3 100 -52 0 ]
+                            |> Core.setDragSettles True
 
                     heightAt x =
                         moveTo (screenOf model (vec3 x 0 0)) model
@@ -1076,11 +1077,11 @@ placementSuite =
                     raised
         , test "addPart still rests on the ground" <|
             \_ -> positions added |> Expect.equal [ vec3 0 -24 0 ]
-        , test "with drag settling off, a horizontal body drag keeps the press-time height" <|
+        , test "with drag settling off (default), a horizontal body drag keeps the press-time height" <|
             \_ ->
                 let
                     model =
-                        grabbedAt [ vec3 0 -90 0, vec3 0 -24 0 ] |> Core.setDragSettles False
+                        grabbedAt [ vec3 0 -90 0, vec3 0 -24 0 ]
                 in
                 model
                     |> moveTo
@@ -1090,9 +1091,10 @@ placementSuite =
                     |> (\( m, _, _ ) -> firstPosition m)
                     |> Maybe.map (\p -> ( round (Vec3.getX p), round (Vec3.getY p) ))
                     |> Expect.equal (Just ( 40, -90 ))
-        , test "with drag settling on (default), the same drag settles onto the support" <|
+        , test "with drag settling on, the same drag settles onto the support" <|
             \_ ->
                 grabbedAt [ vec3 0 -90 0, vec3 0 -24 0 ]
+                    |> Core.setDragSettles True
                     |> moveTo ( 400, 300 )
                     |> (\( m, _, _ ) -> firstPosition m)
                     |> Maybe.map (\p -> toFloat (round (Vec3.getY p)))
@@ -1876,14 +1878,27 @@ restingSuite =
                     |> (\( m, _, _ ) -> firstPosition m)
                     |> Maybe.map (\p -> toFloat (round (Vec3.getY p)))
                     |> Expect.equal (Just -24)
-        , test "a floating brick settles onto its support on the first move (no remembered gap)" <|
+        , test "with drag settling on, a floating brick settles onto its support on the first move (no remembered gap)" <|
             \_ ->
                 grabbedAt [ vec3 0 -90 0, vec3 0 -24 0 ]
+                    |> Core.setDragSettles True
                     |> moveTo ( 400, 300 )
                     |> (\( m, _, _ ) -> firstPosition m)
                     |> Maybe.map (\p -> toFloat (round (Vec3.getY p)))
                     |> Expect.equal (Just -48)
-        , test "a stacked brick slid off its support drops to the ground" <|
+        , test "with drag settling on, a stacked brick slid off its support drops to the ground" <|
+            \_ ->
+                let
+                    model =
+                        grabbedAt [ vec3 0 -48 0, vec3 0 -24 0 ]
+                            |> Core.setDragSettles True
+                in
+                model
+                    |> moveTo (project model 48 (vec3 100 0 0))
+                    |> (\( m, _, _ ) -> firstPosition m)
+                    |> Maybe.map (\p -> toFloat (round (Vec3.getY p)))
+                    |> Expect.equal (Just -24)
+        , test "with drag settling off (default), a stacked brick slid off its support keeps its plane height" <|
             \_ ->
                 let
                     model =
@@ -1893,7 +1908,7 @@ restingSuite =
                     |> moveTo (project model 48 (vec3 100 0 0))
                     |> (\( m, _, _ ) -> firstPosition m)
                     |> Maybe.map (\p -> toFloat (round (Vec3.getY p)))
-                    |> Expect.equal (Just -24)
+                    |> Expect.equal (Just -48)
         ]
 
 
@@ -2356,6 +2371,7 @@ magneticSnapCollisionSuite =
                                 , ( "3001.dat", vec3 0 -24 0 )
                                 ]
                             )
+                            |> Core.setDragSettles True
 
                     -- Drag towards the stack at (10, -24, 0)
                     moved =
@@ -2381,6 +2397,7 @@ magneticSnapCollisionSuite =
                                 , ( "3001.dat", vec3 0 -24 0 )
                                 ]
                             )
+                            |> Core.setDragSettles True
 
                     -- Drag over base brick towards (0, -48, 0)
                     moved =
@@ -2414,6 +2431,7 @@ magneticSnapCollisionSuite =
                     pair =
                         grabLeadSnapping (vec3 60 -8 0)
                             (loadedParts [ ( "3070b.dat", vec3 60 -8 0 ), ( "3005.dat", vec3 0 -24 0 ) ])
+                            |> Core.setDragSettles True
 
                     moved =
                         pair

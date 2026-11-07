@@ -483,7 +483,7 @@ solveSnapCandidatesWithPriority priority maxDist rotationIndex currentMatrix dra
                     else
                         let
                             snapMat =
-                                computeSnapMatrix rotationIndex draggedLocal targetWorld desiredNormal
+                                computeSnapMatrix currentMatrix rotationIndex draggedLocal targetWorld desiredNormal
 
                             originY =
                                 Vec3.getY (Mat4.transform snapMat (vec3 0 0 0))
@@ -677,7 +677,7 @@ solveSnapWithHysteresisAndPredicateWithPriority priority isValid enterDist relea
                 else
                     let
                         snapMat =
-                            computeSnapMatrix rotationIndex active.draggedPoint active.targetPoint desiredNormal
+                            computeSnapMatrix currentMatrix rotationIndex active.draggedPoint active.targetPoint desiredNormal
 
                         guide =
                             makeGuide active.draggedPoint.connType active.targetPoint.worldPosition active.targetPoint.worldNormal False
@@ -843,14 +843,55 @@ targetDesiredNormal conn draggedWorldNormal targetWorldNormal =
         Vec3.negate targetWorldNormal
 
 
-computeSnapMatrix : Int -> ConnectionPoint -> WorldConnectionPoint -> Vec3 -> Mat4
-computeSnapMatrix rotationIndex draggedLocal targetWorld desiredNormal =
+rotateShortestArc : Vec3 -> Vec3 -> Vec3 -> Vec3
+rotateShortestArc n1 n2 x =
+    let
+        c =
+            Vec3.dot n1 n2
+    in
+    if c > 0.999999 then
+        x
+
+    else if c < -0.999999 then
+        -- 180 degree flip around an orthogonal axis
+        let
+            axis =
+                if abs (Vec3.getX n1) < 0.9 then
+                    Vec3.normalize (Vec3.cross n1 (vec3 1 0 0))
+
+                else
+                    Vec3.normalize (Vec3.cross n1 (vec3 0 1 0))
+        in
+        Vec3.add (Vec3.scale (2.0 * Vec3.dot axis x) axis) (Vec3.negate x)
+
+    else
+        let
+            v =
+                Vec3.cross n1 n2
+
+            factor =
+                1.0 / (1.0 + c)
+        in
+        Vec3.add x (Vec3.add (Vec3.cross v x) (Vec3.scale factor (Vec3.cross v (Vec3.cross v x))))
+
+
+computeSnapMatrix : Mat4 -> Int -> ConnectionPoint -> WorldConnectionPoint -> Vec3 -> Mat4
+computeSnapMatrix currentMatrix rotationIndex draggedLocal targetWorld desiredNormal =
     let
         basisD =
             orthonormalBasis draggedLocal.normal draggedLocal.tangent
 
+        draggedWorldNormal =
+            transformDirection currentMatrix draggedLocal.normal
+
+        draggedWorldTangent =
+            transformDirection currentMatrix draggedLocal.tangent
+
+        refTangent =
+            rotateShortestArc draggedWorldNormal desiredNormal draggedWorldTangent
+
         basisT0 =
-            orthonormalBasis desiredNormal targetWorld.worldTangent
+            orthonormalBasis desiredNormal refTangent
 
         step =
             modBy 4 (modBy 4 rotationIndex + 4)

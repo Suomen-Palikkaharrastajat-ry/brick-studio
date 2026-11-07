@@ -56,6 +56,7 @@ suite =
         , snapSolverTests
         , brickStacking2x2Tests
         , collisionSATTests
+        , shortestArcSnapTests
         ]
 
 
@@ -3422,4 +3423,94 @@ collisionSATTests =
                         _ ->
                             Expect.fail "3023.dat or 99781.dat not found in catalog"
             ]
+        ]
+
+
+shortestArcSnapTests : Test
+shortestArcSnapTests =
+    describe "yaw preservation and SNOT tilt snap"
+        [ test "snapping preserves in-flight yaw rotation" <|
+            \_ ->
+                case ( knownCatalogPart "3001.dat", knownCatalogPart "3001.dat" ) of
+                    ( Just dragged, Just target ) ->
+                        let
+                            targetMatrix =
+                                Mat4.identity
+
+                            targetStuds =
+                                target.connections
+                                    |> List.filter (\c -> c.connType == Stud)
+                                    |> List.map (Connectivity.transformPoint targetMatrix 1)
+
+                            -- Dragged brick rotated 90 degrees around Y (normal stays (0, -1, 0))
+                            hoverMatrix =
+                                Mat4.mul
+                                    (Mat4.makeTranslate3 0 -24 0)
+                                    (Mat4.makeRotate (pi / 2) (vec3 0 1 0))
+
+                            maybeSnap =
+                                solveSnap 16.0 0 hoverMatrix dragged.connections targetStuds
+                        in
+                        case maybeSnap of
+                            Just snap ->
+                                let
+                                    hoverDir =
+                                        transformDirection hoverMatrix (vec3 1 0 0)
+
+                                    snapDir =
+                                        transformDirection snap.snapMatrix (vec3 1 0 0)
+
+                                    diff =
+                                        Vec3.distance hoverDir snapDir
+                                in
+                                Expect.lessThan 0.001 diff
+
+                            Nothing ->
+                                Expect.fail "Snap candidate not found"
+
+                    _ ->
+                        Expect.fail "3001.dat not found in catalog"
+        , test "snapping onto side studs tilts normal via shortest arc without unwanted yaw" <|
+            \_ ->
+                case ( knownCatalogPart "3023.dat", knownCatalogPart "99781.dat" ) of
+                    ( Just plate, Just bracket ) ->
+                        let
+                            targetMatrix =
+                                Mat4.makeTranslate3 0 -32 0
+
+                            sideStuds =
+                                bracket.connections
+                                    |> List.filter (\c -> c.connType == Stud && Vec3.getZ c.normal < -0.7)
+                                    |> List.map (Connectivity.transformPoint targetMatrix 1)
+
+                            hoverMatrix =
+                                Mat4.makeTranslate3 0 -22 -20
+
+                            maybeSnap =
+                                solveSnap 16.0 0 hoverMatrix plate.connections sideStuds
+                        in
+                        case maybeSnap of
+                            Just snap ->
+                                let
+                                    snapNormal =
+                                        transformDirection snap.snapMatrix (vec3 0 1 0)
+
+                                    snapTangent =
+                                        transformDirection snap.snapMatrix (vec3 1 0 0)
+                                in
+                                Expect.all
+                                    [ \_ -> Expect.within (Expect.Absolute 0.001) 0 (Vec3.getX snapNormal)
+                                    , \_ -> Expect.within (Expect.Absolute 0.001) 0 (Vec3.getY snapNormal)
+                                    , \_ -> Expect.within (Expect.Absolute 0.001) 1 (Vec3.getZ snapNormal)
+                                    , \_ -> Expect.within (Expect.Absolute 0.001) 1 (Vec3.getX snapTangent)
+                                    , \_ -> Expect.within (Expect.Absolute 0.001) 0 (Vec3.getY snapTangent)
+                                    , \_ -> Expect.within (Expect.Absolute 0.001) 0 (Vec3.getZ snapTangent)
+                                    ]
+                                    ()
+
+                            Nothing ->
+                                Expect.fail "Plate onto bracket side stud snap candidate not found"
+
+                    _ ->
+                        Expect.fail "3023.dat or 99781.dat not found in catalog"
         ]
