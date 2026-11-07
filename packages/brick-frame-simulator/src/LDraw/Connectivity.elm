@@ -9,6 +9,7 @@ module LDraw.Connectivity exposing
     , SnapGuide(..)
     , SnapPriority(..)
     , WorldConnectionPoint
+    , alignedContactCount
     , checkCollisions
     , defaultSnapDistance
     , effectiveEnvelope
@@ -513,17 +514,25 @@ solveSnapCandidatesWithPriority priority maxDist rotationIndex currentMatrix dra
                                     else
                                         0.0
 
-                                score =
-                                    dist + (1.0 - cosAngle) * 5.0 + bias
-
                                 guide =
                                     makeGuide draggedLocal.connType targetWorld.worldPosition targetWorld.worldNormal False
 
                                 contactCount =
                                     alignedContactCount snapMat targetWorld.placementId draggedPoints accessibleTargetPoints
+
+                                contactBonus =
+                                    case priority of
+                                        MaximizeContacts ->
+                                            toFloat (contactCount - 1) * 2.5
+
+                                        ClosestPoint ->
+                                            0.0
+
+                                score =
+                                    dist + (1.0 - cosAngle) * 5.0 + bias - contactBonus
                             in
                             Just
-                                ( -contactCount
+                                ( contactCount
                                 , score
                                 , { draggedPoint = draggedLocal
                                   , targetPoint = targetWorld
@@ -541,12 +550,7 @@ solveSnapCandidatesWithPriority priority maxDist rotationIndex currentMatrix dra
                 |> List.concatMap (\d -> List.filterMap (evalPair d) accessibleTargetPoints)
 
         rankedCandidates =
-            case priority of
-                MaximizeContacts ->
-                    List.sortBy (\( contactRank, score, _ ) -> ( contactRank, score )) candidates
-
-                ClosestPoint ->
-                    List.sortBy (\( _, score, candidate ) -> ( candidate.distance, score )) candidates
+            List.sortBy (\( _, score, _ ) -> score) candidates
     in
     List.map (\( _, _, candidate ) -> candidate) rankedCandidates
 
@@ -684,22 +688,67 @@ solveSnapWithHysteresisAndPredicateWithPriority priority isValid enterDist relea
                                 , distance = dist
                                 , guide = guide
                             }
-
-                        maybeMoreAligned =
-                            case priority of
-                                MaximizeContacts ->
-                                    solveSnapWithPredicateWithPriority priority isValid enterDist rotationIndex currentMatrix draggedPoints targetPoints
-
-                                ClosestPoint ->
-                                    Nothing
                     in
                     if isValid candidate then
-                        case maybeMoreAligned of
+                        let
+                            bias =
+                                if active.draggedPoint.connType == AntiStud && active.targetPoint.connType == Stud then
+                                    -0.5
+
+                                else
+                                    0.0
+
+                            activeContactCount =
+                                alignedContactCount snapMat active.targetPlacementId draggedPoints targetPoints
+
+                            activeContactBonus =
+                                case priority of
+                                    MaximizeContacts ->
+                                        toFloat (activeContactCount - 1) * 2.5
+
+                                    ClosestPoint ->
+                                        0.0
+
+                            activeScore =
+                                dist + (1.0 - cosAngle) * 5.0 + bias - activeContactBonus
+
+                            maybeAlternative =
+                                solveSnapWithPredicateWithPriority priority isValid enterDist rotationIndex currentMatrix draggedPoints targetPoints
+                        in
+                        case maybeAlternative of
                             Just alternative ->
-                                if
-                                    alignedContactCount alternative.snapMatrix alternative.targetPlacementId draggedPoints targetPoints
-                                        > alignedContactCount candidate.snapMatrix candidate.targetPlacementId draggedPoints targetPoints
-                                then
+                                let
+                                    altDraggedWorldNormal =
+                                        transformDirection currentMatrix alternative.draggedPoint.normal
+
+                                    altDesiredNormal =
+                                        targetDesiredNormal alternative.draggedPoint.connType altDraggedWorldNormal alternative.targetPoint.worldNormal
+
+                                    altCosAngle =
+                                        Vec3.dot altDraggedWorldNormal altDesiredNormal
+
+                                    altBias =
+                                        if alternative.draggedPoint.connType == AntiStud && alternative.targetPoint.connType == Stud then
+                                            -0.5
+
+                                        else
+                                            0.0
+
+                                    altContactCount =
+                                        alignedContactCount alternative.snapMatrix alternative.targetPlacementId draggedPoints targetPoints
+
+                                    altContactBonus =
+                                        case priority of
+                                            MaximizeContacts ->
+                                                toFloat (altContactCount - 1) * 2.5
+
+                                            ClosestPoint ->
+                                                0.0
+
+                                    alternativeScore =
+                                        alternative.distance + (1.0 - altCosAngle) * 5.0 + altBias - altContactBonus
+                                in
+                                if alternativeScore < activeScore - 5.0 then
                                     Just alternative
 
                                 else

@@ -13,6 +13,7 @@ import LDraw.Connectivity as Connectivity
         , OBB
         , SnapCandidate
         , SnapPriority(..)
+        , alignedContactCount
         , checkCollisions
         , effectiveEnvelope
         , extractConnections
@@ -31,7 +32,9 @@ import LDraw.Connectivity as Connectivity
         , solveSnapCandidatesWithPriority
         , solveSnapWithHysteresis
         , solveSnapWithHysteresisAndPredicate
+        , solveSnapWithHysteresisAndPredicateWithPriority
         , solveSnapWithPredicate
+        , solveSnapWithPredicateWithPriority
         , studOffset
         , testOBB
         , toOBB
@@ -51,6 +54,7 @@ suite =
         , extractionTests
         , studLatticeTests
         , snapSolverTests
+        , brickStacking2x2Tests
         , collisionSATTests
         ]
 
@@ -1592,7 +1596,7 @@ snapSolverTests =
 
                     Nothing ->
                         Expect.fail "Snap candidate was not found"
-        , test "prefers a full stud grid over the nearest partial group contact" <|
+        , test "soft contact weighting selects edge alignment when hovering directly at edge, but prefers center when equidistant" <|
             \_ ->
                 case knownCatalogPart "3003.dat" of
                     Just brick ->
@@ -1606,47 +1610,80 @@ snapSolverTests =
                                     |> List.filter (.connType >> (==) Stud)
                                     |> List.map (transformPoint (Mat4.makeTranslate3 0 -24 0) 1)
 
-                            candidates =
+                            -- Hovering directly over the 2-stud edge position (-20, -48, 0)
+                            edgeCandidates =
                                 solveSnapCandidates 24.0
                                     0
                                     (Mat4.makeTranslate3 -20 -48 0)
                                     draggedAntiStuds
                                     targetStuds
 
-                            closestCandidates =
-                                solveSnapCandidatesWithPriority ClosestPoint
-                                    24.0
+                            -- Hovering at -10 (equidistant 10 LDU from center at 0 and edge at -20)
+                            equidistantCandidates =
+                                solveSnapCandidates 24.0
                                     0
-                                    (Mat4.makeTranslate3 -20 -48 0)
+                                    (Mat4.makeTranslate3 -10 -48 0)
                                     draggedAntiStuds
                                     targetStuds
 
+                            closestEquidistantCandidates =
+                                solveSnapCandidatesWithPriority ClosestPoint
+                                    24.0
+                                    0
+                                    (Mat4.makeTranslate3 -11 -48 0)
+                                    draggedAntiStuds
+                                    targetStuds
+
+                            edgeOrigin =
+                                edgeCandidates
+                                    |> List.head
+                                    |> Maybe.map (\snap -> ( Mat4.transform snap.snapMatrix (vec3 0 0 0), snap.distance ))
+
+                            equidistantOrigin =
+                                equidistantCandidates
+                                    |> List.head
+                                    |> Maybe.map (\snap -> ( Mat4.transform snap.snapMatrix (vec3 0 0 0), snap.distance ))
+
                             closestOrigin =
-                                closestCandidates
+                                closestEquidistantCandidates
                                     |> List.head
                                     |> Maybe.map (\snap -> Mat4.transform snap.snapMatrix (vec3 0 0 0))
                         in
-                        case List.head candidates of
-                            Just snap ->
-                                let
-                                    snappedOrigin =
-                                        Mat4.transform snap.snapMatrix (vec3 0 0 0)
-                                in
-                                Expect.all
-                                    [ \_ ->
-                                        Vec3.distance snappedOrigin (vec3 0 -48 0)
-                                            |> Expect.within (Expect.Absolute 0.01) 0
-                                    , \_ -> Expect.equal 20 snap.distance
-                                    , \_ -> Expect.equal (Just (vec3 -20 -48 0)) closestOrigin
-                                    ]
-                                    ()
+                        Expect.all
+                            [ \_ ->
+                                case edgeOrigin of
+                                    Just ( origin, dist ) ->
+                                        Expect.all
+                                            [ \_ ->
+                                                Vec3.distance origin (vec3 -20 -48 0)
+                                                    |> Expect.within (Expect.Absolute 0.01) 0
+                                            , \_ -> Expect.equal 0 dist
+                                            ]
+                                            ()
 
-                            Nothing ->
-                                Expect.fail "Expected a full-grid snap candidate"
+                                    Nothing ->
+                                        Expect.fail "Expected edge snap candidate"
+                            , \_ ->
+                                case equidistantOrigin of
+                                    Just ( origin, dist ) ->
+                                        Expect.all
+                                            [ \_ ->
+                                                Vec3.distance origin (vec3 0 -48 0)
+                                                    |> Expect.within (Expect.Absolute 0.01) 0
+                                            , \_ -> Expect.equal 10 dist
+                                            ]
+                                            ()
+
+                                    Nothing ->
+                                        Expect.fail "Expected center snap candidate at equidistant position"
+                            , \_ ->
+                                Expect.equal (Just (vec3 -20 -48 0)) closestOrigin
+                            ]
+                            ()
 
                     Nothing ->
                         Expect.fail "3003.dat is not in the connectivity catalog"
-        , test "hysteresis upgrades a partial latch when a fuller group snap is in range" <|
+        , test "hysteresis maintains partial latch until dragged towards center" <|
             \_ ->
                 case knownCatalogPart "3003.dat" of
                     Just brick ->
@@ -1667,7 +1704,8 @@ snapSolverTests =
                                 solveSnapCandidates 0.5 0 hoveringAtPartialAlignment draggedAntiStuds targetStuds
                                     |> List.head
 
-                            upgraded =
+                            -- Hovering at -20 stays latched to the 2-stud edge
+                            held =
                                 solveSnapWithHysteresisAndPredicate
                                     (\_ -> True)
                                     24.0
@@ -1677,23 +1715,51 @@ snapSolverTests =
                                     hoveringAtPartialAlignment
                                     draggedAntiStuds
                                     targetStuds
-                        in
-                        case upgraded of
-                            Just snap ->
-                                let
-                                    snappedOrigin =
-                                        Mat4.transform snap.snapMatrix (vec3 0 0 0)
-                                in
-                                Expect.all
-                                    [ \_ ->
-                                        Vec3.distance snappedOrigin (vec3 0 -48 0)
-                                            |> Expect.within (Expect.Absolute 0.01) 0
-                                    , \_ -> Expect.equal 20 snap.distance
-                                    ]
-                                    ()
 
-                            Nothing ->
-                                Expect.fail "Expected hysteresis to upgrade to the four-contact snap"
+                            -- Dragged towards center at X = -8 (dist 8 to center, dist 12 to edge)
+                            upgraded =
+                                solveSnapWithHysteresisAndPredicate
+                                    (\_ -> True)
+                                    24.0
+                                    18.0
+                                    partialLatch
+                                    0
+                                    (Mat4.makeTranslate3 -8 -48 0)
+                                    draggedAntiStuds
+                                    targetStuds
+                        in
+                        Expect.all
+                            [ \_ ->
+                                case held of
+                                    Just snap ->
+                                        let
+                                            snappedOrigin =
+                                                Mat4.transform snap.snapMatrix (vec3 0 0 0)
+                                        in
+                                        Vec3.distance snappedOrigin (vec3 -20 -48 0)
+                                            |> Expect.within (Expect.Absolute 0.01) 0
+
+                                    Nothing ->
+                                        Expect.fail "Expected active latch to be held at -20"
+                            , \_ ->
+                                case upgraded of
+                                    Just snap ->
+                                        let
+                                            snappedOrigin =
+                                                Mat4.transform snap.snapMatrix (vec3 0 0 0)
+                                        in
+                                        Expect.all
+                                            [ \_ ->
+                                                Vec3.distance snappedOrigin (vec3 0 -48 0)
+                                                    |> Expect.within (Expect.Absolute 0.01) 0
+                                            , \_ -> Expect.equal 8 snap.distance
+                                            ]
+                                            ()
+
+                                    Nothing ->
+                                        Expect.fail "Expected hysteresis to upgrade to the four-contact snap"
+                            ]
+                            ()
 
                     Nothing ->
                         Expect.fail "3003.dat is not in the connectivity catalog"
@@ -2324,6 +2390,378 @@ snapSolverTests =
 
                     _ ->
                         Expect.fail "3070b.dat or 87087.dat not found in catalog"
+        ]
+
+
+brickStacking2x2Tests : Test
+brickStacking2x2Tests =
+    let
+        setup2x2 =
+            case knownCatalogPart "3003.dat" of
+                Just brick ->
+                    let
+                        draggedAntiStuds =
+                            brick.connections
+                                |> List.filter (.connType >> (==) AntiStud)
+
+                        targetStuds =
+                            brick.connections
+                                |> List.filter (.connType >> (==) Stud)
+                                |> List.map (transformPoint (Mat4.makeTranslate3 0 -24 0) 1)
+                    in
+                    Just ( draggedAntiStuds, targetStuds )
+
+                Nothing ->
+                    Nothing
+
+        expectSnapPosition expectedOrigin expectedContacts dragged target actualSnap =
+            case actualSnap of
+                Just snap ->
+                    let
+                        origin =
+                            Mat4.transform snap.snapMatrix (vec3 0 0 0)
+
+                        contacts =
+                            alignedContactCount snap.snapMatrix snap.targetPlacementId dragged target
+                    in
+                    Expect.all
+                        [ \_ ->
+                            Vec3.distance origin expectedOrigin
+                                |> Expect.within (Expect.Absolute 0.01) 0
+                        , \_ ->
+                            Expect.equal expectedContacts contacts
+                        ]
+                        ()
+
+                Nothing ->
+                    Expect.fail "Expected snap candidate but got Nothing"
+    in
+    describe "2x2 brick stacking configurations (3003.dat)"
+        [ test "center position (0, 0) selects 4-stud snap" <|
+            \_ ->
+                case setup2x2 of
+                    Just ( dragged, target ) ->
+                        solveSnap 12.0 0 (Mat4.makeTranslate3 0 -48 0) dragged target
+                            |> expectSnapPosition (vec3 0 -48 0) 4 dragged target
+
+                    Nothing ->
+                        Expect.fail "3003.dat is not in the connectivity catalog"
+        , test "edge positions (±20, 0) and (0, ±20) select 2-stud snap" <|
+            \_ ->
+                case setup2x2 of
+                    Just ( dragged, target ) ->
+                        let
+                            edgeOffsets =
+                                [ ( 20, 0 ), ( -20, 0 ), ( 0, 20 ), ( 0, -20 ) ]
+
+                            checkEdge ( dx, dz ) =
+                                solveSnap 12.0 0 (Mat4.makeTranslate3 dx -48 dz) dragged target
+                                    |> expectSnapPosition (vec3 dx -48 dz) 2 dragged target
+                        in
+                        Expect.all (List.map (\offset -> \_ -> checkEdge offset) edgeOffsets) ()
+
+                    Nothing ->
+                        Expect.fail "3003.dat is not in the connectivity catalog"
+        , test "corner positions (±20, ±20) select 1-stud snap" <|
+            \_ ->
+                case setup2x2 of
+                    Just ( dragged, target ) ->
+                        let
+                            cornerOffsets =
+                                [ ( 20, 20 ), ( 20, -20 ), ( -20, 20 ), ( -20, -20 ) ]
+
+                            checkCorner ( dx, dz ) =
+                                solveSnap 12.0 0 (Mat4.makeTranslate3 dx -48 dz) dragged target
+                                    |> expectSnapPosition (vec3 dx -48 dz) 1 dragged target
+                        in
+                        Expect.all (List.map (\offset -> \_ -> checkCorner offset) cornerOffsets) ()
+
+                    Nothing ->
+                        Expect.fail "3003.dat is not in the connectivity catalog"
+        , test "all 9 configurations reachable when cursor is placed near them without Shift" <|
+            \_ ->
+                case setup2x2 of
+                    Just ( dragged, target ) ->
+                        let
+                            allConfigs =
+                                [ ( 0, 0, 4 )
+                                , ( 20, 0, 2 )
+                                , ( -20, 0, 2 )
+                                , ( 0, 20, 2 )
+                                , ( 0, -20, 2 )
+                                , ( 20, 20, 1 )
+                                , ( 20, -20, 1 )
+                                , ( -20, 20, 1 )
+                                , ( -20, -20, 1 )
+                                ]
+
+                            nearOffset ( dx, dz, contacts ) =
+                                let
+                                    px =
+                                        dx
+                                            + (if dx >= 0 then
+                                                2.0
+
+                                               else
+                                                -2.0
+                                              )
+
+                                    pz =
+                                        dz
+                                            + (if dz >= 0 then
+                                                2.0
+
+                                               else
+                                                -2.0
+                                              )
+
+                                    snap =
+                                        solveSnapWithPredicateWithPriority
+                                            MaximizeContacts
+                                            (\_ -> True)
+                                            12.0
+                                            0
+                                            (Mat4.makeTranslate3 px -48 pz)
+                                            dragged
+                                            target
+                                in
+                                \_ -> expectSnapPosition (vec3 dx -48 dz) contacts dragged target snap
+                        in
+                        Expect.all (List.map nearOffset allConfigs) ()
+
+                    Nothing ->
+                        Expect.fail "3003.dat is not in the connectivity catalog"
+        , test "all 9 configurations reachable with Shift (ClosestPoint) when cursor is placed near them" <|
+            \_ ->
+                case setup2x2 of
+                    Just ( dragged, target ) ->
+                        let
+                            allConfigs =
+                                [ ( 0, 0, 4 )
+                                , ( 20, 0, 2 )
+                                , ( -20, 0, 2 )
+                                , ( 0, 20, 2 )
+                                , ( 0, -20, 2 )
+                                , ( 20, 20, 1 )
+                                , ( 20, -20, 1 )
+                                , ( -20, 20, 1 )
+                                , ( -20, -20, 1 )
+                                ]
+
+                            nearOffset ( dx, dz, contacts ) =
+                                let
+                                    px =
+                                        dx
+                                            + (if dx >= 0 then
+                                                2.0
+
+                                               else
+                                                -2.0
+                                              )
+
+                                    pz =
+                                        dz
+                                            + (if dz >= 0 then
+                                                2.0
+
+                                               else
+                                                -2.0
+                                              )
+
+                                    snap =
+                                        solveSnapWithPredicateWithPriority
+                                            ClosestPoint
+                                            (\_ -> True)
+                                            12.0
+                                            0
+                                            (Mat4.makeTranslate3 px -48 pz)
+                                            dragged
+                                            target
+                                in
+                                \_ -> expectSnapPosition (vec3 dx -48 dz) contacts dragged target snap
+                        in
+                        Expect.all (List.map nearOffset allConfigs) ()
+
+                    Nothing ->
+                        Expect.fail "3003.dat is not in the connectivity catalog"
+        , test "hysteresis switches from 1-stud corner to 4-stud center when dragged towards center" <|
+            \_ ->
+                case setup2x2 of
+                    Just ( dragged, target ) ->
+                        let
+                            activeCorner =
+                                solveSnap 0.5 0 (Mat4.makeTranslate3 20 -48 20) dragged target
+
+                            result =
+                                solveSnapWithHysteresis
+                                    snapEnterDistance
+                                    snapReleaseDistance
+                                    activeCorner
+                                    0
+                                    (Mat4.makeTranslate3 0 -48 0)
+                                    dragged
+                                    target
+                        in
+                        expectSnapPosition (vec3 0 -48 0) 4 dragged target result
+
+                    Nothing ->
+                        Expect.fail "3003.dat is not in the connectivity catalog"
+        , test "hysteresis switches from 4-stud center to 1-stud corner when dragged towards corner" <|
+            \_ ->
+                case setup2x2 of
+                    Just ( dragged, target ) ->
+                        let
+                            activeCenter =
+                                solveSnap 0.5 0 (Mat4.makeTranslate3 0 -48 0) dragged target
+
+                            result =
+                                solveSnapWithHysteresis
+                                    snapEnterDistance
+                                    snapReleaseDistance
+                                    activeCenter
+                                    0
+                                    (Mat4.makeTranslate3 20 -48 20)
+                                    dragged
+                                    target
+                        in
+                        expectSnapPosition (vec3 20 -48 20) 1 dragged target result
+
+                    Nothing ->
+                        Expect.fail "3003.dat is not in the connectivity catalog"
+        , test "hysteresis provides bidirectional switching between center (4-stud) and edge (2-stud)" <|
+            \_ ->
+                case setup2x2 of
+                    Just ( dragged, target ) ->
+                        let
+                            activeCenter =
+                                solveSnap 0.5 0 (Mat4.makeTranslate3 0 -48 0) dragged target
+
+                            activeEdge =
+                                solveSnap 0.5 0 (Mat4.makeTranslate3 20 -48 0) dragged target
+
+                            -- Dragging from center towards edge:
+                            -- At X = 14, active center stays latched
+                            centerAt14 =
+                                solveSnapWithHysteresis
+                                    snapEnterDistance
+                                    snapReleaseDistance
+                                    activeCenter
+                                    0
+                                    (Mat4.makeTranslate3 14 -48 0)
+                                    dragged
+                                    target
+
+                            -- At X = 16, edge snap overcomes the latch barrier and replaces center
+                            centerAt16 =
+                                solveSnapWithHysteresis
+                                    snapEnterDistance
+                                    snapReleaseDistance
+                                    activeCenter
+                                    0
+                                    (Mat4.makeTranslate3 16 -48 0)
+                                    dragged
+                                    target
+
+                            -- Dragging from edge towards center:
+                            -- At X = 11, active edge stays latched
+                            edgeAt11 =
+                                solveSnapWithHysteresis
+                                    snapEnterDistance
+                                    snapReleaseDistance
+                                    activeEdge
+                                    0
+                                    (Mat4.makeTranslate3 11 -48 0)
+                                    dragged
+                                    target
+
+                            -- At X = 9, center snap overcomes the latch barrier and replaces edge
+                            edgeAt9 =
+                                solveSnapWithHysteresis
+                                    snapEnterDistance
+                                    snapReleaseDistance
+                                    activeEdge
+                                    0
+                                    (Mat4.makeTranslate3 9 -48 0)
+                                    dragged
+                                    target
+                        in
+                        Expect.all
+                            [ \_ -> expectSnapPosition (vec3 0 -48 0) 4 dragged target centerAt14
+                            , \_ -> expectSnapPosition (vec3 20 -48 0) 2 dragged target centerAt16
+                            , \_ -> expectSnapPosition (vec3 20 -48 0) 2 dragged target edgeAt11
+                            , \_ -> expectSnapPosition (vec3 0 -48 0) 4 dragged target edgeAt9
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "3003.dat is not in the connectivity catalog"
+        , test "hysteresis provides bidirectional switching between edge (2-stud) and corner (1-stud)" <|
+            \_ ->
+                case setup2x2 of
+                    Just ( dragged, target ) ->
+                        let
+                            activeEdge =
+                                solveSnap 0.5 0 (Mat4.makeTranslate3 20 -48 0) dragged target
+
+                            activeCorner =
+                                solveSnap 0.5 0 (Mat4.makeTranslate3 20 -48 20) dragged target
+
+                            -- Dragging from edge towards corner along Z:
+                            -- At Z = 13, active edge stays latched
+                            edgeAt13 =
+                                solveSnapWithHysteresis
+                                    snapEnterDistance
+                                    snapReleaseDistance
+                                    activeEdge
+                                    0
+                                    (Mat4.makeTranslate3 20 -48 13)
+                                    dragged
+                                    target
+
+                            -- At Z = 15, corner snap overcomes the barrier and replaces edge
+                            edgeAt15 =
+                                solveSnapWithHysteresis
+                                    snapEnterDistance
+                                    snapReleaseDistance
+                                    activeEdge
+                                    0
+                                    (Mat4.makeTranslate3 20 -48 15)
+                                    dragged
+                                    target
+
+                            -- Dragging from corner towards edge along Z:
+                            -- At Z = 10, active corner stays latched
+                            cornerAt10 =
+                                solveSnapWithHysteresis
+                                    snapEnterDistance
+                                    snapReleaseDistance
+                                    activeCorner
+                                    0
+                                    (Mat4.makeTranslate3 20 -48 10)
+                                    dragged
+                                    target
+
+                            -- At Z = 8, edge snap overcomes the barrier and replaces corner
+                            cornerAt8 =
+                                solveSnapWithHysteresis
+                                    snapEnterDistance
+                                    snapReleaseDistance
+                                    activeCorner
+                                    0
+                                    (Mat4.makeTranslate3 20 -48 8)
+                                    dragged
+                                    target
+                        in
+                        Expect.all
+                            [ \_ -> expectSnapPosition (vec3 20 -48 0) 2 dragged target edgeAt13
+                            , \_ -> expectSnapPosition (vec3 20 -48 20) 1 dragged target edgeAt15
+                            , \_ -> expectSnapPosition (vec3 20 -48 20) 1 dragged target cornerAt10
+                            , \_ -> expectSnapPosition (vec3 20 -48 0) 2 dragged target cornerAt8
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "3003.dat is not in the connectivity catalog"
         ]
 
 
