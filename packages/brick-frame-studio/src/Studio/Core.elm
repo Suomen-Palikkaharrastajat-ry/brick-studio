@@ -863,14 +863,14 @@ resetDocument doc model =
 -}
 isGlued : Int -> Model -> Bool
 isGlued id model =
-    Document.isGlued id model.document
+    Document.isPlacementGlued id model.document
 
 
 {-| Whether any selected placement is glued.
 -}
 selectionGlued : Model -> Bool
 selectionGlued model =
-    not (Set.isEmpty (Set.intersect model.selection (Document.gluedIds model.document)))
+    not (Set.isEmpty (Set.intersect model.selection (Document.gluedPlacementIds model.document)))
 
 
 {-| Puzzle mode. With `False`, `setGlued` does nothing and glued parts cannot be
@@ -933,13 +933,14 @@ clearUnglued : Model -> ( Model, Cmd Msg, List Event )
 clearUnglued model =
     let
         gluedNow =
-            Document.gluedIds model.document
+            Document.gluedPlacementIds model.document
 
         kept =
             Document.placements model.document
                 |> List.map .id
                 |> List.filter (\id -> not (Set.member id gluedNow))
                 |> List.foldl Document.removePlacement model.document
+                |> Document.pruneUnreferencedSubmodels
     in
     resetDocument kept model
 
@@ -961,7 +962,7 @@ applyFixes : List Health.Fix -> Model -> ( Model, Cmd Msg, List Event )
 applyFixes fixes model =
     let
         gluedNow =
-            Document.gluedIds model.document
+            Document.gluedPlacementIds model.document
 
         pairs =
             fixes
@@ -1002,7 +1003,11 @@ stays where it is, and a mixed selection moves only its unglued parts.
 -}
 movableSelection : Model -> Set Int
 movableSelection model =
-    Set.filter (\id -> not (Document.isGluedOrHasGluedMember id model.document)) model.selection
+    let
+        gluedNow =
+            Document.gluedPlacementIds model.document
+    in
+    Set.filter (\id -> not (Set.member id gluedNow)) model.selection
 
 
 {-| Whether the selection holds a part that a move or recolour may change (a

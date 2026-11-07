@@ -13,6 +13,7 @@ module LDraw.Document exposing
     , fromLines
     , getPlacement
     , gluedIds
+    , gluedPlacementIds
     , groupIntoSubmodel
     , indexOfPlacement
     , indexOfPlacementIn
@@ -23,6 +24,7 @@ module LDraw.Document exposing
     , isGlued
     , isGluedOrHasGluedMember
     , isMultiFile
+    , isPlacementGlued
     , isSubmodelReference
     , locatePlacement
     , mainPlacements
@@ -31,6 +33,7 @@ module LDraw.Document exposing
     , parse
     , placements
     , placementsOf
+    , pruneUnreferencedSubmodels
     , removePlacement
     , setGlued
     , subfiles
@@ -569,6 +572,105 @@ gluedIds doc =
         |> List.concatMap (\s -> blocksOf s.entries)
         |> List.filterMap gluedBlockId
         |> Set.fromList
+
+
+{-| Complete set of glued placement ids across the entire document, resolving
+transitive glued status for submodels. If a submodel placement is glued (or has any
+glued member), all its constituent placements (and nested submodels) are glued.
+Likewise, any directly glued placements in any submodel and their constituents are included.
+-}
+gluedPlacementIds : Document -> Set Int
+gluedPlacementIds doc =
+    let
+        directGlued =
+            gluedIds doc
+
+        mainGluedConstituents =
+            mainPlacements doc
+                |> List.filter (\p -> isGluedOrHasGluedMember p.id doc)
+                |> List.concatMap (\p -> constituentPlacements p.id doc)
+                |> List.map .id
+
+        directConstituents =
+            directGlued
+                |> Set.toList
+                |> List.concatMap (\id -> constituentPlacements id doc)
+                |> List.map .id
+    in
+    Set.fromList (mainGluedConstituents ++ directConstituents)
+
+
+{-| Whether a placement is glued, resolving transitive submodel membership.
+-}
+isPlacementGlued : Int -> Document -> Bool
+isPlacementGlued id doc =
+    Set.member id (gluedPlacementIds doc)
+
+
+{-| Remove non-main submodels that are not referenced (transitively) from the main submodel.
+The main submodel is always preserved.
+-}
+pruneUnreferencedSubmodels : Document -> Document
+pruneUnreferencedSubmodels doc =
+    let
+        referencedInSubmodel : Submodel -> List String
+        referencedInSubmodel submodel =
+            submodel.entries
+                |> List.filterMap
+                    (\e ->
+                        case e of
+                            PlacementEntry p ->
+                                Just (normalise p.part)
+
+                            Raw _ ->
+                                Nothing
+                    )
+
+        collectReachable : List String -> Set String -> Set String
+        collectReachable queue visited =
+            case queue of
+                [] ->
+                    visited
+
+                name :: rest ->
+                    if Set.member name visited then
+                        collectReachable rest visited
+
+                    else
+                        let
+                            nextVisited =
+                                Set.insert name visited
+
+                            children =
+                                case submodelByName name doc of
+                                    Just s ->
+                                        referencedInSubmodel s
+
+                                    Nothing ->
+                                        []
+                        in
+                        collectReachable (children ++ rest) nextVisited
+
+        initialQueue =
+            case doc.submodels of
+                main :: _ ->
+                    referencedInSubmodel main
+
+                [] ->
+                    []
+
+        reachable =
+            collectReachable initialQueue Set.empty
+
+        pruned =
+            case doc.submodels of
+                main :: rest ->
+                    main :: List.filter (\s -> Set.member (normalise s.name) reachable) rest
+
+                [] ->
+                    []
+    in
+    { doc | submodels = pruned }
 
 
 {-| The lines of the main submodel, in the form the geometry and gear code

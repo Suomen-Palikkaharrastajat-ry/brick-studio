@@ -306,6 +306,46 @@ coreSuite =
                     , \_ -> Expect.equal True (Core.isGlued 0 cleared)
                     ]
                     ()
+        , test "isGlued and clearUnglued handle glued submodels and drop loose parts and unreferenced submodels" <|
+            \_ ->
+                let
+                    mpd =
+                        String.join "\n"
+                            [ "0 FILE main.ldr"
+                            , "0 !PALIKKA GLUED"
+                            , "1 16 0 0 0 1 0 0 0 1 0 0 0 1 submodel1.ldr"
+                            , "1 0 100 0 0 1 0 0 0 1 0 0 0 1 3039.dat"
+                            , "1 16 200 0 0 1 0 0 0 1 0 0 0 1 unglued_group.ldr"
+                            , "0 FILE submodel1.ldr"
+                            , "1 4 0 0 0 1 0 0 0 1 0 0 0 1 3003.dat"
+                            , "1 4 40 0 0 1 0 0 0 1 0 0 0 1 3003.dat"
+                            , "0 FILE unglued_group.ldr"
+                            , "1 2 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat"
+                            , ""
+                            ]
+
+                    model =
+                        modelWith mpd
+
+                    ( cleared, _, _ ) =
+                        Core.clearUnglued model
+                in
+                Expect.all
+                    -- In original model, constituent parts of submodel1.ldr are glued
+                    [ \_ -> Expect.equal True (Core.isGlued 0 model)
+                    , \_ -> Expect.equal True (Core.isGlued 3 model)
+                    , \_ -> Expect.equal True (Core.isGlued 4 model)
+                    , \_ -> Expect.equal False (Core.isGlued 1 model)
+                    , \_ -> Expect.equal False (Core.isGlued 2 model)
+
+                    -- After clearUnglued, glued group and its parts remain; unglued parts and unglued submodel are pruned
+                    , \_ -> Expect.equal [ "main.ldr", "submodel1.ldr" ] (List.map .name cleared.document.submodels)
+                    , \_ -> Expect.equal [ 0, 3, 4 ] (idsOf cleared)
+                    , \_ -> Expect.equal True (Core.isGlued 0 cleared)
+                    , \_ -> Expect.equal True (Core.isGlued 3 cleared)
+                    , \_ -> Expect.equal True (Core.isGlued 4 cleared)
+                    ]
+                    ()
         ]
 
 

@@ -12,6 +12,7 @@ import LDraw.Types exposing (LDrawLine)
 import LDraw.Writer as Writer
 import Math.Matrix4 as Mat4
 import Math.Vector3 as Vec3 exposing (vec3)
+import Set
 import Test exposing (Test, describe, test)
 
 
@@ -332,6 +333,80 @@ suite =
                         , \_ -> Expect.equal True (Document.isGluedOrHasGluedMember 0 gluedDoc)
                         ]
                         ()
+            , test "gluedPlacementIds and isPlacementGlued resolve transitive glue for submodels" <|
+                \_ ->
+                    let
+                        mpd =
+                            String.join "\n"
+                                [ "0 FILE main.ldr"
+                                , "0 !PALIKKA GLUED"
+                                , "1 16 0 0 0 1 0 0 0 1 0 0 0 1 submodel1.ldr"
+                                , "1 0 100 0 0 1 0 0 0 1 0 0 0 1 3039.dat"
+                                , "0 FILE submodel1.ldr"
+                                , "1 4 0 0 0 1 0 0 0 1 0 0 0 1 3003.dat"
+                                , "1 4 40 0 0 1 0 0 0 1 0 0 0 1 3003.dat"
+                                , ""
+                                ]
+
+                        doc =
+                            Document.parse mpd
+                    in
+                    Expect.all
+                        [ \d -> Expect.equal (Set.fromList [ 0, 2, 3 ]) (Document.gluedPlacementIds d)
+                        , \d -> Expect.equal True (Document.isPlacementGlued 0 d)
+                        , \d -> Expect.equal True (Document.isPlacementGlued 2 d)
+                        , \d -> Expect.equal True (Document.isPlacementGlued 3 d)
+                        , \d -> Expect.equal False (Document.isPlacementGlued 1 d)
+                        ]
+                        doc
+            , test "gluedPlacementIds transitively glues nested submodels when parent group is glued" <|
+                \_ ->
+                    let
+                        mpd =
+                            String.join "\n"
+                                [ "0 FILE main.ldr"
+                                , "0 !PALIKKA GLUED"
+                                , "1 16 0 0 0 1 0 0 0 1 0 0 0 1 outer.ldr"
+                                , "0 FILE outer.ldr"
+                                , "1 16 10 0 0 1 0 0 0 1 0 0 0 1 inner.ldr"
+                                , "0 FILE inner.ldr"
+                                , "1 14 0 0 0 1 0 0 0 1 0 0 0 1 3002.dat"
+                                , ""
+                                ]
+
+                        doc =
+                            Document.parse mpd
+                    in
+                    Expect.all
+                        [ \d -> Expect.equal (Set.fromList [ 0, 1, 2 ]) (Document.gluedPlacementIds d)
+                        , \d -> Expect.equal True (Document.isPlacementGlued 0 d)
+                        , \d -> Expect.equal True (Document.isPlacementGlued 1 d)
+                        , \d -> Expect.equal True (Document.isPlacementGlued 2 d)
+                        ]
+                        doc
+            , test "pruneUnreferencedSubmodels drops unreferenced submodels but preserves reachable ones" <|
+                \_ ->
+                    let
+                        mpd =
+                            String.join "\n"
+                                [ "0 FILE main.ldr"
+                                , "1 16 0 0 0 1 0 0 0 1 0 0 0 1 sub1.ldr"
+                                , "0 FILE sub1.ldr"
+                                , "1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat"
+                                , "0 FILE orphan.ldr"
+                                , "1 16 0 0 0 1 0 0 0 1 0 0 0 1 orphan_child.ldr"
+                                , "0 FILE orphan_child.ldr"
+                                , "1 14 0 0 0 1 0 0 0 1 0 0 0 1 3002.dat"
+                                , ""
+                                ]
+
+                        doc =
+                            Document.parse mpd
+
+                        pruned =
+                            Document.pruneUnreferencedSubmodels doc
+                    in
+                    Expect.equal [ "main.ldr", "sub1.ldr" ] (List.map .name pruned.submodels)
             ]
         ]
 
