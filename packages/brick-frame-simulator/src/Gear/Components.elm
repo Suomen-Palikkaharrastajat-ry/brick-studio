@@ -53,7 +53,6 @@ defaultSpecs =
     , { partFile = "55013.dat", kind = AxleLike }
     , { partFile = "60485.dat", kind = AxleLike }
     , { partFile = "87083.dat", kind = AxleLike }
-    , { partFile = "99009.dat", kind = AxleLike }
     , -- Common pins / pin-axle connectors (trackable as axle-like shafts)
       { partFile = "2780.dat", kind = AxleLike }
     , { partFile = "3673.dat", kind = AxleLike }

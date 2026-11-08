@@ -1,6 +1,7 @@
 module Data exposing (embeddedParts, exampleModels, gearParts, ldrawColors, lodParts, message, version)
 
 import Dict exposing (Dict)
+import Gear.Types exposing (GearAxis(..), GearHoleKind(..), GearKind(..))
 
 
 message : String
@@ -490,24 +491,33 @@ lodParts =
 
 
 
--- Known gear parts
+-- Known gear parts and their explicit simulation metadata
 
 
-gearParts : List { partFile : String, teeth : Int, pitchRadius : Float }
+gearParts : List { partFile : String, teeth : Int, pitchRadius : Float, kind : GearKind, axis : GearAxis, motorCapable : Bool, rotates : Bool, holes : List { kind : GearHoleKind, x : Float, y : Float } }
 gearParts =
-    [ { partFile = "3647.dat", teeth = 8, pitchRadius = 10.0 }
-    , { partFile = "10928.dat", teeth = 8, pitchRadius = 10.0 }
-    , { partFile = "11955.dat", teeth = 8, pitchRadius = 10.0 }
-    , { partFile = "4019.dat", teeth = 16, pitchRadius = 20.0 }
-    , { partFile = "3648.dat", teeth = 24, pitchRadius = 30.0 }
-    , { partFile = "3649.dat", teeth = 40, pitchRadius = 50.0 }
-    , { partFile = "4716.dat", teeth = 1, pitchRadius = 12.0 }
-    , { partFile = "32905.dat", teeth = 1, pitchRadius = 12.0 }
-    , { partFile = "69778.dat", teeth = 12, pitchRadius = 12.0 }
-    , { partFile = "32198.dat", teeth = 20, pitchRadius = 25.0 }
-    , { partFile = "32269.dat", teeth = 20, pitchRadius = 25.0 }
-    , { partFile = "3650b.dat", teeth = 24, pitchRadius = 30.0 }
-    , { partFile = "99010.dat", teeth = 28, pitchRadius = 35.0 }
+    [ { partFile = "3647.dat", teeth = 8, pitchRadius = 10.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "10928.dat", teeth = 8, pitchRadius = 10.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "11955.dat", teeth = 8, pitchRadius = 10.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "4019.dat", teeth = 16, pitchRadius = 20.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "3648.dat", teeth = 24, pitchRadius = 30.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 }, { kind = PinHole, x = 10.0, y = 10.0 }, { kind = PinHole, x = -10.0, y = 10.0 }, { kind = PinHole, x = -10.0, y = -10.0 }, { kind = PinHole, x = 10.0, y = -10.0 } ] }
+    , { partFile = "3648b.dat", teeth = 24, pitchRadius = 30.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 }, { kind = PinHole, x = 10.0, y = 10.0 }, { kind = PinHole, x = -10.0, y = 10.0 }, { kind = PinHole, x = -10.0, y = -10.0 }, { kind = PinHole, x = 10.0, y = -10.0 } ] }
+    , { partFile = "3649.dat", teeth = 40, pitchRadius = 50.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 }, { kind = AxleHole, x = 0.0, y = 20.0 }, { kind = AxleHole, x = 0.0, y = -20.0 }, { kind = AxleHole, x = 20.0, y = 0.0 }, { kind = AxleHole, x = -20.0, y = 0.0 }, { kind = PinHole, x = 10.0, y = 10.0 }, { kind = PinHole, x = -10.0, y = 10.0 }, { kind = PinHole, x = -10.0, y = -10.0 }, { kind = PinHole, x = 10.0, y = -10.0 }, { kind = PinHole, x = 10.0, y = 30.0 }, { kind = PinHole, x = -10.0, y = 30.0 }, { kind = PinHole, x = 10.0, y = -30.0 }, { kind = PinHole, x = -10.0, y = -30.0 }, { kind = PinHole, x = 30.0, y = 10.0 }, { kind = PinHole, x = -30.0, y = 10.0 }, { kind = PinHole, x = 30.0, y = -10.0 }, { kind = PinHole, x = -30.0, y = -10.0 } ] }
+    , { partFile = "4716.dat", teeth = 1, pitchRadius = 12.0, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "32905.dat", teeth = 2, pitchRadius = 12.0, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "69778.dat", teeth = 12, pitchRadius = 12.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "32198.dat", teeth = 20, pitchRadius = 25.0, kind = BevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "32198a.dat", teeth = 20, pitchRadius = 25.0, kind = BevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "32269.dat", teeth = 20, pitchRadius = 25.0, kind = BevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "32270.dat", teeth = 12, pitchRadius = 15.0, kind = BevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "4143.dat", teeth = 14, pitchRadius = 17.5, kind = BevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "6589.dat", teeth = 12, pitchRadius = 15.0, kind = BevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "3650.dat", teeth = 24, pitchRadius = 30.0, kind = CrownGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "3650b.dat", teeth = 24, pitchRadius = 30.0, kind = CrownGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "3650c.dat", teeth = 24, pitchRadius = 30.0, kind = CrownGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole, x = 0.0, y = 0.0 } ] }
+    , { partFile = "18938.dat", teeth = 60, pitchRadius = 75.0, kind = TurntableGear, axis = AxisY, motorCapable = True, rotates = True, holes = [ { kind = PinHole, x = 40.0, y = 0.0 }, { kind = PinHole, x = -40.0, y = 0.0 } ] }
+    , { partFile = "99009.dat", teeth = 28, pitchRadius = 35.0, kind = TurntableGear, axis = AxisY, motorCapable = False, rotates = False, holes = [ { kind = PinHole, x = 20.0, y = 0.0 }, { kind = PinHole, x = -20.0, y = 0.0 } ] }
+    , { partFile = "99010.dat", teeth = 28, pitchRadius = 35.0, kind = TurntableGear, axis = AxisY, motorCapable = True, rotates = True, holes = [ { kind = PinHole, x = 20.0, y = -10.0 }, { kind = PinHole, x = -20.0, y = -10.0 } ] }
     ]
 
 

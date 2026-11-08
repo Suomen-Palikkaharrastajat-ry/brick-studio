@@ -4,7 +4,7 @@ module HintsTest exposing (suite)
 -}
 
 import Expect
-import Gear.Types exposing (GearSpec)
+import Gear.Types exposing (GearAxis(..), GearKind(..), GearSpec)
 import LDraw.Document as Document
 import Set
 import Studio.Hints as Hints
@@ -13,8 +13,8 @@ import Test exposing (Test, describe, test)
 
 specs : List GearSpec
 specs =
-    [ { partFile = "3647.dat", teeth = 8, pitchRadius = 8 }
-    , { partFile = "4019.dat", teeth = 16, pitchRadius = 16 }
+    [ { partFile = "3647.dat", teeth = 8, pitchRadius = 8, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
+    , { partFile = "4019.dat", teeth = 16, pitchRadius = 16, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
     ]
 
 

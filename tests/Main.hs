@@ -1,6 +1,6 @@
 module Main (main) where
 
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Lib (Finish (..), LDrawColor (..), generateColorDataModule, generateElmModule, parseLdConfig)
 import Test.Hspec
 
@@ -20,6 +20,26 @@ main = hspec $ do
         it "produces the generated Elm module" $ do
             generated <- generateElmModule
             generated `shouldSatisfy` Text.isInfixOf "module Data exposing"
+
+        it "emits the catalog gear set, aliases, and explicit metadata" $ do
+            generated <- generateElmModule
+            length (filter (Text.isInfixOf "partFile =") (Text.lines generated)) `shouldBe` 22
+            mapM_
+                (\part -> generated `shouldSatisfy` Text.isInfixOf ("partFile = \"" <> part <> "\""))
+                [ "3648b.dat"
+                , "32270.dat"
+                , "6589.dat"
+                , "4143.dat"
+                , "18938.dat"
+                , "99009.dat"
+                , "99010.dat"
+                , "32198a.dat"
+                , "3650c.dat"
+                ]
+            generated `shouldSatisfy` Text.isInfixOf "teeth = 1, pitchRadius = 12.0, kind = WormGear"
+            generated `shouldSatisfy` Text.isInfixOf "teeth = 2, pitchRadius = 12.0, kind = WormGear"
+            generated `shouldSatisfy` Text.isInfixOf "kind = TurntableGear, axis = AxisY, motorCapable = False, rotates = False"
+            generated `shouldSatisfy` Text.isInfixOf "kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole"
 
     describe "generateColorDataModule" $ do
         it "produces the generated colour table module" $ do

@@ -7,6 +7,7 @@ top-level placements in a document.
 import Dict
 import Expect
 import Gear.Placements as Placements
+import Gear.Types exposing (GearAxis(..), GearKind(..))
 import LDraw.Document as Document
 import Math.Matrix4 as Mat4
 import Math.Vector3 exposing (vec3)
@@ -79,7 +80,7 @@ suite =
                             Document.setGlued True 0 doc
                     in
                     Placements.gearSources gluedDoc
-                        [ { id = 0, spec = { partFile = "3648.dat", teeth = 24, pitchRadius = 30 }, color = 7, worldPosition = vec3 0 0 0, worldMatrix = Mat4.identity } ]
+                        [ { id = 0, spec = { partFile = "3648.dat", teeth = 24, pitchRadius = 30, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }, color = 7, worldPosition = vec3 0 0 0, worldMatrix = Mat4.identity } ]
                         |> Expect.equal Dict.empty
             ]
         ]

@@ -52,7 +52,7 @@ the moving group is considered; fixed gears are never moved.
 
 import Dict exposing (Dict)
 import Gear.Detect exposing (canonicalAxis, isBevelLike, isCrownLike, isWorm)
-import Gear.Types exposing (GearInstance, GearSpec)
+import Gear.Types exposing (GearAxis(..), GearInstance, GearSpec)
 import Math.Matrix4 as Mat4
 import Math.Vector3 as Vec3 exposing (Vec3)
 
@@ -131,18 +131,11 @@ phi0Table =
     Dict.fromList [ ( "32198.dat", 0.0 ) ]
 
 
-{-| Worm parts: their thread phase is unresolved, so they are never aligned.
--}
-wormParts : List String
-wormParts =
-    [ "4716.dat", "32905.dat" ]
-
-
 {-| Tooth phase φ0 for a gear part, or `Nothing` for worms (no alignment).
 -}
 phaseOf : GearSpec -> Maybe Float
 phaseOf spec =
-    if isWorm spec || List.member spec.partFile wormParts then
+    if isWorm spec then
         Nothing
 
     else
@@ -164,8 +157,16 @@ gearFrame gear =
         origin =
             Mat4.transform m (Vec3.vec3 0 0 0)
 
+        localAxis =
+            case gear.spec.axis of
+                AxisY ->
+                    Vec3.vec3 0 1 0
+
+                AxisZ ->
+                    Vec3.vec3 0 0 1
+
         rawAxis =
-            Vec3.sub (Mat4.transform m (Vec3.vec3 0 0 1)) origin
+            Vec3.sub (Mat4.transform m localAxis) origin
 
         rawX =
             Vec3.sub (Mat4.transform m (Vec3.vec3 1 0 0)) origin

@@ -131,6 +131,11 @@ data GearSpec = GearSpec
     { gearFile :: Text
     , gearTeeth :: Int
     , gearPitchRadius :: Float
+    , gearKind :: Text
+    , gearAxis :: Text
+    , gearMotorCapable :: Bool
+    , gearRotates :: Bool
+    , gearHoles :: [(Text, Float, Float)]
     }
     deriving (Show)
 
@@ -138,19 +143,39 @@ data GearSpec = GearSpec
 -- Pitch radii: teeth × 1.25 LDU  (module M = 1 mm = 2.5 LDU, so r = teeth × M / 2)
 knownGears :: [GearSpec]
 knownGears =
-    [ GearSpec "3647.dat" 8 10.0 -- 8T  (was 16.0)
-    , GearSpec "10928.dat" 8 10.0 -- 8T  (was 16.0)
-    , GearSpec "11955.dat" 8 10.0 -- 8T  (was 16.0)
-    , GearSpec "4019.dat" 16 20.0 -- 16T (was 24.0)
-    , GearSpec "3648.dat" 24 30.0 -- 24T (was 38.4)
-    , GearSpec "3649.dat" 40 50.0 -- 40T (was 56.0)
-    , GearSpec "4716.dat" 1 12.0 -- worm gear (pitch radius from 4716s01.dat geometry; thread root 7, tip 12.7; worm+12T sum ≈ 24 LDU)
-    , GearSpec "32905.dat" 1 12.0 -- worm screw long Type II (same thread geometry as 4716)
-    , GearSpec "69778.dat" 12 12.0 -- 12T gear (pitch radius from 69778s01.dat geometry; tooth root 12.3, tip 17.7; worm+12T sum ≈ 24 LDU)
-    , GearSpec "32198.dat" 20 25.0 -- bevel 20T (was 32.0)
-    , GearSpec "32269.dat" 20 25.0 -- double bevel 20T (was 32.0)
-    , GearSpec "3650b.dat" 24 30.0 -- crown gear (was 38.4)
+    [ gear "3647.dat" 8 10.0 "SpurGear" "AxisZ" True True [axle 0 0]
+    , gear "10928.dat" 8 10.0 "SpurGear" "AxisZ" True True [axle 0 0]
+    , gear "11955.dat" 8 10.0 "SpurGear" "AxisZ" True True [axle 0 0]
+    , gear "4019.dat" 16 20.0 "SpurGear" "AxisZ" True True [axle 0 0]
+    , gear "3648.dat" 24 30.0 "SpurGear" "AxisZ" True True (axle 0 0 : pinHoles24)
+    , gear "3648b.dat" 24 30.0 "SpurGear" "AxisZ" True True (axle 0 0 : pinHoles24)
+    , gear "3649.dat" 40 50.0 "SpurGear" "AxisZ" True True (axle 0 0 : axleHoles40 ++ pinHoles40)
+    , gear "4716.dat" 1 12.0 "WormGear" "AxisZ" True True [axle 0 0]
+    , gear "32905.dat" 2 12.0 "WormGear" "AxisZ" True True [axle 0 0]
+    , gear "69778.dat" 12 12.0 "SpurGear" "AxisZ" True True [axle 0 0]
+    , gear "32198.dat" 20 25.0 "BevelGear" "AxisZ" True True [axle 0 0]
+    , gear "32198a.dat" 20 25.0 "BevelGear" "AxisZ" True True [axle 0 0]
+    , gear "32269.dat" 20 25.0 "BevelGear" "AxisZ" True True [axle 0 0]
+    , gear "32270.dat" 12 15.0 "BevelGear" "AxisZ" True True [axle 0 0]
+    , gear "4143.dat" 14 17.5 "BevelGear" "AxisZ" True True [axle 0 0]
+    , gear "6589.dat" 12 15.0 "BevelGear" "AxisZ" True True [axle 0 0]
+    , gear "3650.dat" 24 30.0 "CrownGear" "AxisZ" True True [axle 0 0]
+    , gear "3650b.dat" 24 30.0 "CrownGear" "AxisZ" True True [axle 0 0]
+    , gear "3650c.dat" 24 30.0 "CrownGear" "AxisZ" True True [axle 0 0]
+    , gear "18938.dat" 60 75.0 "TurntableGear" "AxisY" True True (turntableOffsets 40 0)
+    , -- 99009 is the stationary turntable base. It is recognized as a gear
+      -- feature for catalog completeness and connectivity, but is not a motor.
+      gear "99009.dat" 28 35.0 "TurntableGear" "AxisY" False False (turntableOffsets 20 0)
+    , gear "99010.dat" 28 35.0 "TurntableGear" "AxisY" True True (turntableOffsets 20 (-10))
     ]
+  where
+    gear file teeth radius kind axis motor rotates holes = GearSpec file teeth radius kind axis motor rotates holes
+    axle x y = ("AxleHole", x, y)
+    pin x y = ("PinHole", x, y)
+    pinHoles24 = map (uncurry pin) [(10, 10), (-10, 10), (-10, -10), (10, -10)]
+    axleHoles40 = map (uncurry axle) [(0, 20), (0, -20), (20, 0), (-20, 0)]
+    pinHoles40 = map (uncurry pin) [(10, 10), (-10, 10), (-10, -10), (10, -10), (10, 30), (-10, 30), (10, -30), (-10, -30), (30, 10), (-30, 10), (30, -10), (-30, -10)]
+    turntableOffsets x y = map (uncurry pin) [(x, y), (-x, y)]
 
 knownExampleModels :: [(Text, Text)]
 knownExampleModels =
@@ -172,6 +197,7 @@ generateElmModule = do
             , ""
             , ""
             , "import Dict exposing (Dict)"
+            , "import Gear.Types exposing (GearAxis(..), GearHoleKind(..), GearKind(..))"
             , ""
             , ""
             , "message : String"
@@ -209,7 +235,7 @@ generateElmModule = do
             , ""
             , ""
             , "-- Known gear parts"
-            , "gearParts : List { partFile : String, teeth : Int, pitchRadius : Float }"
+            , "gearParts : List { partFile : String, teeth : Int, pitchRadius : Float, kind : GearKind, axis : GearAxis, motorCapable : Bool, rotates : Bool, holes : List { kind : GearHoleKind, x : Float, y : Float } }"
             , "gearParts ="
             , "    [ " <> Text.intercalate "\n    , " (map gearEntry knownGears)
             , "    ]"
@@ -320,7 +346,22 @@ gearEntry g =
         <> Text.pack (show (gearTeeth g))
         <> ", pitchRadius = "
         <> showF (gearPitchRadius g)
+        <> ", kind = "
+        <> gearKind g
+        <> ", axis = "
+        <> gearAxis g
+        <> ", motorCapable = "
+        <> (if gearMotorCapable g then "True" else "False")
+        <> ", rotates = "
+        <> (if gearRotates g then "True" else "False")
+        <> ", holes = [ "
+        <> Text.intercalate ", " (map gearHoleEntry (gearHoles g))
+        <> " ]"
         <> " }"
+
+gearHoleEntry :: (Text, Float, Float) -> Text
+gearHoleEntry (kind, x, y) =
+    "{ kind = " <> kind <> ", x = " <> showF x <> ", y = " <> showF y <> " }"
 
 exampleModelEntry :: (Text, Text) -> Text
 exampleModelEntry (label, url) =

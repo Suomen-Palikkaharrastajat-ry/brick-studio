@@ -2129,6 +2129,9 @@ knownCatalogPart name =
         "32198" ->
             Just (makeGear 25.0 20.0 "32198.dat")
 
+        "32198a" ->
+            Just (makeGear 25.0 20.0 "32198a.dat")
+
         "32269" ->
             Just (makeGear 25.0 20.0 "32269.dat")
 
@@ -2144,8 +2147,31 @@ knownCatalogPart name =
         "3650b" ->
             Just (makeGear 30.0 20.0 "3650b.dat")
 
+        "3650c" ->
+            Just (makeGear 30.0 20.0 "3650c.dat")
+
         "3650" ->
             Just (makeGear 30.0 20.0 "3650.dat")
+
+        "18938" ->
+            Just
+                { part = "18938.dat"
+                , connections =
+                    [ { id = 1
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 40 -20 0
+                      , normal = vec3 0 -1 0
+                      , tangent = vec3 0 0 1
+                      }
+                    , { id = 2
+                      , connType = TechnicPinFemale { length = 20.0 }
+                      , localPosition = vec3 -40 -20 0
+                      , normal = vec3 0 -1 0
+                      , tangent = vec3 0 0 1
+                      }
+                    ]
+                , boundingBoxes = [ { min = vec3 -77 -20 -77, max = vec3 77 0 77 } ]
+                }
 
         "4716" ->
             Just (makeGear 12.0 40.0 "4716.dat")
@@ -2432,25 +2458,25 @@ knownCatalogPart name =
                 pinHoles =
                     [ { id = 1
                       , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 20 -20 0
+                      , localPosition = vec3 20 -20 -10
                       , normal = vec3 0 0 1
                       , tangent = vec3 1 0 0
                       }
                     , { id = 2
                       , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 -20 -20 0
+                      , localPosition = vec3 -20 -20 -10
                       , normal = vec3 0 0 1
                       , tangent = vec3 1 0 0
                       }
                     , { id = 3
                       , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 20 -20 0
+                      , localPosition = vec3 20 -20 -10
                       , normal = vec3 0 0 -1
                       , tangent = vec3 1 0 0
                       }
                     , { id = 4
                       , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 -20 -20 0
+                      , localPosition = vec3 -20 -20 -10
                       , normal = vec3 0 0 -1
                       , tangent = vec3 1 0 0
                       }

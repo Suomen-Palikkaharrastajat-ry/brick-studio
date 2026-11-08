@@ -23,7 +23,7 @@ the status pill that Brick Play shows under the canvas in Technic mode.
 
 import Data
 import Gear.Detect as Detect
-import Gear.Types exposing (GearInstance, GearSpec)
+import Gear.Types exposing (GearInstance, GearKind(..), GearSpec)
 import Html exposing (Html, div, text)
 import Html.Attributes as Attr
 import I18n exposing (Language(..))
@@ -166,17 +166,29 @@ spur gear.
 -}
 gearLabel : GearSpec -> String
 gearLabel spec =
-    if spec.teeth == 1 then
-        "Worm"
-
-    else if spec.partFile == "3650b.dat" then
-        String.fromInt spec.teeth ++ "T crown"
-
-    else if List.member spec.partFile [ "32198.dat", "32269.dat" ] then
-        String.fromInt spec.teeth ++ "T bevel"
+    if spec.kind == WormGear then
+        String.fromInt spec.teeth ++ "-start worm"
 
     else
-        String.fromInt spec.teeth ++ "T"
+        let
+            suffix =
+                case spec.kind of
+                    CrownGear ->
+                        "T crown"
+
+                    BevelGear ->
+                        "T bevel"
+
+                    TurntableGear ->
+                        "T turntable"
+
+                    SpurGear ->
+                        "T"
+
+                    WormGear ->
+                        "T"
+        in
+        String.fromInt spec.teeth ++ suffix
 
 
 gearSpecFor : String -> Maybe GearSpec

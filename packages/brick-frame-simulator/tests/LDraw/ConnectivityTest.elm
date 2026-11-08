@@ -1155,11 +1155,15 @@ extractionTests =
                         , "3648b"
                         , "3649"
                         , "32198"
+                        , "32198a"
                         , "32269"
-                        , "6589"
                         , "32270"
+                        , "6589"
                         , "4143"
+                        , "3650"
                         , "3650b"
+                        , "3650c"
+                        , "18938"
                         , "4716"
                         , "32905"
                         , "3704"
@@ -1200,6 +1204,48 @@ extractionTests =
                         List.filter (\p -> knownCatalogPart p == Nothing) partsToCheck
                 in
                 Expect.equal [] missing
+        , test "turntable pin holes retain opposite-face connectors" <|
+            \_ ->
+                case ( knownCatalogPart "18938.dat", knownCatalogPart "99009.dat", knownCatalogPart "99010.dat" ) of
+                    ( Just turntable60, Just base28, Just top28 ) ->
+                        let
+                            connectorCounts part =
+                                ( List.filter (\c -> c.connType == TechnicPinFemale { length = 20 }) part.connections |> List.length
+                                , List.filter
+                                    (\c ->
+                                        case c.connType of
+                                            TechnicAxleFemale _ ->
+                                                True
+
+                                            _ ->
+                                                False
+                                    )
+                                    part.connections
+                                    |> List.length
+                                )
+
+                            pinNormalZ part =
+                                part.connections
+                                    |> List.filter (\c -> c.connType == TechnicPinFemale { length = 20 })
+                                    |> List.map (\c -> Vec3.getZ c.normal)
+                                    |> List.sort
+
+                            pinPositions part =
+                                part.connections
+                                    |> List.filter (\c -> c.connType == TechnicPinFemale { length = 20 })
+                                    |> List.map (\c -> ( Vec3.getX c.localPosition, Vec3.getY c.localPosition, Vec3.getZ c.localPosition ))
+                                    |> List.sort
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal [ ( 2, 0 ), ( 4, 0 ), ( 4, 0 ) ] [ connectorCounts turntable60, connectorCounts base28, connectorCounts top28 ]
+                            , \_ -> Expect.equal [ -1, -1, 1, 1 ] (pinNormalZ base28)
+                            , \_ -> Expect.equal [ -1, -1, 1, 1 ] (pinNormalZ top28)
+                            , \_ -> Expect.equal [ ( -20, -20, -10 ), ( -20, -20, -10 ), ( 20, -20, -10 ), ( 20, -20, -10 ) ] (pinPositions top28)
+                            ]
+                            ()
+
+                    _ ->
+                        Expect.fail "A catalog turntable gear part was not found"
         , test "87087 has 1 up stud, 1 side stud facing -Z, and 1 anti-stud; 3070b has 1 anti-stud and no studs" <|
             \_ ->
                 case ( knownCatalogPart "87087.dat", knownCatalogPart "3070b.dat" ) of

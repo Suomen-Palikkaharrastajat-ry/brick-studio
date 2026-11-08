@@ -13,7 +13,7 @@ import Dict
 import Expect exposing (Expectation)
 import Gear.Phase as Phase exposing (Constraint, Side(..))
 import Gear.Physics as Physics
-import Gear.Types exposing (GearGraph, GearInstance, GearSpec)
+import Gear.Types exposing (GearAxis(..), GearGraph, GearInstance, GearKind(..), GearSpec)
 import Math.Matrix4 as Mat4 exposing (Mat4)
 import Math.Vector3 as Vec3 exposing (Vec3, vec3)
 import Test exposing (Test, describe, test)
@@ -28,6 +28,11 @@ spurSpec teeth =
     { partFile = spurPartFile teeth
     , teeth = teeth
     , pitchRadius = toFloat teeth / (2 * pi)
+    , kind = SpurGear
+    , axis = AxisZ
+    , motorCapable = True
+    , rotates = True
+    , holes = []
     }
 
 
@@ -60,12 +65,12 @@ crownSpur ss roll =
 
 crownSpec : GearSpec
 crownSpec =
-    { partFile = "3650b.dat", teeth = 24, pitchRadius = 24 / (2 * pi) }
+    { partFile = "3650b.dat", teeth = 24, pitchRadius = 24 / (2 * pi), kind = CrownGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
 wormSpec : GearSpec
 wormSpec =
-    { partFile = "4716.dat", teeth = 1, pitchRadius = 1 / (2 * pi) }
+    { partFile = "4716.dat", teeth = 1, pitchRadius = 1 / (2 * pi), kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
 {-| World pose: translate to (x, y, z), optionally flip the axis (rotate pi
@@ -348,18 +353,18 @@ suite =
                         [ Just 0.0, Just 0.0, Just 0.0 ]
                         [ Phase.phaseOf (spurSpec 8)
                         , Phase.phaseOf crownSpec
-                        , Phase.phaseOf { partFile = "32269.dat", teeth = 20, pitchRadius = 25 }
+                        , Phase.phaseOf { partFile = "32269.dat", teeth = 20, pitchRadius = 25, kind = BevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
                         ]
             , test "bevel 32198 is treated as phase 0 (measured value not trusted)" <|
                 \_ ->
-                    Phase.phaseOf { partFile = "32198.dat", teeth = 20, pitchRadius = 25 }
+                    Phase.phaseOf { partFile = "32198.dat", teeth = 20, pitchRadius = 25, kind = BevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
                         |> Expect.equal (Just 0.0)
             , test "worms have no phase (no alignment)" <|
                 \_ ->
                     Expect.equal
                         [ Nothing, Nothing ]
                         [ Phase.phaseOf wormSpec
-                        , Phase.phaseOf { partFile = "32905.dat", teeth = 1, pitchRadius = 5 }
+                        , Phase.phaseOf { partFile = "32905.dat", teeth = 2, pitchRadius = 5, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
                         ]
             ]
         , describe "contactPoint"

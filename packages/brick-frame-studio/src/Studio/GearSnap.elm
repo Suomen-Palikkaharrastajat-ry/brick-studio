@@ -17,7 +17,7 @@ so the gear teeth interlock.
 
 import Data
 import Gear.Phase as Phase
-import Gear.Types exposing (GearInstance, GearSpec)
+import Gear.Types exposing (GearAxis(..), GearInstance, GearSpec)
 import LDraw.Connectivity as Connectivity
     exposing
         ( ConnectionPoint
@@ -31,12 +31,13 @@ import Math.Matrix4 as Mat4 exposing (Mat4)
 import Math.Vector3 as Vec3 exposing (Vec3, vec3)
 
 
-{-| Check whether an LDraw part filename is a known gear in `Data.gearParts`.
+{-| Check whether an LDraw part filename is a rotatable gear in `Data.gearParts`.
+Fixed parts such as the 99009 turntable base are not mesh-snap partners.
 -}
 findGearSpec : String -> Maybe GearSpec
 findGearSpec file =
     Data.gearParts
-        |> List.filter (\spec -> spec.partFile == file)
+        |> List.filter (\spec -> spec.partFile == file && spec.rotates)
         |> List.head
 
 
@@ -67,28 +68,38 @@ cardinalOffsets dist =
     ]
 
 
-{-| Extract the unit axle axis (local +Z in world space) from a 4x4 transform matrix.
+{-| Extract the unit axle axis from a gear's configured local axis and world matrix.
 -}
-gearAxis : Mat4 -> Vec3
-gearAxis mat =
+gearAxis : GearSpec -> Mat4 -> Vec3
+gearAxis spec mat =
     let
         origin =
             Mat4.transform mat (vec3 0 0 0)
 
-        alongZ =
-            Mat4.transform mat (vec3 0 0 1)
+        localAxis =
+            localGearAxis spec
 
         raw =
-            Vec3.sub alongZ origin
+            Vec3.sub (Mat4.transform mat localAxis) origin
 
         len =
             Vec3.length raw
     in
     if len < 1.0e-6 then
-        vec3 0 0 1
+        localAxis
 
     else
         Vec3.scale (1 / len) raw
+
+
+localGearAxis : GearSpec -> Vec3
+localGearAxis spec =
+    case spec.axis of
+        AxisY ->
+            vec3 0 1 0
+
+        AxisZ ->
+            vec3 0 0 1
 
 
 type alias CandidatePoint =
@@ -102,8 +113,8 @@ type alias CandidatePoint =
 Returns cardinal candidates within threshold, or falling back to the closest point
 on the pitch circle.
 -}
-candidateMeshPositions : Float -> Float -> Mat4 -> Vec3 -> List CandidatePoint
-candidateMeshPositions meshDistance threshold targetMatrix draggedWorldPos =
+candidateMeshPositions : GearAxis -> Float -> Float -> Mat4 -> Vec3 -> List CandidatePoint
+candidateMeshPositions axis meshDistance threshold targetMatrix draggedWorldPos =
     let
         invTarget =
             Connectivity.invertRigid targetMatrix
@@ -111,17 +122,22 @@ candidateMeshPositions meshDistance threshold targetMatrix draggedWorldPos =
         draggedLocal =
             Mat4.transform invTarget draggedWorldPos
 
-        x =
-            Vec3.getX draggedLocal
+        planeCoordinates =
+            case axis of
+                AxisY ->
+                    ( Vec3.getX draggedLocal, Vec3.getZ draggedLocal )
 
-        y =
-            Vec3.getY draggedLocal
+                AxisZ ->
+                    ( Vec3.getX draggedLocal, Vec3.getY draggedLocal )
+
+        ( x, y ) =
+            planeCoordinates
 
         r =
             sqrt (x * x + y * y)
 
         cardinalCandidates =
-            cardinalOffsets meshDistance
+            cardinalOffsetsForAxis axis meshDistance
                 |> List.map
                     (\offset ->
                         let
@@ -147,7 +163,12 @@ candidateMeshPositions meshDistance threshold targetMatrix draggedWorldPos =
             if r > 1.0e-4 then
                 let
                     circleOffset =
-                        vec3 (meshDistance * x / r) (meshDistance * y / r) 0
+                        case axis of
+                            AxisY ->
+                                vec3 (meshDistance * x / r) 0 (meshDistance * y / r)
+
+                            AxisZ ->
+                                vec3 (meshDistance * x / r) (meshDistance * y / r) 0
 
                     worldPos =
                         Mat4.transform targetMatrix circleOffset
@@ -167,6 +188,20 @@ candidateMeshPositions meshDistance threshold targetMatrix draggedWorldPos =
 
             else
                 []
+
+
+cardinalOffsetsForAxis : GearAxis -> Float -> List Vec3
+cardinalOffsetsForAxis axis distance =
+    case axis of
+        AxisY ->
+            [ vec3 distance 0 0
+            , vec3 -distance 0 0
+            , vec3 0 0 distance
+            , vec3 0 0 -distance
+            ]
+
+        AxisZ ->
+            cardinalOffsets distance
 
 
 {-| Find the best gear mesh snap candidate for the currently dragged gear among
@@ -199,12 +234,12 @@ solveGearSnap isValid snapDistance activeSnap draggedPlacement draggedSurfaceMat
                     Mat4.transform draggedSurfaceMatrix (vec3 0 0 0)
 
                 draggedAxle =
-                    gearAxis draggedSurfaceMatrix
+                    gearAxis dragSpec draggedSurfaceMatrix
 
                 evaluatePartner ( targetP, targetSpec ) =
                     let
                         targetAxle =
-                            gearAxis targetP.matrix
+                            gearAxis targetSpec targetP.matrix
 
                         absDot =
                             abs (Vec3.dot draggedAxle targetAxle)
@@ -239,7 +274,7 @@ solveGearSnap isValid snapDistance activeSnap draggedPlacement draggedSurfaceMat
                                     enterThreshold
 
                             candidates =
-                                candidateMeshPositions meshDistance threshold targetP.matrix draggedWorldPos
+                                candidateMeshPositions targetSpec.axis meshDistance threshold targetP.matrix draggedWorldPos
 
                             isOccupied pos =
                                 List.any
@@ -279,7 +314,7 @@ solveGearSnap isValid snapDistance activeSnap draggedPlacement draggedSurfaceMat
                                         snapMatrix =
                                             case Phase.meshCorrection { fixed = partnerInst, moving = movingInst } of
                                                 Just correction ->
-                                                    Mat4.mul baseSnapMatrix (Mat4.makeRotate correction.radians (vec3 0 0 1))
+                                                    Mat4.mul baseSnapMatrix (Mat4.makeRotate correction.radians (localGearAxis dragSpec))
 
                                                 Nothing ->
                                                     baseSnapMatrix

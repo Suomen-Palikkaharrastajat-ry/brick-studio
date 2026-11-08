@@ -259,6 +259,9 @@ analyse { lines, cache } model =
                     if isGlued then
                         Nothing
 
+                    else if isTopLevelGearRef model.gearSpecs line then
+                        Nothing
+
                     else
                         Meshes.topLevelCoaxialGear cache drivenAxles line gearInstances
                 )
@@ -284,7 +287,7 @@ analyse { lines, cache } model =
                                         _ ->
                                             False
                             in
-                            not (isTopLevelGearRef model.gearSpecs line)
+                            not (isRotatingGearRef model.gearSpecs line)
                                 && not isDrivenAxle
                                 && coaxial
                                 == Nothing
@@ -339,21 +342,28 @@ analyse { lines, cache } model =
         graph =
             Detect.buildGearGraph gearInstances
 
-        firstGearId =
-            List.head gearInstances |> Maybe.map .id
+        firstMotorGearId =
+            gearInstances
+                |> List.filter (\gear -> gear.spec.motorCapable && gear.spec.rotates)
+                |> List.head
+                |> Maybe.map .id
 
         selectedMotorGearId =
             case model.requestedMotorIndex of
                 Just idx ->
-                    case gearInstances |> List.drop idx |> List.head |> Maybe.map .id of
-                        Just gid ->
-                            Just gid
+                    case gearInstances |> List.drop idx |> List.head of
+                        Just gear ->
+                            if gear.spec.motorCapable && gear.spec.rotates then
+                                Just gear.id
+
+                            else
+                                firstMotorGearId
 
                         Nothing ->
-                            firstGearId
+                            firstMotorGearId
 
                 Nothing ->
-                    firstGearId
+                    firstMotorGearId
 
         playbackState =
             model.playback
@@ -392,10 +402,10 @@ analyse { lines, cache } model =
             }
         , gearAngles = initAngles
         , simulationChecked = True
-        , simulationAvailable = not (List.isEmpty gearInstances)
+        , simulationAvailable = selectedMotorGearId /= Nothing
       }
     , { staticLines = nonGearTopLevelLines
-      , fallbackLines = List.filter (not << isTopLevelGearRef model.gearSpecs) lines
+      , fallbackLines = List.filter (not << isRotatingGearRef model.gearSpecs) lines
       , gearCount = List.length gearInstances
       }
     )
@@ -416,6 +426,16 @@ isTopLevelGearRef specs line =
     case line of
         SubFileRef ref ->
             List.any (\spec -> spec.partFile == ref.file) specs
+
+        _ ->
+            False
+
+
+isRotatingGearRef : List GearSpec -> LDrawLine -> Bool
+isRotatingGearRef specs line =
+    case line of
+        SubFileRef ref ->
+            List.any (\spec -> spec.partFile == ref.file && spec.rotates) specs
 
         _ ->
             False
@@ -1226,29 +1246,38 @@ refreshLods camera model =
 
 setMotorGear : GearId -> Model -> Model
 setMotorGear id model =
-    let
-        motor =
-            model.motor
+    case model.gearGraph |> Maybe.andThen (\graph -> Array.get id graph.instances) of
+        Just gear ->
+            if gear.spec.motorCapable && gear.spec.rotates then
+                let
+                    motor =
+                        model.motor
 
-        playbackState =
-            model.playback
+                    playbackState =
+                        model.playback
 
-        newMotor =
-            { motor | drivingGearId = Just id }
+                    newMotor =
+                        { motor | drivingGearId = Just id }
 
-        newAngles =
-            case model.gearGraph of
-                Just graph ->
-                    Animate.gearAngles newMotor graph model.playback.currentTime
+                    newAngles =
+                        case model.gearGraph of
+                            Just graph ->
+                                Animate.gearAngles newMotor graph model.playback.currentTime
 
-                Nothing ->
-                    Dict.empty
-    in
-    { model
-        | motor = newMotor
-        , playback = { playbackState | motorGearId = Just id }
-        , gearAngles = newAngles
-    }
+                            Nothing ->
+                                Dict.empty
+                in
+                { model
+                    | motor = newMotor
+                    , playback = { playbackState | motorGearId = Just id }
+                    , gearAngles = newAngles
+                }
+
+            else
+                model
+
+        Nothing ->
+            model
 
 
 {-| The gear under a screen point (canvas pixels), nearest to the eye first.

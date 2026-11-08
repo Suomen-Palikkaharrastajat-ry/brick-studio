@@ -6,8 +6,8 @@ module Gear.DetectTest exposing (suite)
 import Array
 import Dict
 import Expect
-import Gear.Detect exposing (buildGearGraph, buildGearGraphReference, extractGears)
-import Gear.Types exposing (GearInstance, GearSpec)
+import Gear.Detect exposing (buildGearGraph, buildGearGraphReference, extractGears, isWorm, meshing)
+import Gear.Types exposing (GearAxis(..), GearInstance, GearKind(..), GearSpec)
 import LDraw.Resolve exposing (PartStatus(..))
 import LDraw.Types exposing (LDrawLine(..))
 import Math.Matrix4 as Mat4
@@ -37,32 +37,32 @@ emptyCache =
 
 spec8T : GearSpec
 spec8T =
-    { partFile = "3647.dat", teeth = 8, pitchRadius = 10.0 }
+    { partFile = "3647.dat", teeth = 8, pitchRadius = 10.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
 spec16T : GearSpec
 spec16T =
-    { partFile = "4019.dat", teeth = 16, pitchRadius = 20.0 }
+    { partFile = "4019.dat", teeth = 16, pitchRadius = 20.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
 specBevel20T : GearSpec
 specBevel20T =
-    { partFile = "32198.dat", teeth = 20, pitchRadius = 25.0 }
+    { partFile = "32198.dat", teeth = 20, pitchRadius = 25.0, kind = BevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
 specCrown24T : GearSpec
 specCrown24T =
-    { partFile = "3650b.dat", teeth = 24, pitchRadius = 30.0 }
+    { partFile = "3650b.dat", teeth = 24, pitchRadius = 30.0, kind = CrownGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
 specWorm : GearSpec
 specWorm =
-    { partFile = "4716.dat", teeth = 1, pitchRadius = 12.0 }
+    { partFile = "4716.dat", teeth = 1, pitchRadius = 12.0, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
 spec12T : GearSpec
 spec12T =
-    { partFile = "69778.dat", teeth = 12, pitchRadius = 12.0 }
+    { partFile = "69778.dat", teeth = 12, pitchRadius = 12.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
 testGearSpecs : List GearSpec
@@ -168,6 +168,70 @@ suite =
                             extractGears testGearSpecs lines emptyCache |> List.map .id
                     in
                     Expect.equal [ 0, 1 ] ids
+            ]
+        , describe "explicit gear kinds"
+            [ test "worm identity is independent of tooth count" <|
+                \_ ->
+                    Expect.equal
+                        [ True, False ]
+                        [ isWorm specWorm, isWorm { spec8T | teeth = 1 } ]
+            , test "a fixed turntable base is not a rotating mesh node" <|
+                \_ ->
+                    let
+                        fixedBase =
+                            { partFile = "99009.dat"
+                            , teeth = 28
+                            , pitchRadius = 35
+                            , kind = TurntableGear
+                            , axis = AxisY
+                            , motorCapable = False
+                            , rotates = False
+                            , holes = []
+                            }
+
+                        pinion =
+                            { spec8T | axis = AxisY }
+                    in
+                    meshing
+                        (gearInst 0 fixedBase Mat4.identity (vec3 0 0 0))
+                        (gearInst 1 pinion Mat4.identity (vec3 45 0 0))
+                        |> Expect.equal False
+            , test "fixed 99009 cannot join rotatable 99010 through a rigid axle or mesh" <|
+                \_ ->
+                    let
+                        fixedBase =
+                            { partFile = "99009.dat"
+                            , teeth = 28
+                            , pitchRadius = 35
+                            , kind = TurntableGear
+                            , axis = AxisY
+                            , motorCapable = False
+                            , rotates = False
+                            , holes = []
+                            }
+
+                        top =
+                            { partFile = "99010.dat"
+                            , teeth = 28
+                            , pitchRadius = 35
+                            , kind = TurntableGear
+                            , axis = AxisY
+                            , motorCapable = True
+                            , rotates = True
+                            , holes = []
+                            }
+
+                        graph =
+                            buildGearGraph
+                                [ gearInst 0 fixedBase Mat4.identity (vec3 0 0 0)
+                                , gearInst 1 top Mat4.identity (vec3 0 0 0)
+                                ]
+                    in
+                    Expect.all
+                        [ \g -> Expect.equal Dict.empty g.connections
+                        , \g -> Expect.equal Dict.empty g.rigidAxles
+                        ]
+                        graph
             ]
         , describe "buildGearGraph — adjacency"
             [ test "no instances → empty connections" <|

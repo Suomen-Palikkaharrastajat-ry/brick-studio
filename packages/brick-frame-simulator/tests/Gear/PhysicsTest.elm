@@ -16,7 +16,7 @@ import Gear.Physics
         , propagate
         , propagateWithLinkages
         )
-import Gear.Types exposing (GearGraph, GearId, GearInstance, GearSpec)
+import Gear.Types exposing (GearAxis(..), GearGraph, GearId, GearInstance, GearKind(..), GearSpec)
 import Math.Matrix4 as Mat4
 import Math.Vector3 exposing (vec3)
 import Test exposing (Test, describe, test)
@@ -28,7 +28,12 @@ import Test exposing (Test, describe, test)
 
 spec : Int -> Float -> GearSpec
 spec teeth pitchRadius =
-    { partFile = "test.dat", teeth = teeth, pitchRadius = pitchRadius }
+    { partFile = "test.dat", teeth = teeth, pitchRadius = pitchRadius, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
+
+
+wormSpec : Int -> Float -> GearSpec
+wormSpec teeth pitchRadius =
+    { partFile = "worm.dat", teeth = teeth, pitchRadius = pitchRadius, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
 makeInstance : GearId -> Int -> Float -> Gear.Types.GearInstance
@@ -63,10 +68,15 @@ chainGraph t0 t1 t2 =
 
 twoGearGraph : Int -> Int -> GearGraph
 twoGearGraph t0 t1 =
+    twoGearGraphWithSpecs (spec t0 16) (spec t1 24)
+
+
+twoGearGraphWithSpecs : GearSpec -> GearSpec -> GearGraph
+twoGearGraphWithSpecs spec0 spec1 =
     { instances =
         Array.fromList
-            [ makeInstance 0 t0 16
-            , makeInstance 1 t1 24
+            [ { id = 0, spec = spec0, color = 16, worldPosition = vec3 0 0 0, worldMatrix = Mat4.identity }
+            , { id = 1, spec = spec1, color = 16, worldPosition = vec3 0 0 0, worldMatrix = Mat4.identity }
             ]
     , connections =
         Dict.fromList
@@ -141,12 +151,56 @@ suite =
                         |> angleAt
                         |> (\f -> f 1)
                         |> Expect.within (Expect.Absolute 1.0e-6) -1.0
-            , test "worm (1T) driving 24T: neighbour angle is +1/24 × motor (no sign inversion)" <|
+            , test "one-start worm driving 24T: neighbour angle keeps the positive sign" <|
+                \_ ->
+                    propagate (twoGearGraphWithSpecs (wormSpec 1 12) (spec 24 24)) 0 1.0
+                        |> angleAt
+                        |> (\f -> f 1)
+                        |> Expect.within (Expect.Absolute 1.0e-6) (1 / 24)
+            , test "two-start worm driving 24T uses two teeth in the ratio" <|
+                \_ ->
+                    propagate (twoGearGraphWithSpecs (wormSpec 2 12) (spec 24 24)) 0 1.0
+                        |> angleAt
+                        |> (\f -> f 1)
+                        |> Expect.within (Expect.Absolute 1.0e-6) (2 / 24)
+            , test "a non-worm one-tooth gear still follows ordinary mesh direction" <|
                 \_ ->
                     propagate (twoGearGraph 1 24) 0 1.0
                         |> angleAt
                         |> (\f -> f 1)
-                        |> Expect.within (Expect.Absolute 1.0e-6) (1 / 24)
+                        |> Expect.within (Expect.Absolute 1.0e-6) (-1 / 24)
+            , test "fixed gears cannot be propagated through mesh or rigid links" <|
+                \_ ->
+                    let
+                        turntableSpec =
+                            spec 28 35
+
+                        topSpec =
+                            { turntableSpec | partFile = "99010.dat", kind = TurntableGear, axis = AxisY }
+
+                        baseSpec =
+                            { turntableSpec | partFile = "99009.dat", kind = TurntableGear, axis = AxisY, motorCapable = False, rotates = False }
+
+                        top =
+                            { id = 0, spec = topSpec, color = 16, worldPosition = vec3 0 0 0, worldMatrix = Mat4.identity }
+
+                        fixedBase =
+                            { id = 1, spec = baseSpec, color = 16, worldPosition = vec3 0 0 0, worldMatrix = Mat4.identity }
+
+                        gear8 =
+                            makeInstance 2 8 10
+
+                        graph =
+                            { instances = Array.fromList [ top, fixedBase, gear8 ]
+                            , connections = Dict.fromList [ ( 0, [ 1 ] ), ( 1, [ 0, 2 ] ), ( 2, [ 1 ] ) ]
+                            , rigidAxles = Dict.fromList [ ( 0, [ 1 ] ), ( 1, [ 0 ] ) ]
+                            }
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal (Dict.singleton 0 0.5) (propagate graph 0 0.5)
+                        , \_ -> Expect.equal Dict.empty (propagate graph 1 0.5)
+                        ]
+                        ()
             ]
         , describe "propagate — 3-gear chain (8T → 16T → 8T)"
             [ test "gear 0 ratio = 1.0 (motor)" <|
@@ -484,7 +538,21 @@ flipIf flipped m =
 placedGear : String -> GearId -> Int -> Mat4.Mat4 -> GearInstance
 placedGear partFile id teeth m =
     { id = id
-    , spec = { partFile = partFile, teeth = teeth, pitchRadius = toFloat teeth / (2 * pi) }
+    , spec =
+        { partFile = partFile
+        , teeth = teeth
+        , pitchRadius = toFloat teeth / (2 * pi)
+        , kind =
+            if partFile == "3650b.dat" then
+                CrownGear
+
+            else
+                SpurGear
+        , axis = AxisZ
+        , motorCapable = True
+        , rotates = True
+        , holes = []
+        }
     , color = 16
     , worldPosition = Mat4.transform m (vec3 0 0 0)
     , worldMatrix = m

@@ -43,9 +43,9 @@ bevel pairs take their sign from the same formula.
 Coaxial (rigid) neighbours turn at ratio `+1` when their true axes point the
 same way, and `-1` when one is flipped (`rigidSign`).
 
-Worm gear simplification:
-if either side has `teeth == 1`, treat it as a worm mesh and do not invert
-sign. The ratio magnitude still follows `teeth1 / teeth2`.
+Worm gear simplification: an explicit worm kind preserves the positive ratio
+sign; its tooth count still determines the ratio magnitude (including the
+two-start 32905 worm).
 
 If the geometry is degenerate (coincident centres, no pitch point), the sign
 falls back to the same-orientation rule `−teeth1/teeth2`.
@@ -54,6 +54,7 @@ falls back to the same-orientation rule `−teeth1/teeth2`.
 
 import Array
 import Dict exposing (Dict)
+import Gear.Detect as Detect
 import Gear.Phase as Phase
 import Gear.Types exposing (GearGraph, GearId, GearInstance)
 import Math.Vector3 as Vec3 exposing (Vec3)
@@ -95,10 +96,19 @@ Gears not reachable from `motorId` are absent from the result.
 -}
 propagate : GearGraph -> GearId -> Float -> Dict GearId Float
 propagate graph motorId motorAngle =
-    bfsStep graph
-        [ ( motorId, motorAngle ) ]
-        (Set.singleton motorId)
-        (Dict.singleton motorId motorAngle)
+    case gearInstance graph motorId of
+        Just motor ->
+            if motor.spec.rotates && motor.spec.motorCapable then
+                bfsStep graph
+                    [ ( motorId, motorAngle ) ]
+                    (Set.singleton motorId)
+                    (Dict.singleton motorId motorAngle)
+
+            else
+                Dict.empty
+
+        Nothing ->
+            Dict.empty
 
 
 {-| Angle for a single gear given the propagation result.
@@ -267,10 +277,14 @@ bfsStep graph queue visited angles =
                     Dict.get currentId graph.rigidAxles |> Maybe.withDefault []
 
                 unvisited =
-                    List.filter (\n -> not (Set.member n visited)) neighbours
+                    List.filter
+                        (\n -> not (Set.member n visited) && isRotatingGear graph n)
+                        neighbours
 
                 unvisitedRigid =
-                    List.filter (\n -> not (Set.member n visited)) rigidNeighbours
+                    List.filter
+                        (\n -> not (Set.member n visited) && isRotatingGear graph n)
+                        rigidNeighbours
 
                 ( newVisited, newAngles, newEntries ) =
                     List.foldl
@@ -340,10 +354,17 @@ gearInstance graph gearId =
     Array.get gearId graph.instances
 
 
+isRotatingGear : GearGraph -> GearId -> Bool
+isRotatingGear graph gearId =
+    gearInstance graph gearId
+        |> Maybe.map (\gear -> gear.spec.rotates)
+        |> Maybe.withDefault False
+
+
 {-| Signed ratio for one mesh edge, `angle(g2) / angle(g1)`.
 
-Worms (`teeth == 1` on either side) keep a positive sign. Otherwise the
-magnitude is `teeth1 / teeth2` and the sign is `meshSign g1 g2`.
+Worms keep a positive sign. Otherwise the magnitude is `teeth1 / teeth2` and
+the sign is `meshSign g1 g2`.
 
 -}
 meshRatio : GearInstance -> GearInstance -> Float
@@ -352,7 +373,7 @@ meshRatio g1 g2 =
         baseRatio =
             toFloat g1.spec.teeth / toFloat g2.spec.teeth
     in
-    if g1.spec.teeth == 1 || g2.spec.teeth == 1 then
+    if Detect.isWorm g1.spec || Detect.isWorm g2.spec then
         baseRatio
 
     else

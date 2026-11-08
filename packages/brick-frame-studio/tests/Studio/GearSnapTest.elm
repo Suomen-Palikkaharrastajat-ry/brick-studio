@@ -14,7 +14,7 @@ import Data
 import Expect
 import Gear.Detect as Detect
 import Gear.Phase as Phase
-import Gear.Types exposing (GearInstance)
+import Gear.Types exposing (GearAxis(..), GearInstance, GearKind(..))
 import LDraw.Connectivity as Connectivity
     exposing
         ( ConnectionType(..)
@@ -32,6 +32,7 @@ suite : Test
 suite =
     describe "Studio.GearSnap"
         [ findGearSpecTests
+        , turntableGearSnapTests
         , isGearSnapTests
         , cardinalOffsetsTests
         , snap16TTo16TTests
@@ -82,6 +83,77 @@ findGearSpecTests =
         , test "returns Nothing for standard brick (3001.dat)" <|
             \_ ->
                 Expect.equal Nothing (GearSnap.findGearSpec "3001.dat")
+        , test "fixed turntable base is not a snap gear" <|
+            \_ ->
+                Expect.equal Nothing (GearSnap.findGearSpec "99009.dat")
+        , test "turntable tops remain rotating snap gears on their local Y axis" <|
+            \_ ->
+                let
+                    specFor part =
+                        GearSnap.findGearSpec part
+                            |> Maybe.map (\spec -> ( spec.rotates, spec.axis, spec.kind ))
+                in
+                Expect.equal
+                    [ Just ( True, AxisY, TurntableGear ), Just ( True, AxisY, TurntableGear ) ]
+                    [ specFor "99010.dat", specFor "18938.dat" ]
+        ]
+
+
+turntableGearSnapTests : Test
+turntableGearSnapTests =
+    describe "turntable gear snapping"
+        [ test "a fixed 99009 is rejected as both dragged gear and partner" <|
+            \_ ->
+                let
+                    target =
+                        makePlacement 1 "3647.dat" Mat4.identity 14
+
+                    fixedBase =
+                        makePlacement 2 "99009.dat" Mat4.identity 7
+
+                    draggedGear =
+                        makePlacement 3 "3647.dat" Mat4.identity 14
+
+                    draggedFixedResult =
+                        GearSnap.solveGearSnap
+                            (\_ -> True)
+                            12
+                            Nothing
+                            fixedBase
+                            (Mat4.makeTranslate3 43 0 0)
+                            [ target ]
+
+                    fixedPartnerResult =
+                        GearSnap.solveGearSnap
+                            (\_ -> True)
+                            12
+                            Nothing
+                            draggedGear
+                            (Mat4.makeTranslate3 43 0 0)
+                            [ fixedBase ]
+                in
+                Expect.equal ( Nothing, Nothing ) ( draggedFixedResult, fixedPartnerResult )
+        , test "rotatable 99010 and 18938 tops still snap to same-axis partners" <|
+            \_ ->
+                let
+                    canSnap part distance =
+                        let
+                            target =
+                                makePlacement 1 part Mat4.identity 7
+
+                            dragged =
+                                makePlacement 2 part Mat4.identity 7
+                        in
+                        GearSnap.solveGearSnap
+                            (\_ -> True)
+                            12
+                            Nothing
+                            dragged
+                            (Mat4.makeTranslate3 (distance + 2) 0 0)
+                            [ target ]
+                            |> Maybe.map .targetPlacementId
+                in
+                Expect.equal [ Just 1, Just 1 ] [ canSnap "99010.dat" 70, canSnap "18938.dat" 150 ]
         ]
 
 
@@ -251,10 +323,10 @@ coplanarAndMeshingTests =
                     Just snap ->
                         let
                             targetSpec =
-                                GearSnap.findGearSpec targetGear.part |> Maybe.withDefault { partFile = "", teeth = 16, pitchRadius = 20 }
+                                GearSnap.findGearSpec targetGear.part |> Maybe.withDefault { partFile = "", teeth = 16, pitchRadius = 20, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
                             dragSpec =
-                                GearSnap.findGearSpec draggedGear.part |> Maybe.withDefault { partFile = "", teeth = 16, pitchRadius = 20 }
+                                GearSnap.findGearSpec draggedGear.part |> Maybe.withDefault { partFile = "", teeth = 16, pitchRadius = 20, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
                             g1 : GearInstance
                             g1 =

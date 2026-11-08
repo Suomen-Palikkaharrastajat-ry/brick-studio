@@ -30,7 +30,7 @@ model and build a connectivity graph from their world positions.
 
 import Array
 import Dict exposing (Dict)
-import Gear.Types exposing (GearGraph, GearId, GearInstance, GearSpec)
+import Gear.Types exposing (GearAxis(..), GearGraph, GearId, GearInstance, GearKind(..), GearSpec)
 import LDraw.Resolve exposing (PartCache, PartStatus(..))
 import LDraw.Types exposing (LDrawLine(..))
 import Math.Matrix4 as Mat4 exposing (Mat4)
@@ -334,11 +334,15 @@ within tolerance of the sum of the pitch radii.
 -}
 meshing : GearInstance -> GearInstance -> Bool
 meshing g1 g2 =
-    let
-        facts =
-            meshFacts g1 g2
-    in
-    facts.axisOk && abs (facts.distance - facts.expected) <= facts.tolerance
+    if not g1.spec.rotates || not g2.spec.rotates then
+        False
+
+    else
+        let
+            facts =
+                meshFacts g1 g2
+        in
+        facts.axisOk && abs (facts.distance - facts.expected) <= facts.tolerance
 
 
 {-| True when two gears share a physical axle: parallel axes with negligible
@@ -346,26 +350,30 @@ radial offset between their centres. Such gears rotate together at 1:1.
 -}
 coAxial : GearInstance -> GearInstance -> Bool
 coAxial g1 g2 =
-    let
-        axis1 =
-            gearAxis g1
+    if not g1.spec.rotates || not g2.spec.rotates then
+        False
 
-        centerDelta =
-            Vec3.sub g2.worldPosition g1.worldPosition
+    else
+        let
+            axis1 =
+                gearAxis g1
 
-        axialProjection =
-            Vec3.dot centerDelta axis1
+            centerDelta =
+                Vec3.sub g2.worldPosition g1.worldPosition
 
-        radialComponent =
-            Vec3.sub centerDelta (Vec3.scale axialProjection axis1)
+            axialProjection =
+                Vec3.dot centerDelta axis1
 
-        radialOffset =
-            Vec3.length radialComponent
+            radialComponent =
+                Vec3.sub centerDelta (Vec3.scale axialProjection axis1)
 
-        absDot =
-            abs (Vec3.dot axis1 (gearAxis g2))
-    in
-    absDot >= 0.99 && radialOffset <= 2.0
+            radialOffset =
+                Vec3.length radialComponent
+
+            absDot =
+                abs (Vec3.dot axis1 (gearAxis g2))
+        in
+        absDot >= 0.99 && radialOffset <= 2.0
 
 
 gearAxis : GearInstance -> Vec3
@@ -374,12 +382,16 @@ gearAxis inst =
         origin =
             Mat4.transform inst.worldMatrix (Vec3.vec3 0 0 0)
 
-        alongLocalAxis =
-            if inst.spec.partFile == "99010.dat" then
-                Mat4.transform inst.worldMatrix (Vec3.vec3 0 1 0)
+        localAxis =
+            case inst.spec.axis of
+                AxisY ->
+                    Vec3.vec3 0 1 0
 
-            else
-                Mat4.transform inst.worldMatrix (Vec3.vec3 0 0 1)
+                AxisZ ->
+                    Vec3.vec3 0 0 1
+
+        alongLocalAxis =
+            Mat4.transform inst.worldMatrix localAxis
 
         raw =
             Vec3.sub alongLocalAxis origin
@@ -388,7 +400,7 @@ gearAxis inst =
             Vec3.length raw
     in
     if len < 1.0e-6 then
-        if inst.spec.partFile == "99010.dat" then
+        if inst.spec.axis == AxisY then
             Vec3.vec3 0 1 0
 
         else
@@ -400,17 +412,17 @@ gearAxis inst =
 
 isWorm : GearSpec -> Bool
 isWorm spec =
-    spec.teeth == 1
+    spec.kind == WormGear
 
 
 isBevelLike : GearSpec -> Bool
 isBevelLike spec =
-    List.member spec.partFile [ "32198.dat", "32269.dat" ]
+    spec.kind == BevelGear
 
 
 isCrownLike : GearSpec -> Bool
 isCrownLike spec =
-    spec.partFile == "3650b.dat"
+    spec.kind == CrownGear
 
 
 addConnection : GearId -> GearId -> Dict GearId (List GearId) -> Dict GearId (List GearId)

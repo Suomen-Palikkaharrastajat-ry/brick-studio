@@ -6,7 +6,7 @@ playback clock and the motor controls.
 
 import Dict
 import Expect
-import Gear.Types exposing (GearSpec)
+import Gear.Types exposing (GearAxis(..), GearHoleKind(..), GearKind(..), GearSpec)
 import LDraw.Resolve as Resolve exposing (PartStatus(..))
 import LDraw.Types exposing (LDrawLine(..))
 import Math.Matrix4 as Mat4
@@ -23,13 +23,52 @@ import WebGL
 
 specs : List GearSpec
 specs =
-    [ { partFile = "3647.dat", teeth = 8, pitchRadius = 10 }
-    , { partFile = "4019.dat", teeth = 16, pitchRadius = 20 }
-    , { partFile = "3648.dat", teeth = 24, pitchRadius = 30 }
-    , { partFile = "3648b.dat", teeth = 24, pitchRadius = 30 }
-    , { partFile = "3649.dat", teeth = 40, pitchRadius = 50 }
-    , { partFile = "99010.dat", teeth = 28, pitchRadius = 35 }
+    [ { partFile = "3647.dat", teeth = 8, pitchRadius = 10, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ axleHole 0 0 ] }
+    , { partFile = "4019.dat", teeth = 16, pitchRadius = 20, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ axleHole 0 0 ] }
+    , { partFile = "3648.dat", teeth = 24, pitchRadius = 30, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = axleHole 0 0 :: pin24Holes }
+    , { partFile = "3648b.dat", teeth = 24, pitchRadius = 30, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = axleHole 0 0 :: pin24Holes }
+    , { partFile = "3649.dat", teeth = 40, pitchRadius = 50, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = axleHole 0 0 :: (axle40Holes ++ pin40Holes) }
+    , { partFile = "99010.dat", teeth = 28, pitchRadius = 35, kind = TurntableGear, axis = AxisY, motorCapable = True, rotates = True, holes = [ pinHole 20 -10, pinHole -20 -10 ] }
     ]
+
+
+axleHole : Float -> Float -> { kind : GearHoleKind, x : Float, y : Float }
+axleHole x y =
+    { kind = AxleHole, x = x, y = y }
+
+
+pinHole : Float -> Float -> { kind : GearHoleKind, x : Float, y : Float }
+pinHole x y =
+    { kind = PinHole, x = x, y = y }
+
+
+pin24Holes : List { kind : GearHoleKind, x : Float, y : Float }
+pin24Holes =
+    List.map (\( x, y ) -> pinHole x y) [ ( 10, 10 ), ( -10, 10 ), ( -10, -10 ), ( 10, -10 ) ]
+
+
+axle40Holes : List { kind : GearHoleKind, x : Float, y : Float }
+axle40Holes =
+    List.map (\( x, y ) -> axleHole x y) [ ( 0, 20 ), ( 0, -20 ), ( 20, 0 ), ( -20, 0 ) ]
+
+
+pin40Holes : List { kind : GearHoleKind, x : Float, y : Float }
+pin40Holes =
+    List.map
+        (\( x, y ) -> pinHole x y)
+        [ ( 10, 10 )
+        , ( -10, 10 )
+        , ( -10, -10 )
+        , ( 10, -10 )
+        , ( 10, 30 )
+        , ( -10, 30 )
+        , ( 10, -30 )
+        , ( -10, -30 )
+        , ( 30, 10 )
+        , ( -30, 10 )
+        , ( 30, -10 )
+        , ( -30, -10 )
+        ]
 
 
 config : Simulation.Config
@@ -89,6 +128,17 @@ pinAlongZ x y =
         }
 
 
+{-| A pin along local Y at the given local point.
+-}
+pinAlongY : Float -> Float -> Float -> LDrawLine
+pinAlongY x y z =
+    SubFileRef
+        { color = 0
+        , transform = Mat4.mul (Mat4.makeTranslate3 x y z) (Mat4.makeRotate (pi / 2) (Vec3.vec3 0 0 1))
+        , file = "2780.dat"
+        }
+
+
 {-| An axle-pin 43093 along Z at (x, y, 0): its local X turned to Z.
 -}
 axlePinAlongZ : Float -> Float -> LDrawLine
@@ -96,6 +146,17 @@ axlePinAlongZ x y =
     SubFileRef
         { color = 0
         , transform = Mat4.mul (Mat4.makeTranslate3 x y 0) (Mat4.makeRotate (pi / 2) (Vec3.vec3 0 1 0))
+        , file = "43093.dat"
+        }
+
+
+{-| An axle-pin with its local X axis along local Y at the given point.
+-}
+axlePinAlongY : Float -> Float -> Float -> LDrawLine
+axlePinAlongY x y z =
+    SubFileRef
+        { color = 0
+        , transform = Mat4.mul (Mat4.makeTranslate3 x y z) (Mat4.makeRotate (pi / 2) (Vec3.vec3 0 0 1))
         , file = "43093.dat"
         }
 
@@ -274,7 +335,7 @@ suite =
                             ]
             ]
         , describe "analyse"
-            [ test "detects the gears and picks the first as motor" <|
+            [ test "detects the gears and picks the first motor-capable gear" <|
                 \_ ->
                     Expect.all
                         [ \m -> Expect.equal True m.simulationAvailable
@@ -316,6 +377,85 @@ suite =
                             [ \m -> Expect.equal True m.simulationChecked
                             , \m -> Expect.equal False m.simulationAvailable
                             ]
+            , test "a fixed turntable base is recognized but unavailable as a motor" <|
+                \_ ->
+                    let
+                        fixedBase =
+                            { partFile = "99009.dat"
+                            , teeth = 28
+                            , pitchRadius = 35
+                            , kind = TurntableGear
+                            , axis = AxisY
+                            , motorCapable = False
+                            , rotates = False
+                            , holes = []
+                            }
+
+                        fixedOnlyConfig =
+                            { config | gearSpecs = [ fixedBase ] }
+
+                        ( model, analysis ) =
+                            Simulation.init fixedOnlyConfig
+                                |> Simulation.analyse { lines = [ part "99009.dat" 0 ], cache = cache }
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal 1 analysis.gearCount
+                        , \_ -> Expect.equal [ "99009.dat" ] (fileNames analysis.staticLines)
+                        , \_ -> Expect.equal False model.simulationAvailable
+                        , \_ -> Expect.equal Nothing model.motor.drivingGearId
+                        ]
+                        ()
+            , test "a fixed base beside the rotatable top stays static and outside moving gear meshes" <|
+                \_ ->
+                    let
+                        fixedBase =
+                            { partFile = "99009.dat"
+                            , teeth = 28
+                            , pitchRadius = 35
+                            , kind = TurntableGear
+                            , axis = AxisY
+                            , motorCapable = False
+                            , rotates = False
+                            , holes = []
+                            }
+
+                        top =
+                            { partFile = "99010.dat"
+                            , teeth = 28
+                            , pitchRadius = 35
+                            , kind = TurntableGear
+                            , axis = AxisY
+                            , motorCapable = True
+                            , rotates = True
+                            , holes = [ pinHole 20 -10, pinHole -20 -10 ]
+                            }
+
+                        turntableCache =
+                            cache
+                                |> Dict.insert "99009.dat" (Loaded [])
+                                |> Dict.insert "99010.dat" (Loaded [])
+
+                        ( model, analysis ) =
+                            Simulation.init { config | gearSpecs = [ fixedBase, top ] }
+                                |> Simulation.analyse
+                                    { lines = [ part "99009.dat" 0, part "99010.dat" 0 ]
+                                    , cache = turntableCache
+                                    }
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal [ "99009.dat" ] (fileNames analysis.staticLines)
+                        , \_ -> Expect.equal (Just 1) model.motor.drivingGearId
+                        , \_ -> Expect.equal (Just Dict.empty) (Maybe.map .connections model.gearGraph)
+                        , \_ -> Expect.equal (Just Dict.empty) (Maybe.map .rigidAxles model.gearGraph)
+                        , \_ -> Expect.equal False (Dict.member 0 model.gearMeshes)
+                        , \_ -> Expect.equal True (Dict.member 1 model.gearMeshes)
+                        , \_ ->
+                            Dict.get 1 model.gearMeshes
+                                |> Maybe.map (\render -> ( Vec3.getY render.axis, Vec3.getZ render.axis ))
+                                |> Expect.equal (Just ( -1, 0 ))
+                        , \_ -> Expect.equal (Set.singleton 1) (Simulation.rotatingGearIds model)
+                        ]
+                        ()
             ]
         , describe "playback"
             [ test "Play starts the clock and reports it" <|
@@ -631,8 +771,8 @@ suite =
                         lines =
                             [ gear24 0
                             , gear24 60
-                            , pinAlongZ 60 0
-                            , brick3700AtZ 60 0
+                            , pinAlongZ 70 10
+                            , brick3700AtZ 70 10
                             ]
 
                         m =
@@ -667,9 +807,9 @@ suite =
                         lines =
                             [ gear24 0
                             , gear24 60
-                            , pinAlongZ 60 0
+                            , pinAlongZ 70 10
                             , Comment "!PALIKKA GLUED"
-                            , brick3700AtZ 60 0
+                            , brick3700AtZ 70 10
                             ]
 
                         m =
@@ -1000,26 +1140,17 @@ suite =
                             Expect.equal False (List.member brick analysis.staticLines)
                         ]
                         ()
-            , test "turntable 28T 99010 as driven gear rotates with attached axle and rotor" <|
+            , test "turntable 28T 99010 turns a pin in its configured pin hole" <|
                 \_ ->
                     let
                         turntable =
                             SubFileRef { color = 4, transform = Mat4.identity, file = "99010.dat" }
 
-                        axleMat =
-                            Mat4.makeRotate (pi / 2) (Vec3.vec3 0 0 1)
-
-                        axle =
-                            SubFileRef { color = 0, transform = axleMat, file = "3705.dat" }
-
-                        rotorMat =
-                            Mat4.makeTranslate3 0 -4 0
-
-                        rotor =
-                            SubFileRef { color = 0, transform = rotorMat, file = "2711.dat" }
+                        pin =
+                            pinAlongY 20 -20 -10
 
                         lines =
-                            [ turntable, axle, rotor ]
+                            [ turntable, pin ]
 
                         ( m, analysis ) =
                             Simulation.init config
@@ -1029,9 +1160,41 @@ suite =
                         [ \_ ->
                             drivenPartsFor [ 0 ] m
                                 |> List.map .file
-                                |> Expect.equal [ "3705.dat", "2711.dat" ]
+                                |> Expect.equal [ "2780.dat" ]
                         , \_ ->
-                            Expect.equal False (List.member rotor analysis.staticLines)
+                            Expect.equal False (List.member pin analysis.staticLines)
+                        ]
+                        ()
+            , test "turntable 28T 99010 drives an axle-pin and the rotor riding on it" <|
+                \_ ->
+                    let
+                        turntable =
+                            SubFileRef { color = 4, transform = Mat4.identity, file = "99010.dat" }
+
+                        axlePin =
+                            axlePinAlongY 20 -10 -10
+
+                        rotor =
+                            SubFileRef
+                                { color = 0
+                                , transform = Mat4.makeTranslate3 20 0 -10
+                                , file = "2711.dat"
+                                }
+
+                        ( model, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse
+                                    { lines = [ turntable, axlePin, rotor ]
+                                    , cache = drivenCache
+                                    }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            drivenPartsFor [ 0 ] model
+                                |> List.map .file
+                                |> Expect.equal [ "43093.dat", "2711.dat" ]
+                        , \_ -> Expect.equal False (List.member axlePin analysis.staticLines)
+                        , \_ -> Expect.equal False (List.member rotor analysis.staticLines)
                         ]
                         ()
             ]
@@ -1043,6 +1206,30 @@ suite =
                         |> .motor
                         |> .drivingGearId
                         |> Expect.equal (Just 1)
+            , test "SetMotorGear rejects a fixed turntable base" <|
+                \_ ->
+                    let
+                        fixedBase =
+                            { partFile = "99009.dat"
+                            , teeth = 28
+                            , pitchRadius = 35
+                            , kind = TurntableGear
+                            , axis = AxisY
+                            , motorCapable = False
+                            , rotates = False
+                            , holes = []
+                            }
+
+                        fixedModel =
+                            Simulation.init { config | gearSpecs = [ fixedBase ] }
+                                |> Simulation.analyse { lines = [ part "99009.dat" 0 ], cache = cache }
+                                |> Tuple.first
+                    in
+                    Simulation.update (SetMotorGear 0) fixedModel
+                        |> Tuple.first
+                        |> .motor
+                        |> .drivingGearId
+                        |> Expect.equal Nothing
             , test "SetMotorSpeed is clamped to the maximum RPM" <|
                 \_ ->
                     Simulation.update (SetMotorSpeed 500) analysed

@@ -32,7 +32,7 @@ angle applies to them.
 
 import Dict exposing (Dict)
 import Gear.Components as Components
-import Gear.Types exposing (GearId, GearInstance)
+import Gear.Types as Gear exposing (GearAxis(..), GearHole, GearHoleKind(..), GearId, GearInstance)
 import LDraw.Connectivity as Connectivity
 import LDraw.Geometry as Geometry
 import LDraw.Resolve exposing (PartCache, PartStatus(..))
@@ -83,6 +83,7 @@ type alias ComponentMeshRender =
 buildGearMeshes : PartCache -> PartCache -> List GearInstance -> Dict GearId GearRender
 buildGearMeshes lodCache cache instances =
     instances
+        |> List.filter (\inst -> inst.spec.rotates)
         |> List.foldl
             (\inst acc ->
                 let
@@ -110,7 +111,7 @@ buildGearMeshes lodCache cache instances =
                                 toYUpPoint (Mat4.transform inst.worldMatrix (Vec3.vec3 0 0 0))
 
                             axisEnd =
-                                toYUpPoint (Mat4.transform inst.worldMatrix (Vec3.vec3 0 0 1))
+                                toYUpPoint (Mat4.transform inst.worldMatrix (localGearAxis inst))
 
                             axisRaw =
                                 Vec3.sub axisEnd center
@@ -378,6 +379,7 @@ componentDrivingGear cache component gears =
 
         candidates =
             gears
+                |> List.filter (\gear -> gear.spec.rotates)
                 |> List.concatMap
                     (\gear ->
                         let
@@ -385,15 +387,7 @@ componentDrivingGear cache component gears =
                                 toYUpPoint gear.worldPosition
 
                             gearAxisEnd =
-                                let
-                                    localAxis =
-                                        if gear.spec.partFile == "99010.dat" then
-                                            Vec3.vec3 0 1 0
-
-                                        else
-                                            Vec3.vec3 0 0 1
-                                in
-                                toYUpPoint (Mat4.transform gear.worldMatrix localAxis)
+                                toYUpPoint (Mat4.transform gear.worldMatrix (localGearAxis gear))
 
                             gearAxisRaw =
                                 Vec3.sub gearAxisEnd gearCenter
@@ -415,16 +409,13 @@ componentDrivingGear cache component gears =
                             []
 
                         else
-                            gearHoleOffsets gear.spec.partFile
+                            componentGearHoles component
+                                |> List.concatMap (\kind -> gearHoleOffsets kind gear.spec.holes)
                                 |> List.filterMap
                                     (\( hx, hy ) ->
                                         let
                                             holeWorld =
-                                                if gear.spec.partFile == "99010.dat" then
-                                                    Mat4.transform gear.worldMatrix (Vec3.vec3 hx 0 hy)
-
-                                                else
-                                                    Mat4.transform gear.worldMatrix (Vec3.vec3 hx hy 0)
+                                                gearHoleWorld gear hx hy
 
                                             holeCenter =
                                                 toYUpPoint holeWorld
@@ -461,9 +452,6 @@ topLevelCoaxialGear cache drivenAxles line gears =
     case line of
         SubFileRef ref ->
             let
-                pos =
-                    toYUpPoint (Mat4.transform ref.transform (Vec3.vec3 0 0 0))
-
                 connectors =
                     extractConnectors cache ref.file
 
@@ -476,9 +464,6 @@ topLevelCoaxialGear cache drivenAxles line gears =
                     connectors
                         |> List.filter (\c -> c.kind == PinHole)
                         |> List.map (\c -> toYUpPoint (Mat4.transform ref.transform c.localPosition))
-
-                samplePoints =
-                    pos :: axleHolePoints
 
                 axleMatch =
                     drivenAxles
@@ -519,6 +504,7 @@ topLevelCoaxialGear cache drivenAxles line gears =
 
                 gearMatch =
                     gears
+                        |> List.filter (\gear -> gear.spec.rotates)
                         |> List.concatMap
                             (\gear ->
                                 let
@@ -526,15 +512,7 @@ topLevelCoaxialGear cache drivenAxles line gears =
                                         toYUpPoint gear.worldPosition
 
                                     gearAxisEnd =
-                                        let
-                                            localAxis =
-                                                if gear.spec.partFile == "99010.dat" then
-                                                    Vec3.vec3 0 1 0
-
-                                                else
-                                                    Vec3.vec3 0 0 1
-                                        in
-                                        toYUpPoint (Mat4.transform gear.worldMatrix localAxis)
+                                        toYUpPoint (Mat4.transform gear.worldMatrix (localGearAxis gear))
 
                                     gearAxisRaw =
                                         Vec3.sub gearAxisEnd gearCenter
@@ -549,21 +527,25 @@ topLevelCoaxialGear cache drivenAxles line gears =
                                         else
                                             Vec3.scale (1 / gearAxisLen) gearAxisRaw
                                 in
-                                gearPinAndAxleHoles gear.spec.partFile
+                                gear.spec.holes
                                     |> List.filterMap
-                                        (\( hx, hy ) ->
+                                        (\hole ->
                                             let
                                                 holeWorld =
-                                                    if gear.spec.partFile == "99010.dat" then
-                                                        Mat4.transform gear.worldMatrix (Vec3.vec3 hx 0 hy)
-
-                                                    else
-                                                        Mat4.transform gear.worldMatrix (Vec3.vec3 hx hy 0)
+                                                    gearHoleWorld gear hole.x hole.y
 
                                                 holeCenter =
                                                     toYUpPoint holeWorld
+
+                                                matchingPoints =
+                                                    case hole.kind of
+                                                        Gear.AxleHole ->
+                                                            axleHolePoints
+
+                                                        Gear.PinHole ->
+                                                            pinHolePoints
                                             in
-                                            bestLineMatchForPoints samplePoints holeCenter gearAxis
+                                            bestLineMatchForPoints matchingPoints holeCenter gearAxis
                                                 |> Maybe.andThen
                                                     (\( lineDist, axialOffset ) ->
                                                         if lineDist <= 2.5 && axialOffset <= 120 then
@@ -648,58 +630,49 @@ isFrictionShaft file =
             False
 
 
-gearHoleOffsets : String -> List ( Float, Float )
-gearHoleOffsets partFile =
-    ( 0, 0 ) :: gearPinAndAxleHoles partFile
+gearHoleOffsets : GearHoleKind -> List GearHole -> List ( Float, Float )
+gearHoleOffsets requiredKind holes =
+    holes
+        |> List.filter (\hole -> hole.kind == requiredKind)
+        |> List.map (\hole -> ( hole.x, hole.y ))
 
 
-gearPinAndAxleHoles : String -> List ( Float, Float )
-gearPinAndAxleHoles partFile =
-    case cleanPartFile partFile of
-        "3648" ->
-            pinHoles24T
+componentGearHoles : Components.ComponentInstance -> List GearHoleKind
+componentGearHoles component =
+    case component.kind of
+        Components.Beam ->
+            [ Gear.PinHole ]
 
-        "3648a" ->
-            pinHoles24T
+        Components.AxleLike ->
+            if hasAxleShaft component.partFile then
+                if isFrictionShaft component.partFile then
+                    [ Gear.AxleHole, Gear.PinHole ]
 
-        "3648b" ->
-            pinHoles24T
+                else
+                    [ Gear.AxleHole ]
 
-        "3649" ->
-            axleHoles40T ++ pinHoles40T
-
-        "99010" ->
-            [ ( 20, 20 ), ( -20, 20 ), ( 20, -20 ), ( -20, -20 ) ]
-
-        _ ->
-            []
+            else
+                [ Gear.PinHole ]
 
 
-pinHoles24T : List ( Float, Float )
-pinHoles24T =
-    [ ( 10, 10 ), ( -10, 10 ), ( -10, -10 ), ( 10, -10 ) ]
+localGearAxis : GearInstance -> Vec3.Vec3
+localGearAxis gear =
+    case gear.spec.axis of
+        AxisY ->
+            Vec3.vec3 0 1 0
+
+        AxisZ ->
+            Vec3.vec3 0 0 1
 
 
-axleHoles40T : List ( Float, Float )
-axleHoles40T =
-    [ ( 0, 20 ), ( 0, -20 ), ( 20, 0 ), ( -20, 0 ) ]
+gearHoleWorld : GearInstance -> Float -> Float -> Vec3.Vec3
+gearHoleWorld gear x y =
+    case gear.spec.axis of
+        AxisY ->
+            Mat4.transform gear.worldMatrix (Vec3.vec3 x 0 y)
 
-
-pinHoles40T : List ( Float, Float )
-pinHoles40T =
-    [ ( 10, 10 )
-    , ( -10, 10 )
-    , ( -10, -10 )
-    , ( 10, -10 )
-    , ( 10, 30 )
-    , ( -10, 30 )
-    , ( 10, -30 )
-    , ( -10, -30 )
-    , ( 30, 10 )
-    , ( -30, 10 )
-    , ( 30, -10 )
-    , ( -30, -10 )
-    ]
+        AxisZ ->
+            Mat4.transform gear.worldMatrix (Vec3.vec3 x y 0)
 
 
 bestLineMatchForPoints : List Vec3.Vec3 -> Vec3.Vec3 -> Vec3.Vec3 -> Maybe ( Float, Float )
@@ -1020,15 +993,7 @@ gearAxisInfoById targetId gears =
                         toYUpPoint gear.worldPosition
 
                     axisEnd =
-                        let
-                            localAxis =
-                                if gear.spec.partFile == "99010.dat" then
-                                    Vec3.vec3 0 1 0
-
-                                else
-                                    Vec3.vec3 0 0 1
-                        in
-                        toYUpPoint (Mat4.transform gear.worldMatrix localAxis)
+                        toYUpPoint (Mat4.transform gear.worldMatrix (localGearAxis gear))
 
                     rawAxis =
                         Vec3.sub axisEnd center
