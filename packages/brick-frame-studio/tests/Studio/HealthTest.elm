@@ -151,6 +151,24 @@ misalignmentTests =
                             ]
                 in
                 Expect.equal [] (Health.check jumperCache doc Set.empty)
+        , test "a 1x2 jumper plate placed across two studs on a 6x6 plate is healthy" <|
+            \_ ->
+                let
+                    doc =
+                        lines
+                            [ brick "3958.dat" 0 -8 0
+                            , "1 14 0 -16 10 1 0 0 0 1 0 0 0 1 3794b.dat"
+                            ]
+                in
+                Expect.equal [] (Health.check noParts doc Set.empty)
+        , test "a 1x2 jumper plate aligned on the ground is healthy" <|
+            \_ ->
+                let
+                    -- Origin at X = 0, Z = 10, Y = -8 on ground
+                    doc =
+                        lines [ "1 14 0 -8 10 1 0 0 0 1 0 0 0 1 3794b.dat" ]
+                in
+                Expect.equal [] (Health.check noParts doc Set.empty)
         , test "a 1 x 1 a few LDU off the lattice on the ground is moved onto it" <|
             \_ ->
                 let

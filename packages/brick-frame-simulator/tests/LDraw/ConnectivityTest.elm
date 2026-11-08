@@ -1518,6 +1518,22 @@ studLatticeTests =
                     , \_ -> Expect.equal { x = 10, z = 0 } (offsetOf "3039.dat" rot90)
                     ]
                     ()
+        , test "studOffset for 1x2 jumper plates (3794b, 15573) and 2x2 jumper plate (87580) across rotations" <|
+            \_ ->
+                Expect.all
+                    [ -- 1x2 jumper plate 3794b: even on X, odd on Z at rot0, swaps at rot90
+                      \_ -> Expect.equal { x = 0, z = 10 } (offsetOf "3794b.dat" rot0)
+                    , \_ -> Expect.equal { x = 10, z = 0 } (offsetOf "3794b.dat" rot90)
+                    , \_ -> Expect.equal { x = 0, z = 10 } (offsetOf "3794b.dat" rot180)
+                    , \_ -> Expect.equal { x = 10, z = 0 } (offsetOf "3794b.dat" rot270)
+                    , -- 1x2 jumper plate 15573
+                      \_ -> Expect.equal { x = 0, z = 10 } (offsetOf "15573.dat" rot0)
+                    , \_ -> Expect.equal { x = 10, z = 0 } (offsetOf "15573.dat" rot90)
+                    , -- 2x2 jumper plate 87580: even on both axes, { x = 0, z = 0 } at all rotations
+                      \_ -> Expect.equal { x = 0, z = 0 } (offsetOf "87580.dat" rot0)
+                    , \_ -> Expect.equal { x = 0, z = 0 } (offsetOf "87580.dat" rot90)
+                    ]
+                    ()
         , test "isUpright reports True for yaw rotations and False for tipped/inverted parts" <|
             \_ ->
                 let
@@ -1805,6 +1821,93 @@ snapSolverTests =
 
                     Nothing ->
                         Expect.fail "Expected snap candidate for slope on brick"
+        , test "snaps 1x2 jumper plate 3794b anti-studs onto target studs of a 6x6 plate" <|
+            \_ ->
+                let
+                    plate6x6 =
+                        Connectivity.extractPartConnectivity "3958.dat" (\_ -> Nothing)
+
+                    targetPoints =
+                        List.map
+                            (\p ->
+                                { placementId = 0
+                                , pointId = p.id
+                                , connType = p.connType
+                                , worldPosition = p.localPosition
+                                , worldNormal = p.normal
+                                , worldTangent = p.tangent
+                                }
+                            )
+                            plate6x6.connections
+
+                    jumper =
+                        Connectivity.extractPartConnectivity "3794b.dat" (\_ -> Nothing)
+
+                    -- Jumper dragged near X = 0, Z = 10 spanning studs at (-10, 0, 10) and (10, 0, 10)
+                    initialMatrix =
+                        Mat4.makeTranslate3 2 -8 12
+
+                    candidates =
+                        solveSnapCandidates 25.0 0 initialMatrix jumper.connections targetPoints
+                in
+                case candidates of
+                    first :: _ ->
+                        let
+                            snapOrigin =
+                                Mat4.transform first.snapMatrix (vec3 0 0 0)
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 0 (round (Vec3.getX snapOrigin))
+                            , \_ -> Expect.equal -8 (round (Vec3.getY snapOrigin))
+                            , \_ -> Expect.equal 10 (round (Vec3.getZ snapOrigin))
+                            ]
+                            ()
+
+                    [] ->
+                        Expect.fail "expected snap candidate for 1x2 jumper plate on 6x6 plate"
+        , test "snaps 1x1 brick anti-stud onto central stud of 1x2 jumper plate" <|
+            \_ ->
+                let
+                    jumper =
+                        Connectivity.extractPartConnectivity "3794b.dat" (\_ -> Nothing)
+
+                    targetPoints =
+                        List.map
+                            (\p ->
+                                { placementId = 0
+                                , pointId = p.id
+                                , connType = p.connType
+                                , worldPosition = p.localPosition
+                                , worldNormal = p.normal
+                                , worldTangent = p.tangent
+                                }
+                            )
+                            jumper.connections
+
+                    brick1x1 =
+                        Connectivity.extractPartConnectivity "3005.dat" (\_ -> Nothing)
+
+                    initialMatrix =
+                        Mat4.makeTranslate3 3 -24 2
+
+                    candidates =
+                        solveSnapCandidates 25.0 0 initialMatrix brick1x1.connections targetPoints
+                in
+                case candidates of
+                    first :: _ ->
+                        let
+                            snapOrigin =
+                                Mat4.transform first.snapMatrix (vec3 0 0 0)
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 0 (round (Vec3.getX snapOrigin))
+                            , \_ -> Expect.equal -24 (round (Vec3.getY snapOrigin))
+                            , \_ -> Expect.equal 0 (round (Vec3.getZ snapOrigin))
+                            ]
+                            ()
+
+                    [] ->
+                        Expect.fail "expected snap candidate for 1x1 brick on 1x2 jumper plate"
         , test "rotationIndex cycles orientation around connection normal by 90-degree steps" <|
             \_ ->
                 let

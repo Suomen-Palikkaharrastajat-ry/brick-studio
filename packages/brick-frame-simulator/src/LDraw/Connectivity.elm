@@ -1722,6 +1722,14 @@ studOffset conn matrix =
         origin =
             Mat4.transform matrix (vec3 0 0 0)
 
+        antiStuds =
+            conn.connections
+                |> List.filter
+                    (\point ->
+                        point.connType == AntiStud && Vec3.getY (transformDirection matrix point.normal) > 0.7
+                    )
+                |> List.map (\point -> Vec3.sub (Mat4.transform matrix point.localPosition) origin)
+
         studs =
             conn.connections
                 |> List.filter
@@ -1731,30 +1739,27 @@ studOffset conn matrix =
                 |> List.map (\point -> Vec3.sub (Mat4.transform matrix point.localPosition) origin)
 
         relevantPoints =
-            if List.isEmpty studs then
-                conn.connections
-                    |> List.filter
-                        (\point ->
-                            point.connType == AntiStud && Vec3.getY (transformDirection matrix point.normal) > 0.7
-                        )
-                    |> List.map (\point -> Vec3.sub (Mat4.transform matrix point.localPosition) origin)
+            if not (List.isEmpty antiStuds) then
+                antiStuds
 
             else
                 studs
 
         offsetAlong get =
-            let
-                columns =
-                    relevantPoints
-                        |> List.map (\v -> round (get v))
-                        |> Set.fromList
-                        |> Set.size
-            in
-            if modBy 2 columns == 1 then
-                10
+            if List.isEmpty relevantPoints then
+                0
 
             else
-                0
+                let
+                    hasOddMultiple =
+                        relevantPoints
+                            |> List.any (\v -> modBy 20 (abs (round (get v))) == 10)
+                in
+                if hasOddMultiple then
+                    0
+
+                else
+                    10
     in
     { x = offsetAlong Vec3.getX, z = offsetAlong Vec3.getZ }
 
@@ -1872,6 +1877,21 @@ knownCatalogPart name =
         "3795" ->
             -- Plate 2 x 6
             Just (makeBrick 6 2 8 "3795.dat")
+
+        "3794" ->
+            Just (makeJumperPlate1x2 "3794.dat")
+
+        "3794a" ->
+            Just (makeJumperPlate1x2 "3794a.dat")
+
+        "3794b" ->
+            Just (makeJumperPlate1x2 "3794b.dat")
+
+        "15573" ->
+            Just (makeJumperPlate1x2 "15573.dat")
+
+        "87580" ->
+            Just (makeJumperPlate2x2 "87580.dat")
 
         "3031" ->
             -- Plate 4 x 4
@@ -2911,6 +2931,34 @@ makeBrick length width height partName =
     { part = partName
     , connections = allConnections
     , boundingBoxes = [ bbox ]
+    }
+
+
+makeJumperPlate1x2 : String -> PartConnectivity
+makeJumperPlate1x2 partName =
+    { part = partName
+    , connections =
+        [ studAt 1 (vec3 0 0 0)
+        , antiStudAt 101 (vec3 -10 8 0)
+        , antiStudAt 102 (vec3 10 8 0)
+        , antiStudAt 103 (vec3 0 8 0)
+        ]
+    , boundingBoxes = [ { min = vec3 -20 -4 -10, max = vec3 20 8 10 } ]
+    }
+
+
+makeJumperPlate2x2 : String -> PartConnectivity
+makeJumperPlate2x2 partName =
+    { part = partName
+    , connections =
+        [ studAt 1 (vec3 0 0 0)
+        , antiStudAt 101 (vec3 -10 8 -10)
+        , antiStudAt 102 (vec3 10 8 -10)
+        , antiStudAt 103 (vec3 -10 8 10)
+        , antiStudAt 104 (vec3 10 8 10)
+        , antiStudAt 105 (vec3 0 8 0)
+        ]
+    , boundingBoxes = [ { min = vec3 -20 -4 -20, max = vec3 20 8 20 } ]
     }
 
 
