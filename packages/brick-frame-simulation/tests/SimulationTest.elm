@@ -335,7 +335,7 @@ suite =
                             ]
             ]
         , describe "analyse"
-            [ test "detects the gears and picks the first motor-capable gear" <|
+            [ test "detects the gears and picks the first motor-capable gear when reachability ties" <|
                 \_ ->
                     Expect.all
                         [ \m -> Expect.equal True m.simulationAvailable
@@ -368,6 +368,42 @@ suite =
                         |> .motor
                         |> .drivingGearId
                         |> Expect.equal (Just 0)
+            , test "default motor selection follows worm→wheel→spur reachability but preserves an explicit choice" <|
+                \_ ->
+                    let
+                        wormSpec =
+                            { partFile = "4716.dat", teeth = 1, pitchRadius = 12, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ axleHole 0 0 ] }
+
+                        wheelSpec =
+                            { partFile = "69778.dat", teeth = 12, pitchRadius = 12, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ axleHole 0 0 ] }
+
+                        wormTrainConfig =
+                            { config | gearSpecs = wheelSpec :: wormSpec :: specs }
+
+                        wheelFirstLines =
+                            [ SubFileRef { color = 4, transform = Mat4.makeTranslate3 0 24 0, file = "69778.dat" }
+                            , SubFileRef { color = 4, transform = Mat4.makeRotate (pi / 2) (Vec3.vec3 0 1 0), file = "4716.dat" }
+                            , SubFileRef { color = 4, transform = Mat4.makeTranslate3 22 24 0, file = "3647.dat" }
+                            ]
+
+                        wormCache =
+                            Dict.insert "69778.dat" (Loaded []) (Dict.insert "4716.dat" (Loaded []) cache)
+
+                        autoSelected =
+                            Simulation.init wormTrainConfig
+                                |> Simulation.analyse { lines = wheelFirstLines, cache = wormCache }
+                                |> Tuple.first
+
+                        explicitlySelected =
+                            Simulation.init { wormTrainConfig | requestedMotorIndex = Just 0 }
+                                |> Simulation.analyse { lines = wheelFirstLines, cache = wormCache }
+                                |> Tuple.first
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal (Just 1) autoSelected.motor.drivingGearId
+                        , \_ -> Expect.equal (Just 0) explicitlySelected.motor.drivingGearId
+                        ]
+                        ()
             , test "a model without gears is checked but unavailable" <|
                 \_ ->
                     Simulation.init config

@@ -364,7 +364,7 @@ suite =
                     Expect.equal
                         [ Nothing, Nothing ]
                         [ Phase.phaseOf wormSpec
-                        , Phase.phaseOf { partFile = "32905.dat", teeth = 2, pitchRadius = 5, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
+                        , Phase.phaseOf { partFile = "32905.dat", teeth = 1, pitchRadius = 5, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
                         ]
             ]
         , describe "contactPoint"

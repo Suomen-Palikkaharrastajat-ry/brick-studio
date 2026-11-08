@@ -36,8 +36,12 @@ main = hspec $ do
                 , "32198a.dat"
                 , "3650c.dat"
                 ]
-            generated `shouldSatisfy` Text.isInfixOf "teeth = 1, pitchRadius = 12.0, kind = WormGear"
-            generated `shouldSatisfy` Text.isInfixOf "teeth = 2, pitchRadius = 12.0, kind = WormGear"
+            generated
+                `shouldSatisfy` Text.isInfixOf
+                    "partFile = \"4716.dat\", teeth = 1, pitchRadius = 12.0, kind = WormGear"
+            generated
+                `shouldSatisfy` Text.isInfixOf
+                    "partFile = \"32905.dat\", teeth = 1, pitchRadius = 12.0, kind = WormGear"
             generated `shouldSatisfy` Text.isInfixOf "kind = TurntableGear, axis = AxisY, motorCapable = False, rotates = False"
             generated `shouldSatisfy` Text.isInfixOf "kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ { kind = AxleHole"
 

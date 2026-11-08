@@ -337,6 +337,9 @@ meshing g1 g2 =
     if not g1.spec.rotates || not g2.spec.rotates then
         False
 
+    else if isWorm g1.spec && isWorm g2.spec then
+        False
+
     else
         let
             facts =

@@ -4,6 +4,7 @@ module Gear.Physics exposing
     , angleAt
     , crankSliderPosition
     , crankSliderRodAngle
+    , defaultMotorGearId
     , fourBarAngles
     , propagate
     , propagateWithLinkages
@@ -43,11 +44,14 @@ bevel pairs take their sign from the same formula.
 Coaxial (rigid) neighbours turn at ratio `+1` when their true axes point the
 same way, and `-1` when one is flipped (`rigidSign`).
 
-Worm gear simplification: an explicit worm kind preserves the positive ratio
-sign; its tooth count still determines the ratio magnitude (including the
-two-start 32905 worm).
+Worm ratio magnitude uses starts/tooth metadata. Local LDraw geometry for both
+4716 and 32905 uses the same right-handed thread subpart: its helix angle
+increases along local +Z. The ratio sign follows that handedness and the
+oriented worm axis, wheel axis, and center side; a valid native arrangement
+(worm +X, wheel +Z at +Y) therefore has a negative ratio. Reversing either
+axis or moving the wheel to the opposite side reverses the sign.
 
-If the geometry is degenerate (coincident centres, no pitch point), the sign
+For non-worm meshes, degenerate geometry (coincident centres, no pitch point)
 falls back to the same-orientation rule `−teeth1/teeth2`.
 
 -}
@@ -109,6 +113,37 @@ propagate graph motorId motorAngle =
 
         Nothing ->
             Dict.empty
+
+
+{-| Choose the motor-capable rotating gear whose directed traversal reaches the
+largest rotating set. `GearGraph.instances` is in document order, so ties keep
+the earliest original gear ID. Worm edges remain directional during this
+selection: a wheel cannot be chosen as a route back to its worm.
+-}
+defaultMotorGearId : GearGraph -> Maybe GearId
+defaultMotorGearId graph =
+    graph.instances
+        |> Array.toList
+        |> List.filter (\gear -> gear.spec.rotates && gear.spec.motorCapable)
+        |> List.foldl
+            (\gear best ->
+                let
+                    reachedCount =
+                        Dict.size (propagate graph gear.id 1.0)
+                in
+                case best of
+                    Nothing ->
+                        Just ( gear.id, reachedCount )
+
+                    Just ( _, bestCount ) ->
+                        if reachedCount > bestCount then
+                            Just ( gear.id, reachedCount )
+
+                        else
+                            best
+            )
+            Nothing
+        |> Maybe.map Tuple.first
 
 
 {-| Angle for a single gear given the propagation result.
@@ -361,11 +396,9 @@ isRotatingGear graph gearId =
         |> Maybe.withDefault False
 
 
-{-| Signed ratio for one mesh edge, `angle(g2) / angle(g1)`.
-
-Worms keep a positive sign. Otherwise the magnitude is `teeth1 / teeth2` and
-the sign is `meshSign g1 g2`.
-
+{-| Signed ratio for one mesh edge, `angle(g2) / angle(g1)`. The magnitude is
+`teeth1 / teeth2`; worms use the documented native-orientation convention in
+`wormMeshSign`, while ordinary meshes use `meshSign`.
 -}
 meshRatio : GearInstance -> GearInstance -> Float
 meshRatio g1 g2 =
@@ -374,10 +407,69 @@ meshRatio g1 g2 =
             toFloat g1.spec.teeth / toFloat g2.spec.teeth
     in
     if Detect.isWorm g1.spec || Detect.isWorm g2.spec then
-        baseRatio
+        baseRatio * wormMeshSign g1 g2
 
     else
         baseRatio * meshSign g1 g2
+
+
+{-| Worms have no meaningful single pitch point for the spur-style no-slip
+calculation. Their screw motion is grounded in the local LDraw geometry: the
+shared 4716/32905 thread subpart is right-handed, with angular phase increasing
+about local +Z as position increases along local +Z. The Y-up conversion negates
+both LDraw Y and Z (a proper rotation), so it preserves this handedness.
+
+For a right-handed thread, positive rotation about the worm's oriented axis
+moves the thread axially toward `-wormAxis`. Equating this with the wheel's
+tangential contact direction gives the sign `hand * sign((wormAxis × wheelAxis)
+· (wheelCentre − wormCentre))`. Thus the +X worm / +Z wheel at +Y arrangement
+has a negative ratio, and changing either oriented axis or the wheel's center
+side reverses it. This is a kinematic sign inferred from the LDraw thread and
+idealized contact directions, not an empirical validation of the molded gear.
+
+If the oriented triple product is degenerate, the contact direction does not
+determine an absolute sign and the implementation falls back to +1.
+
+-}
+wormMeshSign : GearInstance -> GearInstance -> Float
+wormMeshSign g1 g2 =
+    let
+        ( worm, wheel ) =
+            if Detect.isWorm g1.spec then
+                ( g1, g2 )
+
+            else
+                ( g2, g1 )
+
+        wormFrame =
+            Phase.gearFrame worm
+
+        wheelFrame =
+            Phase.gearFrame wheel
+
+        wheelFromWorm =
+            Vec3.sub wheelFrame.centre wormFrame.centre
+
+        handedOrientation =
+            Vec3.dot (Vec3.cross wormFrame.axis wheelFrame.axis) wheelFromWorm
+    in
+    if abs handedOrientation < 1.0e-6 then
+        1
+
+    else if handedOrientation < 0 then
+        -wormThreadHandedness
+
+    else
+        wormThreadHandedness
+
+
+{-| The local LDraw worm thread is right-handed: angular phase increases about
+local +Z as position increases along local +Z. A positive value denotes
+right-handedness in the screw sign formula above.
+-}
+wormThreadHandedness : Float
+wormThreadHandedness =
+    1
 
 
 {-| The no-slip sign of a spur, crown or bevel mesh: `+1` when the two gears

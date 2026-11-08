@@ -38,10 +38,13 @@ sub-assemblies are found correctly.
 Technic gears and worms in the catalog's Technic category, plus the moved-file
 aliases used by older LDraw models. Each `GearSpec` stores a positive tooth
 count, pitch radius, explicit `GearKind`, local rotation `GearAxis`, motor and
-rotation eligibility, and typed pin/axle-hole centers. The gear kind—not a
-tooth-count sentinel—selects worm, bevel, or crown behavior. In particular,
-`32905.dat` is a two-start worm and has two teeth for ratio math; `4716.dat` is
-one-start and has one.
+rotation eligibility, and typed pin/axle-hole centers. For ordinary gears, the
+`teeth` metadata is the tooth count; for worms, it is the screw-start count.
+The gear kind—not a tooth-count sentinel—selects worm, bevel, or crown behavior.
+The LDraw part name for `32905.dat` is “Technic Worm Gear 2L with Axle Hole
+Two-toothed Sliding”, but its geometry reuses the one-start thread subpart from
+`4716.dat`. Accordingly, both worm specs have `teeth = 1` for ratio math; the
+LDraw name describes the sliding tooth profile, not two screw starts.
 
 Moved aliases `3648.dat`, `32198.dat`, and `3650.dat` remain registered with
 their replacements `3648b.dat`, `32198a.dat`, and `3650c.dat`; `3650b.dat` is
@@ -122,18 +125,39 @@ adjacency graph. At each edge the ratio is updated:
 ```elm
 meshRatio g1 g2 =
     if g1.kind == WormGear || g2.kind == WormGear then
-        toFloat g1.teeth / toFloat g2.teeth      -- worm: no sign flip
+        toFloat g1.teeth / toFloat g2.teeth * wormMeshSign g1 g2
     else
         toFloat g1.teeth / toFloat g2.teeth * meshSign g1 g2
 ```
 
-The magnitude is always the tooth-count ratio. The sign is the no-slip sign at
-the pitch point `P`. With `v_X = n_X × (P − C_X)` (`n_X` the gear's axis, `C_X`
-its centre), the signed ratio is `k = (v_1·v_2) / |v_2|²`, and `meshSign` is
-its sign. Two spur gears with the same axis orientation give `−teeth1/teeth2`.
-Flipping one gear's axis gives a positive ratio. Crown and bevel pairs take
-their sign from the same formula. If the geometry is degenerate (coincident
-centres, no pitch point), `meshSign` falls back to `−1`.
+The magnitude is the ratio of the metadata counts: ordinary gears contribute
+their tooth count, while worms contribute their screw-start count. For
+non-worm pairs, the sign is the no-slip sign at the pitch point `P`. With
+`v_X = n_X × (P − C_X)` (`n_X` the gear's axis, `C_X` its centre), the signed
+ratio is `k = (v_1·v_2) / |v_2|²`, and `meshSign` is its sign. Two spur gears
+with the same axis orientation give `−teeth1/teeth2`. Flipping one gear's axis
+gives a positive ratio. Crown and bevel pairs take their sign from the same
+formula. If the geometry is degenerate (coincident centres, no pitch point), a
+non-worm `meshSign` falls back to `−1`.
+
+Worm contact has no single physically meaningful pitch point for the spur-style
+no-slip formula. Both checked-in worm parts reference the same local LDraw
+thread geometry. In LDraw local coordinates it is right-handed: angular phase
+increases about local +Z as position increases along local +Z. For positive
+rotation around the oriented worm axis, a right-handed screw's thread moves
+axially toward `−wormAxis`. The sign used by
+the idealized worm model is therefore
+`sign((wormAxis × wheelAxis) · (wheelCentre − wormCentre))`: the +X worm, +Z
+wheel, +Y center-side arrangement has a negative ratio. Flipping either
+oriented axis or moving the wheel to the opposite side reverses the sign.
+
+LDraw's Y-down to engine Y-up conversion negates both Y and Z, a proper 180°
+rotation about X, so it preserves handedness; the formula uses the transformed
+world axes. This is a kinematic inference from the LDraw helicoid and idealized
+contact directions, not empirical validation of the molded parts. A degenerate
+oriented triple product has no determined physical sign and falls back to +1.
+Worm graph edges remain one-way from worm to wheel, so wheels cannot back-drive
+worms.
 
 Co-axial (rigid) neighbours share one axle, so they turn with the same
 angular velocity. Each gear's angle is measured about its own true axis, so
@@ -150,6 +174,10 @@ If gear B also drives gear C (8T), same orientation:
 
 Gears not reachable from the motor are absent from the result dict.
 Cycles are handled by the BFS visited set — each gear appears at most once.
+When no motor was explicitly requested, the simulator chooses the
+motor-capable rotating gear with the largest directed BFS-reachable set. Ties
+are resolved by original document order; explicit user motor selections are
+preserved.
 
 ## Tooth phase
 

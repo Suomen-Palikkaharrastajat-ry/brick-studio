@@ -1,6 +1,6 @@
 module LDraw.ColorData exposing (Finish(..), colorNames, colorTable, finishFor)
 
-{-| LDraw colour code → RGBA and finish, generated from viewer-app/public/ldraw/LDConfig.ldr.
+{-| LDraw colour code → RGBA and finish, generated from ldraw/LDConfig.ldr.
 
 Do not edit by hand — run `make generate`.
 

@@ -12,6 +12,7 @@ import Gear.Physics
         , angleAt
         , crankSliderPosition
         , crankSliderRodAngle
+        , defaultMotorGearId
         , fourBarAngles
         , propagate
         , propagateWithLinkages
@@ -31,9 +32,9 @@ spec teeth pitchRadius =
     { partFile = "test.dat", teeth = teeth, pitchRadius = pitchRadius, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
-wormSpec : Int -> Float -> GearSpec
-wormSpec teeth pitchRadius =
-    { partFile = "worm.dat", teeth = teeth, pitchRadius = pitchRadius, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
+wormSpec : String -> Int -> Float -> GearSpec
+wormSpec partFile teeth pitchRadius =
+    { partFile = partFile, teeth = teeth, pitchRadius = pitchRadius, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
 makeInstance : GearId -> Int -> Float -> Gear.Types.GearInstance
@@ -83,6 +84,88 @@ twoGearGraphWithSpecs spec0 spec1 =
             [ ( 0, [ 1 ] )
             , ( 1, [ 0 ] )
             ]
+    , rigidAxles = Dict.empty
+    }
+
+
+wormWheelGraph : String -> Bool -> Bool -> Bool -> GearGraph
+wormWheelGraph wormPart wormAxisFlipped wheelAxisFlipped wheelOnOppositeSide =
+    let
+        wormNativeAxis =
+            Mat4.makeRotate (pi / 2) (vec3 0 1 0)
+
+        wormTransform =
+            if wormAxisFlipped then
+                Mat4.mul (Mat4.makeRotate pi (vec3 0 0 1)) wormNativeAxis
+
+            else
+                wormNativeAxis
+
+        wheelRotation =
+            if wheelAxisFlipped then
+                flipX
+
+            else
+                Mat4.identity
+
+        wheelY =
+            if wheelOnOppositeSide then
+                -24
+
+            else
+                24
+
+        worm =
+            { id = 0
+            , spec = wormSpec wormPart 1 12
+            , color = 16
+            , worldPosition = vec3 0 0 0
+            , worldMatrix = wormTransform
+            }
+
+        wheel =
+            { id = 1
+            , spec = spec 24 24
+            , color = 16
+            , worldPosition = vec3 0 wheelY 0
+            , worldMatrix = Mat4.mul (Mat4.makeTranslate3 0 wheelY 0) wheelRotation
+            }
+    in
+    { instances = Array.fromList [ worm, wheel ]
+    , connections = Dict.fromList [ ( 0, [ 1 ] ) ]
+    , rigidAxles = Dict.empty
+    }
+
+
+wormWheelSpurGraph : GearGraph
+wormWheelSpurGraph =
+    let
+        wheel =
+            { id = 0
+            , spec = spec 24 24
+            , color = 16
+            , worldPosition = vec3 0 24 0
+            , worldMatrix = Mat4.makeTranslate3 0 24 0
+            }
+
+        worm =
+            { id = 1
+            , spec = wormSpec "4716.dat" 1 12
+            , color = 16
+            , worldPosition = vec3 0 0 0
+            , worldMatrix = Mat4.makeRotate (pi / 2) (vec3 0 1 0)
+            }
+
+        spur =
+            { id = 2
+            , spec = spec 8 8
+            , color = 16
+            , worldPosition = vec3 32 24 0
+            , worldMatrix = Mat4.makeTranslate3 32 24 0
+            }
+    in
+    { instances = Array.fromList [ wheel, worm, spur ]
+    , connections = Dict.fromList [ ( 0, [ 2 ] ), ( 1, [ 0 ] ), ( 2, [ 0 ] ) ]
     , rigidAxles = Dict.empty
     }
 
@@ -151,18 +234,35 @@ suite =
                         |> angleAt
                         |> (\f -> f 1)
                         |> Expect.within (Expect.Absolute 1.0e-6) -1.0
-            , test "one-start worm driving 24T: neighbour angle keeps the positive sign" <|
+            , test "4716 right-handed worm gives a negative ratio in the +X/+Z/+Y arrangement" <|
                 \_ ->
-                    propagate (twoGearGraphWithSpecs (wormSpec 1 12) (spec 24 24)) 0 1.0
+                    propagate (wormWheelGraph "4716.dat" False False False) 0 1.0
+                        |> angleAt
+                        |> (\f -> f 1)
+                        |> Expect.within (Expect.Absolute 1.0e-6) (-1 / 24)
+            , test "4716 flipping either axis reverses the signed ratio" <|
+                \_ ->
+                    Expect.all
+                        [ \_ -> propagate (wormWheelGraph "4716.dat" True False False) 0 1.0 |> angleAt |> (\f -> f 1) |> Expect.within (Expect.Absolute 1.0e-6) (1 / 24)
+                        , \_ -> propagate (wormWheelGraph "4716.dat" False True False) 0 1.0 |> angleAt |> (\f -> f 1) |> Expect.within (Expect.Absolute 1.0e-6) (1 / 24)
+                        , \_ -> propagate (wormWheelGraph "4716.dat" True True False) 0 1.0 |> angleAt |> (\f -> f 1) |> Expect.within (Expect.Absolute 1.0e-6) (-1 / 24)
+                        ]
+                        ()
+            , test "4716 wheel on the opposite side reverses the ratio" <|
+                \_ ->
+                    propagate (wormWheelGraph "4716.dat" False False True) 0 1.0
                         |> angleAt
                         |> (\f -> f 1)
                         |> Expect.within (Expect.Absolute 1.0e-6) (1 / 24)
-            , test "two-start worm driving 24T uses two teeth in the ratio" <|
+            , test "32905 shares the one-start magnitude and right-handed signed ratio" <|
                 \_ ->
-                    propagate (twoGearGraphWithSpecs (wormSpec 2 12) (spec 24 24)) 0 1.0
-                        |> angleAt
-                        |> (\f -> f 1)
-                        |> Expect.within (Expect.Absolute 1.0e-6) (2 / 24)
+                    Expect.all
+                        [ \_ -> propagate (wormWheelGraph "32905.dat" False False False) 0 1.0 |> angleAt |> (\f -> f 1) |> Expect.within (Expect.Absolute 1.0e-6) (-1 / 24)
+                        , \_ -> propagate (wormWheelGraph "32905.dat" True False False) 0 1.0 |> angleAt |> (\f -> f 1) |> Expect.within (Expect.Absolute 1.0e-6) (1 / 24)
+                        , \_ -> propagate (wormWheelGraph "32905.dat" False True False) 0 1.0 |> angleAt |> (\f -> f 1) |> Expect.within (Expect.Absolute 1.0e-6) (1 / 24)
+                        , \_ -> propagate (wormWheelGraph "32905.dat" False False True) 0 1.0 |> angleAt |> (\f -> f 1) |> Expect.within (Expect.Absolute 1.0e-6) (1 / 24)
+                        ]
+                        ()
             , test "a non-worm one-tooth gear still follows ordinary mesh direction" <|
                 \_ ->
                     propagate (twoGearGraph 1 24) 0 1.0
@@ -201,6 +301,26 @@ suite =
                         , \_ -> Expect.equal Dict.empty (propagate graph 1 0.5)
                         ]
                         ()
+            ]
+        , describe "directed default motor selection"
+            [ test "worm→wheel→spur chain chooses the worm even when the wheel is first" <|
+                \_ ->
+                    let
+                        angles =
+                            propagate wormWheelSpurGraph 1 1.0
+                    in
+                    Expect.all
+                        [ \_ -> defaultMotorGearId wormWheelSpurGraph |> Expect.equal (Just 1)
+                        , \_ -> Expect.equal 3 (Dict.size angles)
+                        , \_ -> angleAt angles 0 |> Expect.within (Expect.Absolute 1.0e-6) (-1 / 24)
+                        , \_ -> angleAt angles 2 |> Expect.within (Expect.Absolute 1.0e-6) (1 / 8)
+                        , \_ -> propagate wormWheelSpurGraph 0 1.0 |> Dict.member 1 |> Expect.equal False
+                        ]
+                        ()
+            , test "equal reachability keeps the first motor in document order" <|
+                \_ ->
+                    defaultMotorGearId (twoGearGraph 8 16)
+                        |> Expect.equal (Just 0)
             ]
         , describe "propagate — 3-gear chain (8T → 16T → 8T)"
             [ test "gear 0 ratio = 1.0 (motor)" <|

@@ -66,7 +66,8 @@ type alias GearHole =
 {-| Static properties of a known gear part.
 
   - `partFile` — normalised LDraw filename (lowercase, forward slashes)
-  - `teeth` — tooth count (determines gear ratio)
+  - `teeth` — tooth count for ordinary gears, or screw-start count for worms;
+    this value determines the ratio magnitude.
   - `pitchRadius` — distance from axle centre to the pitch circle in LDraw
     units (LDU). Two gears mesh when their world-space axle separation ≈
     pitchRadius1 + pitchRadius2.

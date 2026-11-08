@@ -50,6 +50,7 @@ import Gear.Animate as Animate exposing (MotorState)
 import Gear.Components as Components
 import Gear.Detect as Detect
 import Gear.Lod as Lod exposing (Lod)
+import Gear.Physics as Physics
 import Gear.Types exposing (GearGraph, GearId, GearInstance, GearSpec)
 import LDraw.ColorData exposing (Finish(..))
 import LDraw.Connectivity as Connectivity exposing (ConnectionType(..))
@@ -96,7 +97,8 @@ type alias PlaybackState =
 `gearSpecs` lists the part files that count as gears. `lodCache` holds
 simplified versions of those parts for the low-detail meshes used at a
 distance. `requestedMotorIndex` picks which detected gear starts as the motor
-(`Nothing` = the first).
+(`Nothing` = the gear whose directed traversal reaches the largest rotating
+set, with document order breaking ties).
 
 -}
 type alias Config =
@@ -342,11 +344,8 @@ analyse { lines, cache } model =
         graph =
             Detect.buildGearGraph gearInstances
 
-        firstMotorGearId =
-            gearInstances
-                |> List.filter (\gear -> gear.spec.motorCapable && gear.spec.rotates)
-                |> List.head
-                |> Maybe.map .id
+        defaultMotorGearId =
+            Physics.defaultMotorGearId graph
 
         selectedMotorGearId =
             case model.requestedMotorIndex of
@@ -357,13 +356,13 @@ analyse { lines, cache } model =
                                 Just gear.id
 
                             else
-                                firstMotorGearId
+                                defaultMotorGearId
 
                         Nothing ->
-                            firstMotorGearId
+                            defaultMotorGearId
 
                 Nothing ->
-                    firstMotorGearId
+                    defaultMotorGearId
 
         playbackState =
             model.playback
@@ -1140,9 +1139,7 @@ resolveMotorGearId model =
                 Nothing ->
                     case model.gearGraph of
                         Just graph ->
-                            graph.instances
-                                |> Array.get 0
-                                |> Maybe.map .id
+                            Physics.defaultMotorGearId graph
 
                         Nothing ->
                             Nothing

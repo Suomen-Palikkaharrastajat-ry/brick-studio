@@ -7,6 +7,7 @@ import Array
 import Dict
 import Expect
 import Gear.Detect exposing (buildGearGraph, buildGearGraphReference, extractGears, isWorm, meshing)
+import Gear.Physics as Physics
 import Gear.Types exposing (GearAxis(..), GearInstance, GearKind(..), GearSpec)
 import LDraw.Resolve exposing (PartStatus(..))
 import LDraw.Types exposing (LDrawLine(..))
@@ -472,6 +473,45 @@ suite =
                         , \g -> Dict.get 1 g.connections |> Maybe.withDefault [] |> Expect.equal []
                         ]
                         graph
+            , test "worm pairs never form a rotation link, in either document order" <|
+                \_ ->
+                    let
+                        worm id position transform =
+                            { id = id
+                            , spec = specWorm
+                            , color = 16
+                            , worldPosition = position
+                            , worldMatrix = transform
+                            }
+
+                        wormX =
+                            worm 0 (vec3 0 0 0) (Mat4.makeRotate (pi / 2) (vec3 0 1 0))
+
+                        wormZ =
+                            worm 1 (vec3 0 24 0) Mat4.identity
+
+                        graphFor orderedWorms =
+                            buildGearGraph orderedWorms
+
+                        assertNoLink graph =
+                            Expect.all
+                                [ \g -> Expect.equal Dict.empty g.connections
+                                , \g -> Expect.equal Dict.empty g.rigidAxles
+                                , \g -> Physics.defaultMotorGearId g |> Expect.equal (Just 0)
+                                , \g -> Physics.propagate g 0 1.0 |> Dict.size |> Expect.equal 1
+                                ]
+                                graph
+                    in
+                    Expect.all
+                        [ \_ -> graphFor [ wormX, wormZ ] |> assertNoLink
+                        , \_ ->
+                            graphFor
+                                [ { wormZ | id = 0 }
+                                , { wormX | id = 1 }
+                                ]
+                                |> assertNoLink
+                        ]
+                        ()
             ]
         , describe "buildGearGraph — rigidAxles"
             [ test "two gears on the same Z-axis → co-axial coupling" <|

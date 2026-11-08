@@ -151,7 +151,7 @@ knownGears =
     , gear "3648b.dat" 24 30.0 "SpurGear" "AxisZ" True True (axle 0 0 : pinHoles24)
     , gear "3649.dat" 40 50.0 "SpurGear" "AxisZ" True True (axle 0 0 : axleHoles40 ++ pinHoles40)
     , gear "4716.dat" 1 12.0 "WormGear" "AxisZ" True True [axle 0 0]
-    , gear "32905.dat" 2 12.0 "WormGear" "AxisZ" True True [axle 0 0]
+    , gear "32905.dat" 1 12.0 "WormGear" "AxisZ" True True [axle 0 0]
     , gear "69778.dat" 12 12.0 "SpurGear" "AxisZ" True True [axle 0 0]
     , gear "32198.dat" 20 25.0 "BevelGear" "AxisZ" True True [axle 0 0]
     , gear "32198a.dat" 20 25.0 "BevelGear" "AxisZ" True True [axle 0 0]
@@ -169,7 +169,7 @@ knownGears =
     , gear "99010.dat" 28 35.0 "TurntableGear" "AxisY" True True (turntableOffsets 20 (-10))
     ]
   where
-    gear file teeth radius kind axis motor rotates holes = GearSpec file teeth radius kind axis motor rotates holes
+    gear = GearSpec
     axle x y = ("AxleHole", x, y)
     pin x y = ("PinHole", x, y)
     pinHoles24 = map (uncurry pin) [(10, 10), (-10, 10), (-10, -10), (10, -10)]
@@ -234,7 +234,7 @@ generateElmModule = do
             , "        ]"
             , ""
             , ""
-            , "-- Known gear parts"
+            , "-- Known gear parts and their explicit simulation metadata"
             , "gearParts : List { partFile : String, teeth : Int, pitchRadius : Float, kind : GearKind, axis : GearAxis, motorCapable : Bool, rotates : Bool, holes : List { kind : GearHoleKind, x : Float, y : Float } }"
             , "gearParts ="
             , "    [ " <> Text.intercalate "\n    , " (map gearEntry knownGears)
