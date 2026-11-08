@@ -253,6 +253,9 @@ module I18n exposing
       -- Health & Tidy Up
     , toolTurnBackAxis
     , toolUndo
+    , touchHelpDialogTitle
+    , touchHelpFootnote
+    , touchHelpRows
     )
 
 {-| Central localization and internationalization module for Palikkakehys applications.
@@ -2591,6 +2594,168 @@ shortcutsFootnote lang =
 
         En ->
             "Street level flies through walls — there is no collision."
+
+
+touchHelpDialogTitle : Language -> String
+touchHelpDialogTitle lang =
+    case lang of
+        Fi ->
+            "Kosketusohjaimet"
+
+        En ->
+            "Touch controls"
+
+
+touchHelpFootnote : Language -> String
+touchHelpFootnote lang =
+    case lang of
+        Fi ->
+            "Kaksoisnapauta osaa avataksesi säätötyökalut tai napauta tyhjää tilaa sulkeaksesi ne."
+
+        En ->
+            "Double-tap a part to open its controls, or tap empty space to close them."
+
+
+touchHelpRows : Language -> { free : Bool, technic : Bool, hasInventory : Bool } -> List ( String, List ( String, String ) )
+touchHelpRows lang config =
+    case lang of
+        Fi ->
+            [ ( "Rakentaminen"
+              , [ ( "Valikko, vasen yläkulma", "Jaa linkki, kumoa, tee uudelleen, poista, tyhjennä ja kielen valinta" )
+                , ( "Napauta osaa", "Valitse osa" )
+                , ( "Vedä osaa", "Siirrä kamerakulman mukaan (kohdistuu askeleeseen)" )
+                , ( "Kaksoisnapauta osaa", "Avaa säätökehä: nuolinäppäimet siirtämiseen, käännä, kallista, nosta, laske, leikkaa, kopioi, liitä, ryhmittele ja poista" )
+                , ( "Kehä: Nuppi, ½ nuppi, Pikkuliike", "Siirtoaskel: Nuppi 20 LDU sivuttain ja 24 ylös/alas; ½ nuppi 10 ja 8; Pikkuliike 1 LDU" )
+                , ( "Pikkuliike (yläpalkki)", "Kytke 1 LDU:n hienosiirto päälle tai pois osaa vedettäessä" )
+                , ( "Siisti malli (yläpalkki)", "Näkyy kun osat ovat irti nupeista tai päällekkäin. Siisti esikatselee siirrot haamuina; Ota käyttöön tekee siirrot yhtenä askeleena, Peruuta ei muuta mitään" )
+                , ( "Napauta tyhjää tilaa", "Sulje säätökehä tai poista valinta" )
+                ]
+                    ++ (if config.free then
+                            [ ( "Kehä: Lukitse", "Lukitse valitut osat alustaan tai avaa lukitus" ) ]
+
+                        else
+                            []
+                       )
+              )
+            ]
+                ++ (if config.free then
+                        [ ( "Telakka"
+                          , [ ( "Välilehdet ja värit", "Palikat, levyt, viistot ja laatat, Technic; väririvi asettaa seuraavan tai valitun osan värin" )
+                            , ( "Hakukenttä", "Etsi mikä tahansa osa koko kirjastosta nimellä tai numerolla, napauta lisätäksesi" )
+                            , ( "Pyyhkäise", "Selaa osakortteja ja välilehtiä vaakasuunnassa" )
+                            ]
+                          )
+                        ]
+
+                    else if not config.hasInventory then
+                        []
+
+                    else
+                        [ ( "Telakka"
+                          , [ ( "Kortit", "Kukin kortti on sarjan osa; napauta lisätäksesi, jäljellä oleva määrä näkyy kuvassa" )
+                            , ( "Lukitut osat", "Lukittu osa on kiinteä: sitä ei voi siirtää, kääntää tai värjätä uudelleen" )
+                            ]
+                          )
+                        ]
+                   )
+                ++ [ ( "Kamera"
+                     , [ ( "Yksi sormi tyhjällä tilalla", "Panoroi" )
+                       , ( "Kaksi sormea tyhjällä tilalla", "Kierrä; nipistä tai levitä zoomataksesi" )
+                       , ( "Kamerapainike, oikea alakulma", "Vaihda telakan ja kamerapallon välillä kapealla näytöllä" )
+                       , ( "Vedä palloa, oikea alakulma", "Kierrä kameraa" )
+                       , ( "Napauta palloa", "Siirry suoraan mallin kyseiselle puolelle" )
+                       , ( "Zoomaussäädin", "Lähennä ja loitonna" )
+                       , ( "Palauta näkymä", "Sovita koko malli näkymään" )
+                       ]
+                     )
+                   ]
+                ++ (if config.technic then
+                        [ ( "Mekanismi"
+                          , [ ( "Käynnistä / pysäytä (yläpalkki)", "Käynnistä tai pysäytä mekanismi (muokkaus pysäyttää ja kelaa alkuun)" )
+                            , ( "Rattaat kytkeytyvät", "Ratas joka kohtaa toisen kääntää akseliaan niin että hampaat kytkeytyvät" )
+                            , ( "Rataspilleri", "Kun yksi ratas on valittuna, kertoo miten se kytkeytyy lähimpään rattaaseen" )
+                            ]
+                          )
+                        ]
+
+                    else
+                        []
+                   )
+                ++ [ ( "Ohje"
+                     , [ ( "?", "Näytä tai sulje tämä ohje (yläpalkin ?-painike)" )
+                       , ( "×", "Sulje tämä ohje" )
+                       ]
+                     )
+                   ]
+
+        En ->
+            [ ( "Build"
+              , [ ( "Menu, top left", "Share link, undo, redo, delete, clear, and language switch" )
+                , ( "Tap a part", "Select the part" )
+                , ( "Drag a part", "Move it as seen from the camera (snaps to the move step)" )
+                , ( "Double-tap a part", "Open its controls: move pad arrows, turn, tip, raise, lower, cut, copy, paste, group, and delete" )
+                , ( "Ring: Stud, ½ stud, Bit", "The move step: Stud 20 LDU sideways and 24 up or down; ½ stud 10 and 8; Bit 1 LDU" )
+                , ( "Bit step (top bar)", "Toggle 1 LDU fine movement while dragging a part" )
+                , ( "Tidy up (pill, top left)", "Shown when parts sit off the studs or overlap. Tidy up previews the moves as ghosts; Apply makes them one undo step, Cancel changes nothing" )
+                , ( "Tap empty space", "Close the controls or deselect" )
+                ]
+                    ++ (if config.free then
+                            [ ( "Ring: Glue", "Glue the selected parts to the board, locked, or unglue them" ) ]
+
+                        else
+                            []
+                       )
+              )
+            ]
+                ++ (if config.free then
+                        [ ( "Dock"
+                          , [ ( "Tabs and colour row", "Bricks, plates, slopes and tiles, Technic; the colour row sets the colour of the next or selected part" )
+                            , ( "Search box", "Find any part in the whole library by name or number, then tap it to add it" )
+                            , ( "Swipe", "Scroll through part cards and tabs horizontally" )
+                            ]
+                          )
+                        ]
+
+                    else if not config.hasInventory then
+                        []
+
+                    else
+                        [ ( "Dock"
+                          , [ ( "Cards", "Each card is one part of the kit; tap to add it, its count shows on the picture" )
+                            , ( "Glued parts", "A glued part is locked: it cannot be moved, turned or recoloured" )
+                            ]
+                          )
+                        ]
+                   )
+                ++ [ ( "Camera"
+                     , [ ( "One finger on empty space", "Pan" )
+                       , ( "Two fingers on empty space", "Orbit; spread or pinch to zoom" )
+                       , ( "Camera button, bottom right", "Switch between the dock and the camera globe on a narrow screen" )
+                       , ( "Drag the globe, bottom right", "Orbit the camera" )
+                       , ( "Tap the globe", "Fly to that side of the model" )
+                       , ( "Zoom slider", "Zoom in and out" )
+                       , ( "Reset view", "Fit the whole model in view" )
+                       ]
+                     )
+                   ]
+                ++ (if config.technic then
+                        [ ( "Machine"
+                          , [ ( "Play / pause (top bar)", "Play or pause the machine (an edit stops it and rewinds)" )
+                            , ( "Gears turn to mesh", "A gear that meets another turns its axle line so the teeth interlock" )
+                            , ( "Gear pill", "With one gear selected, says how it meets its nearest gear" )
+                            ]
+                          )
+                        ]
+
+                    else
+                        []
+                   )
+                ++ [ ( "Help"
+                     , [ ( "?", "Show or close this reference (top bar ? button)" )
+                       , ( "×", "Close this reference" )
+                       ]
+                     )
+                   ]
 
 
 shortcutsHelpRows : Language -> { free : Bool, technic : Bool, hasInventory : Bool } -> List ( String, List ( String, String ) )

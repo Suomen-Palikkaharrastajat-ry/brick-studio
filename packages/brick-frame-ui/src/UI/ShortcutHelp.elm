@@ -1,6 +1,6 @@
-module UI.ShortcutHelp exposing (Config, view, viewWithLanguage)
+module UI.ShortcutHelp exposing (Config, view, viewTouchWithLanguage, viewWithLanguage)
 
-{-| The keyboard shortcut reference dialog.
+{-| The keyboard shortcut and touch controls reference dialog.
 
 The rows come from the host (normally `Viewport.Shortcuts.helpRows`) so the text
 cannot drift away from the bindings it documents.
@@ -38,6 +38,40 @@ view =
 -}
 viewWithLanguage : Language -> Config msg -> Html msg
 viewWithLanguage lang config =
+    viewDialog
+        { title = I18n.shortcutsDialogTitle lang
+        , closeLabel = I18n.shortcutsClose lang
+        , closeTitle = I18n.shortcutsClose lang ++ " (Esc)"
+        , footnote = I18n.shortcutsFootnote lang
+        , rows = config.rows
+        , onClose = config.onClose
+        }
+
+
+{-| The touch/mobile controls reference rendered in the given language.
+-}
+viewTouchWithLanguage : Language -> Config msg -> Html msg
+viewTouchWithLanguage lang config =
+    viewDialog
+        { title = I18n.touchHelpDialogTitle lang
+        , closeLabel = I18n.shortcutsClose lang
+        , closeTitle = I18n.shortcutsClose lang
+        , footnote = I18n.touchHelpFootnote lang
+        , rows = config.rows
+        , onClose = config.onClose
+        }
+
+
+viewDialog :
+    { title : String
+    , closeLabel : String
+    , closeTitle : String
+    , footnote : String
+    , rows : List ( String, List ( String, String ) )
+    , onClose : msg
+    }
+    -> Html msg
+viewDialog spec =
     div
         [ Attr.attribute "role" "dialog"
         , Attr.attribute "aria-modal" "true"
@@ -71,13 +105,13 @@ viewWithLanguage lang config =
                 , Attr.style "font-weight" "600"
                 , Attr.style "font-size" "13px"
                 ]
-                [ text (I18n.shortcutsDialogTitle lang) ]
+                [ text spec.title ]
             , button
                 [ Attr.id "shortcut-help-close"
-                , Html.Events.onClick config.onClose
-                , Touch.onTap config.onClose
-                , Attr.title (I18n.shortcutsClose lang ++ " (Esc)")
-                , Attr.attribute "aria-label" (I18n.shortcutsClose lang)
+                , Html.Events.onClick spec.onClose
+                , Touch.onTap spec.onClose
+                , Attr.title spec.closeTitle
+                , Attr.attribute "aria-label" spec.closeLabel
                 , Attr.style "padding" "2px 4px"
                 , Attr.style "background" "transparent"
                 , Attr.style "color" Theme.textMuted
@@ -92,12 +126,12 @@ viewWithLanguage lang config =
             , Attr.style "grid-template-columns" "repeat(auto-fit, minmax(220px, 1fr))"
             , Attr.style "gap" "8px 24px"
             ]
-            (List.map viewShortcutGroup config.rows)
+            (List.map viewShortcutGroup spec.rows)
         , div
             [ Attr.style "margin-top" "12px"
             , Attr.style "color" Theme.textMuted
             ]
-            [ text (I18n.shortcutsFootnote lang) ]
+            [ text spec.footnote ]
         ]
 
 
@@ -162,10 +196,17 @@ viewKeys keys =
 -}
 viewAlternative : String -> List (Html msg)
 viewAlternative alternative =
-    String.split " " alternative
-        |> List.filter (\token -> token /= "")
-        |> List.map (\token -> ( token, isKeyToken token ))
-        |> viewTokens Nothing
+    let
+        tagged =
+            String.split " " alternative
+                |> List.filter (\token -> token /= "")
+                |> List.map (\token -> ( token, isKeyToken token ))
+    in
+    if List.any Tuple.second tagged then
+        viewTokens Nothing tagged
+
+    else
+        [ text (String.join " " (List.map Tuple.first tagged)) ]
 
 
 {-| Render tokens in order. Two adjacent key caps get a thin space between them,

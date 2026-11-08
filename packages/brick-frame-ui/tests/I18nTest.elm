@@ -173,5 +173,31 @@ suite =
                         , \_ -> Expect.equal True (List.any (\( group, _ ) -> group == "Build") enRows)
                         ]
                         ()
+            , test "touch help title and rows omit keyboard-only bindings" <|
+                \_ ->
+                    let
+                        fiRows =
+                            I18n.touchHelpRows Fi { free = True, technic = True, hasInventory = True }
+
+                        enRows =
+                            I18n.touchHelpRows En { free = True, technic = True, hasInventory = True }
+
+                        enKeys =
+                            List.concatMap Tuple.second enRows |> List.map Tuple.first
+
+                        fiKeys =
+                            List.concatMap Tuple.second fiRows |> List.map Tuple.first
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal "Kosketusohjaimet" (I18n.touchHelpDialogTitle Fi)
+                        , \_ -> Expect.equal "Touch controls" (I18n.touchHelpDialogTitle En)
+                        , \_ -> Expect.equal True (List.any (\( group, _ ) -> group == "Rakentaminen") fiRows)
+                        , \_ -> Expect.equal True (List.any (\( group, _ ) -> group == "Build") enRows)
+                        , \_ -> Expect.equal True (List.member "Double-tap a part" enKeys)
+                        , \_ -> Expect.equal True (List.member "Kaksoisnapauta osaa" fiKeys)
+                        , \_ -> Expect.equal False (List.member "Ctrl + Z" enKeys)
+                        , \_ -> Expect.equal False (List.member "Ctrl + Z" fiKeys)
+                        ]
+                        ()
             ]
         ]
