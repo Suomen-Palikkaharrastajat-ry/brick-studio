@@ -2638,6 +2638,22 @@ knownCatalogPart name =
             -- Tile 1 x 1 with Groove
             Just (makeTile 1 1 "3070b.dat")
 
+        "98138" ->
+            -- Tile 1 x 1 Round
+            Just (makeTile 1 1 "98138.dat")
+
+        "25269" ->
+            -- Tile 1 x 1 Round Quarter
+            Just (makeTile 1 1 "25269.dat")
+
+        "24246" ->
+            -- Tile 1 x 1 with Rounded End
+            Just (makeTile 1 1 "24246.dat")
+
+        "39739" ->
+            -- Tile 1 x 1 Heart
+            Just (makeTile 1 1 "39739.dat")
+
         "3069" ->
             Just (makeTile 2 1 "3069.dat")
 
@@ -2647,6 +2663,16 @@ knownCatalogPart name =
         "3069b" ->
             -- Tile 1 x 2 with Groove
             Just (makeTile 2 1 "3069b.dat")
+
+        "2412" ->
+            Just (makeTile 2 1 "2412.dat")
+
+        "2412a" ->
+            Just (makeTile 2 1 "2412a.dat")
+
+        "2412b" ->
+            -- Tile 1 x 2 Grille with Groove
+            Just (makeTile 2 1 "2412b.dat")
 
         "3068" ->
             Just (makeTile 2 2 "3068.dat")

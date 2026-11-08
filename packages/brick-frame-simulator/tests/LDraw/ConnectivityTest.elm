@@ -1534,6 +1534,87 @@ studLatticeTests =
                     , \_ -> Expect.equal { x = 0, z = 0 } (offsetOf "87580.dat" rot90)
                     ]
                     ()
+        , test "studOffset for 1x1 tiles (98138, 25269, 24246, 39739) is { x = 10, z = 10 } across rotations" <|
+            \_ ->
+                let
+                    checkPart part =
+                        [ \_ -> Expect.equal { x = 10, z = 10 } (offsetOf part rot0)
+                        , \_ -> Expect.equal { x = 10, z = 10 } (offsetOf part rot90)
+                        , \_ -> Expect.equal { x = 10, z = 10 } (offsetOf part rot180)
+                        , \_ -> Expect.equal { x = 10, z = 10 } (offsetOf part rot270)
+                        ]
+                in
+                Expect.all
+                    (List.concatMap checkPart [ "98138.dat", "25269.dat", "24246.dat", "39739.dat" ])
+                    ()
+        , test "studOffset for 1x2 grille tile 2412b is { x = 0, z = 10 } at rot0 and { x = 10, z = 0 } at rot90" <|
+            \_ ->
+                Expect.all
+                    [ \_ -> Expect.equal { x = 0, z = 10 } (offsetOf "2412b.dat" rot0)
+                    , \_ -> Expect.equal { x = 10, z = 0 } (offsetOf "2412b.dat" rot90)
+                    ]
+                    ()
+        , test "snaps 1x2 grille tile 2412b and 1x1 round quarter tile 25269 onto 6x6 plate 3958" <|
+            \_ ->
+                let
+                    plate6x6 =
+                        Connectivity.extractPartConnectivity "3958.dat" noLines
+
+                    targetPoints =
+                        List.map
+                            (\p ->
+                                { placementId = 0
+                                , pointId = p.id
+                                , connType = p.connType
+                                , worldPosition = p.localPosition
+                                , worldNormal = p.normal
+                                , worldTangent = p.tangent
+                                }
+                            )
+                            plate6x6.connections
+
+                    tile1x2 =
+                        Connectivity.extractPartConnectivity "2412b.dat" noLines
+
+                    tile1x1 =
+                        Connectivity.extractPartConnectivity "25269.dat" noLines
+
+                    initialMatrix1x2 =
+                        Mat4.makeTranslate3 2 -8 12
+
+                    candidates1x2 =
+                        solveSnapCandidates 25.0 0 initialMatrix1x2 tile1x2.connections targetPoints
+
+                    initialMatrix1x1 =
+                        Mat4.makeTranslate3 12 -8 12
+
+                    candidates1x1 =
+                        solveSnapCandidates 25.0 0 initialMatrix1x1 tile1x1.connections targetPoints
+                in
+                case ( candidates1x2, candidates1x1 ) of
+                    ( first1x2 :: _, first1x1 :: _ ) ->
+                        let
+                            origin1x2 =
+                                Mat4.transform first1x2.snapMatrix (vec3 0 0 0)
+
+                            origin1x1 =
+                                Mat4.transform first1x1.snapMatrix (vec3 0 0 0)
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 0 (round (Vec3.getX origin1x2))
+                            , \_ -> Expect.equal -8 (round (Vec3.getY origin1x2))
+                            , \_ -> Expect.equal 10 (round (Vec3.getZ origin1x2))
+                            , \_ -> Expect.equal 10 (round (Vec3.getX origin1x1))
+                            , \_ -> Expect.equal -8 (round (Vec3.getY origin1x1))
+                            , \_ -> Expect.equal 10 (round (Vec3.getZ origin1x1))
+                            ]
+                            ()
+
+                    ( [], _ ) ->
+                        Expect.fail "expected snap candidate for 2412b.dat onto 3958.dat"
+
+                    ( _, [] ) ->
+                        Expect.fail "expected snap candidate for 25269.dat onto 3958.dat"
         , test "isUpright reports True for yaw rotations and False for tipped/inverted parts" <|
             \_ ->
                 let
