@@ -481,7 +481,7 @@ appPlaygroundTitle : Language -> String
 appPlaygroundTitle lang =
     case lang of
         Fi ->
-            "Palikkaleikkikenttä"
+            "Palikkaleikki"
 
         En ->
             "Brick Playground"
