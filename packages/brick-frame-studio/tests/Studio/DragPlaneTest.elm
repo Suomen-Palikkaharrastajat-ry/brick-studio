@@ -452,4 +452,133 @@ suite =
                     |> (\b -> [ Vec3.getX b.min, Vec3.getX b.max, Vec3.getZ b.min, Vec3.getZ b.max ])
                     |> List.map (\v -> toFloat (round v))
                     |> Expect.equal [ 90, 110, -20, 20 ]
+        , describe "dwellElevationStep"
+            [ test "ground brick over empty floor returns Nothing" <|
+                \_ ->
+                    let
+                        groundBrick =
+                            at 0 -24 0 brick
+
+                        -- brick has min.y = -28, max.y = 0
+                    in
+                    DragPlane.dwellElevationStep
+                        { movedFootprint = groundBrick
+                        , originalFootprint = groundBrick
+                        , otherBoxes = []
+                        , currentElevationOffset = 0.0
+                        , cameraElevation = degrees 45
+                        }
+                        |> Expect.equal Nothing
+            , test "ground brick over two-brick stack climbs level by level to the top when looking from above" <|
+                \_ ->
+                    let
+                        groundBrick =
+                            at 0 -24 0 brick
+
+                        -- Stack of two bricks at x = 0: brick 1 top at -28, brick 2 top at -52
+                        stackBrick1 =
+                            at 0 -24 0 brick
+
+                        stackBrick2 =
+                            at 0 -52 0 brick
+
+                        others =
+                            [ stackBrick1, stackBrick2 ]
+
+                        step1 =
+                            DragPlane.dwellElevationStep
+                                { movedFootprint = groundBrick
+                                , originalFootprint = groundBrick
+                                , otherBoxes = others
+                                , currentElevationOffset = 0.0
+                                , cameraElevation = degrees 45
+                                }
+
+                        step2 =
+                            DragPlane.dwellElevationStep
+                                { movedFootprint = groundBrick
+                                , originalFootprint = groundBrick
+                                , otherBoxes = others
+                                , currentElevationOffset = -28.0
+                                , cameraElevation = degrees 45
+                                }
+
+                        step3 =
+                            DragPlane.dwellElevationStep
+                                { movedFootprint = groundBrick
+                                , originalFootprint = groundBrick
+                                , otherBoxes = others
+                                , currentElevationOffset = -56.0
+                                , cameraElevation = degrees 45
+                                }
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal (Just -28.0) step1
+                        , \_ -> Expect.equal (Just -56.0) step2
+                        , \_ -> Expect.equal Nothing step3
+                        ]
+                        ()
+            , test "elevated brick over empty floor descends step by step to the floor when looking from above" <|
+                \_ ->
+                    let
+                        elevatedBrick =
+                            at 0 -72 0 brick
+
+                        -- elevatedBrick has min.y = -76, max.y = -48
+                        step1 =
+                            DragPlane.dwellElevationStep
+                                { movedFootprint = elevatedBrick
+                                , originalFootprint = elevatedBrick
+                                , otherBoxes = []
+                                , currentElevationOffset = 0.0
+                                , cameraElevation = degrees 45
+                                }
+
+                        step2 =
+                            DragPlane.dwellElevationStep
+                                { movedFootprint = elevatedBrick
+                                , originalFootprint = elevatedBrick
+                                , otherBoxes = []
+                                , currentElevationOffset = 28.0
+                                , cameraElevation = degrees 45
+                                }
+
+                        step3 =
+                            DragPlane.dwellElevationStep
+                                { movedFootprint = elevatedBrick
+                                , originalFootprint = elevatedBrick
+                                , otherBoxes = []
+                                , currentElevationOffset = 48.0
+                                , cameraElevation = degrees 45
+                                }
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal (Just 28.0) step1
+                        , \_ -> Expect.equal (Just 48.0) step2
+                        , \_ -> Expect.equal Nothing step3
+                        ]
+                        ()
+            , test "looking from below, a brick inside a stack moves downwards towards the underside" <|
+                \_ ->
+                    let
+                        floatingStack =
+                            [ at 0 -76 0 brick ]
+
+                        -- floatingStack has min.y = -80, max.y = -52
+                        draggedBrick =
+                            at 0 -76 0 brick
+
+                        stepDown =
+                            DragPlane.dwellElevationStep
+                                { movedFootprint = draggedBrick
+                                , originalFootprint = draggedBrick
+                                , otherBoxes = floatingStack
+                                , currentElevationOffset = 0.0
+                                , cameraElevation = degrees -45
+                                }
+                    in
+                    -- Target bottom of floatingStack is max.y = -52.
+                    -- draggedBrick min.y is -80, so targetOffset = -52 - (-80) = 28.0 (moves downwards to snap top of dragged brick under -52).
+                    Expect.equal (Just 28.0) stepDown
+            ]
         ]

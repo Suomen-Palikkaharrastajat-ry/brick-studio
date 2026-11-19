@@ -175,6 +175,9 @@ type alias Drag =
     -- the selection before the press. Released without moving, the press toggles
     -- the part in that selection (Shift + click), as it does without a drag.
     , shiftToggle : Maybe ( Int, Set Int )
+    , dwellTime : Float
+    , lastDwellPoint : ( Float, Float )
+    , lastDwellStepTime : Float
     }
 
 
@@ -308,6 +311,7 @@ type alias Model =
 -}
 type Msg
     = ViewportMsg Viewport.Msg
+    | DragTick Float
     | Select (Set Int)
     | SelectOnly Int
     | ToggleSelect Int
@@ -2161,6 +2165,67 @@ updateInner msg model =
             , emittedEvents
             )
 
+        DragTick dt ->
+            case model.drag of
+                Just drag ->
+                    case drag.kind of
+                        PlaneDrag grab ->
+                            let
+                                plane =
+                                    Maybe.withDefault (DragPlane.choose model.viewport.camera grab) drag.plane
+                            in
+                            if plane.mode == DragPlane.Horizontal then
+                                let
+                                    nextDwellTime =
+                                        drag.dwellTime + dt
+
+                                    dwellThreshold =
+                                        700.0
+
+                                    stepInterval =
+                                        350.0
+
+                                    shouldStep =
+                                        if nextDwellTime < dwellThreshold then
+                                            False
+
+                                        else if drag.lastDwellStepTime == 0.0 then
+                                            True
+
+                                        else
+                                            (nextDwellTime - drag.lastDwellStepTime) >= stepInterval
+                                in
+                                if shouldStep then
+                                    case dwellStep drag grab model of
+                                        Just newOffset ->
+                                            let
+                                                updatedDrag =
+                                                    { drag
+                                                        | dwellTime = nextDwellTime
+                                                        , lastDwellStepTime = nextDwellTime
+                                                        , elevationOffset = newOffset
+                                                    }
+
+                                                ( movedModel, moveCmd, moveEvents ) =
+                                                    moveDrag updatedDrag updatedDrag.lastPoint { model | drag = Just updatedDrag }
+                                            in
+                                            ( movedModel, moveCmd, moveEvents )
+
+                                        Nothing ->
+                                            ( { model | drag = Just { drag | dwellTime = nextDwellTime } }, Cmd.none, [] )
+
+                                else
+                                    ( { model | drag = Just { drag | dwellTime = nextDwellTime } }, Cmd.none, [] )
+
+                            else
+                                ( model, Cmd.none, [] )
+
+                        _ ->
+                            ( model, Cmd.none, [] )
+
+                Nothing ->
+                    ( model, Cmd.none, [] )
+
         Select newSelection ->
             ( { model | selection = newSelection }
             , Cmd.none
@@ -2887,8 +2952,28 @@ handleViewportEvent event ( model, cmds, outEvents ) =
             case model.drag of
                 Just drag ->
                     let
+                        dx =
+                            x - Tuple.first drag.lastDwellPoint
+
+                        dy =
+                            y - Tuple.second drag.lastDwellPoint
+
+                        movedDist =
+                            sqrt (dx * dx + dy * dy)
+
+                        dragWithDwell =
+                            if movedDist > 3.0 then
+                                { drag
+                                    | dwellTime = 0.0
+                                    , lastDwellPoint = ( x, y )
+                                    , lastDwellStepTime = 0.0
+                                }
+
+                            else
+                                drag
+
                         ( movedModel, moveCmd, moveEvents ) =
-                            moveDrag drag ( x, y ) model
+                            moveDrag dragWithDwell ( x, y ) model
                     in
                     ( movedModel, cmds ++ [ moveCmd ], outEvents ++ moveEvents )
 
@@ -3000,6 +3085,9 @@ startDrag point model =
             , modeAnchor = point
             , baseElevation = 0.0
             , shiftToggle = Nothing
+            , dwellTime = 0.0
+            , lastDwellPoint = point
+            , lastDwellStepTime = 0.0
             }
 
         arcDrag =
@@ -3058,6 +3146,9 @@ grabPart ( x, y ) model =
                             , modeAnchor = ( x, y )
                             , baseElevation = 0.0
                             , shiftToggle = Nothing
+                            , dwellTime = 0.0
+                            , lastDwellPoint = ( x, y )
+                            , lastDwellStepTime = 0.0
                             }
                 )
 
@@ -3161,6 +3252,107 @@ moveLinearDrag drag handle point model =
             , drag = Just { drag | amount = amount, lastPoint = point }
             , activeSnap = Nothing
         }
+
+
+dwellStep : Drag -> Vec3 -> Model -> Maybe Float
+dwellStep drag grab model =
+    let
+        plane =
+            Maybe.withDefault (DragPlane.choose model.viewport.camera grab) drag.plane
+
+        ( x, y ) =
+            drag.lastPoint
+
+        cursor =
+            Pick.screenRay model.viewport.camera model.viewport.width model.viewport.height x y
+                |> Maybe.andThen (DragPlane.intersect plane)
+
+        originalPlacements =
+            drag.ids
+                |> List.filterMap
+                    (\id ->
+                        case Document.getPlacement id drag.original of
+                            Just p ->
+                                Just p
+
+                            Nothing ->
+                                Document.getPlacement id model.document
+                    )
+    in
+    case ( cursor, originalPlacements ) of
+        ( Just cursorPoint, leadP :: _ ) ->
+            let
+                resolveLines =
+                    resolvedLines model
+
+                leadConn =
+                    Connectivity.extractPartConnectivity leadP.part resolveLines
+
+                placementBox p =
+                    DragPlane.worldBox p.matrix (partLocalBox resolveLines p.part model)
+
+                footprint =
+                    originalPlacements
+                        |> List.concatMap
+                            (\p ->
+                                let
+                                    b =
+                                        placementBox p
+                                in
+                                [ b.min, b.max ]
+                            )
+                        |> DragPlane.unionBox
+                        |> Maybe.withDefault (placementBox leadP)
+
+                otherBoxes =
+                    Document.mainPlacements drag.original
+                        |> List.filter (\p -> not (List.member p.id drag.ids))
+                        |> List.map placementBox
+
+                origPos =
+                    Transform.position leadP.matrix
+
+                targetPos =
+                    DragPlane.targetPosition
+                        { plane = plane
+                        , cursor = cursorPoint
+                        , original = origPos
+                        , gridStep = dragGridStep model
+                        , verticalStep = dragGridStep model
+                        , offset = Connectivity.studOffset leadConn leadP.matrix
+                        , elevationOffset = drag.elevationOffset
+                        , footprint = footprint
+                        , others = otherBoxes
+                        , keepHeight = not model.dragSettles && plane.mode == DragPlane.Horizontal
+                        }
+
+                ox =
+                    Vec3.getX origPos
+
+                oz =
+                    Vec3.getZ origPos
+
+                currX =
+                    Vec3.getX targetPos
+
+                currZ =
+                    Vec3.getZ targetPos
+
+                movedFootprint =
+                    { min = Vec3.add footprint.min (vec3 (currX - ox) 0 (currZ - oz))
+                    , max = Vec3.add footprint.max (vec3 (currX - ox) 0 (currZ - oz))
+                    }
+            in
+            DragPlane.dwellElevationStep
+                { movedFootprint = movedFootprint
+                , originalFootprint = footprint
+                , otherBoxes = otherBoxes
+                , currentElevationOffset = drag.elevationOffset
+                , cameraElevation = model.viewport.camera.elevation
+                }
+
+        _ ->
+            Nothing
 
 
 movePlaneDrag : Drag -> Vec3 -> ( Float, Float ) -> Model -> ( Model, Cmd Msg, List Event )
@@ -3663,6 +3855,12 @@ subscriptions model =
     Sub.batch
         [ Sub.map ViewportMsg (Viewport.subscriptions model.viewport)
         , Browser.Events.onKeyUp (Decode.field "key" Decode.string |> Decode.map KeyUp)
+        , case model.drag of
+            Just _ ->
+                Browser.Events.onAnimationFrameDelta DragTick
+
+            Nothing ->
+                Sub.none
         ]
 
 

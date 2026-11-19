@@ -58,7 +58,7 @@ specCrown24T =
 
 specWorm : GearSpec
 specWorm =
-    { partFile = "4716.dat", teeth = 1, pitchRadius = 12.0, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
+    { partFile = "4716.dat", teeth = 1, pitchRadius = 10.0, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
 
 
 spec12T : GearSpec
@@ -417,10 +417,10 @@ suite =
                     Dict.get 0 graph.connections
                         |> Maybe.withDefault []
                         |> Expect.equal []
-            , test "worm drives 12T when axes are perpendicular and centres are 24 LDU apart" <|
+            , test "worm drives 12T when axes are perpendicular and centres are 22 LDU apart" <|
                 \_ ->
                     -- Mirrors wheeler-plain.ldr: worm axis along X (identity Z→X via 90° Y rotation),
-                    -- 12T axis along Z (identity). Centre distance = 24 LDU along Y.
+                    -- 12T axis along Z (identity). Centre distance = 22 LDU along Y.
                     let
                         worm =
                             { id = 0
@@ -434,12 +434,41 @@ suite =
                             { id = 1
                             , spec = spec12T
                             , color = 16
-                            , worldPosition = vec3 0 24 0
+                            , worldPosition = vec3 0 22 0
                             , worldMatrix = Mat4.identity
                             }
 
                         graph =
                             buildGearGraph [ worm, gear12T ]
+                    in
+                    Dict.get 0 graph.connections
+                        |> Maybe.withDefault []
+                        |> List.member 1
+                        |> Expect.equal True
+            , test "worm drives 24T at standard 2-stud (40 LDU) grid distance" <|
+                \_ ->
+                    let
+                        spec24T =
+                            { partFile = "3648.dat", teeth = 24, pitchRadius = 30.0, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
+
+                        worm =
+                            { id = 0
+                            , spec = specWorm
+                            , color = 16
+                            , worldPosition = vec3 0 0 0
+                            , worldMatrix = Mat4.makeRotate (pi / 2) (vec3 0 1 0)
+                            }
+
+                        gear24T =
+                            { id = 1
+                            , spec = spec24T
+                            , color = 16
+                            , worldPosition = vec3 0 40 0
+                            , worldMatrix = Mat4.identity
+                            }
+
+                        graph =
+                            buildGearGraph [ worm, gear24T ]
                     in
                     Dict.get 0 graph.connections
                         |> Maybe.withDefault []
@@ -460,7 +489,7 @@ suite =
                             { id = 1
                             , spec = spec12T
                             , color = 16
-                            , worldPosition = vec3 0 24 0
+                            , worldPosition = vec3 0 22 0
                             , worldMatrix = Mat4.identity
                             }
 
@@ -488,7 +517,7 @@ suite =
                             worm 0 (vec3 0 0 0) (Mat4.makeRotate (pi / 2) (vec3 0 1 0))
 
                         wormZ =
-                            worm 1 (vec3 0 24 0) Mat4.identity
+                            worm 1 (vec3 0 20 0) Mat4.identity
 
                         graphFor orderedWorms =
                             buildGearGraph orderedWorms
@@ -599,7 +628,7 @@ suite =
                 \_ ->
                     expectSameGraph
                         [ gearInst 0 specWorm (Mat4.makeRotate (pi / 2) (vec3 0 1 0)) (vec3 0 0 0)
-                        , gearInst 1 spec12T Mat4.identity (vec3 0 24 0)
+                        , gearInst 1 spec12T Mat4.identity (vec3 0 22 0)
                         ]
             , test "meshing pair straddling a spatial-hash cell boundary" <|
                 \_ ->

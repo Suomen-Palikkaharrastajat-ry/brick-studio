@@ -220,6 +220,44 @@ canConnect a b =
             False
 
 
+isAxleMale : ConnectionType -> Bool
+isAxleMale conn =
+    case conn of
+        TechnicAxleMale _ ->
+            True
+
+        _ ->
+            False
+
+
+isAxleFemale : ConnectionType -> Bool
+isAxleFemale conn =
+    case conn of
+        TechnicAxleFemale _ ->
+            True
+
+        _ ->
+            False
+
+
+{-| Priority bias for connection candidate evaluation.
+Negative bias favors higher priority matches (e.g. Stud-AntiStud, or AxleMale-AxleFemale over AxleMale-PinFemale).
+-}
+connectionPairBias : ConnectionType -> ConnectionType -> Float
+connectionPairBias dragged target =
+    if dragged == AntiStud && target == Stud then
+        -0.5
+
+    else if
+        (isAxleMale dragged && isAxleFemale target)
+            || (isAxleFemale dragged && isAxleMale target)
+    then
+        -3.0
+
+    else
+        0.0
+
+
 
 -- ── Vector & Coordinate Math ──────────────────────────────────────────────────
 
@@ -508,11 +546,7 @@ solveSnapCandidatesWithPriority priority maxDist rotationIndex currentMatrix dra
                         else
                             let
                                 bias =
-                                    if draggedLocal.connType == AntiStud && targetWorld.connType == Stud then
-                                        -0.5
-
-                                    else
-                                        0.0
+                                    connectionPairBias draggedLocal.connType targetWorld.connType
 
                                 guide =
                                     makeGuide draggedLocal.connType targetWorld.worldPosition targetWorld.worldNormal False
@@ -692,11 +726,7 @@ solveSnapWithHysteresisAndPredicateWithPriority priority isValid enterDist relea
                     if isValid candidate then
                         let
                             bias =
-                                if active.draggedPoint.connType == AntiStud && active.targetPoint.connType == Stud then
-                                    -0.5
-
-                                else
-                                    0.0
+                                connectionPairBias active.draggedPoint.connType active.targetPoint.connType
 
                             activeContactCount =
                                 alignedContactCount snapMat active.targetPlacementId draggedPoints targetPoints
@@ -728,11 +758,7 @@ solveSnapWithHysteresisAndPredicateWithPriority priority isValid enterDist relea
                                         Vec3.dot altDraggedWorldNormal altDesiredNormal
 
                                     altBias =
-                                        if alternative.draggedPoint.connType == AntiStud && alternative.targetPoint.connType == Stud then
-                                            -0.5
-
-                                        else
-                                            0.0
+                                        connectionPairBias alternative.draggedPoint.connType alternative.targetPoint.connType
 
                                     altContactCount =
                                         alignedContactCount alternative.snapMatrix alternative.targetPlacementId draggedPoints targetPoints
@@ -2082,34 +2108,19 @@ knownCatalogPart name =
                     makeGear 50.0 20.0 "3649.dat"
 
                 extraHoles =
-                    [ { id = 2
-                      , connType = TechnicAxleFemale { length = 20.0 }
-                      , localPosition = vec3 0 20 0
-                      , normal = vec3 0 0 1
-                      , tangent = vec3 1 0 0
-                      }
-                    , { id = 3
-                      , connType = TechnicAxleFemale { length = 20.0 }
-                      , localPosition = vec3 0 -20 0
-                      , normal = vec3 0 0 1
-                      , tangent = vec3 1 0 0
-                      }
-                    , { id = 4
-                      , connType = TechnicAxleFemale { length = 20.0 }
-                      , localPosition = vec3 20 0 0
-                      , normal = vec3 0 0 1
-                      , tangent = vec3 1 0 0
-                      }
-                    , { id = 5
-                      , connType = TechnicAxleFemale { length = 20.0 }
-                      , localPosition = vec3 -20 0 0
-                      , normal = vec3 0 0 1
-                      , tangent = vec3 1 0 0
-                      }
+                    [ ( 0, 20 )
+                    , ( 0, -20 )
+                    , ( 20, 0 )
+                    , ( -20, 0 )
                     ]
+                        |> List.indexedMap
+                            (\i ( x, y ) ->
+                                makeAxleHolePoints (10 + i * 3) 10.0 (vec3 x y 0)
+                            )
+                        |> List.concat
 
                 pinHoles =
-                    makeGearPinHoles 10
+                    makeGearPinHoles 30
                         [ ( 10, 10 )
                         , ( -10, 10 )
                         , ( -10, -10 )
@@ -2174,10 +2185,10 @@ knownCatalogPart name =
                 }
 
         "4716" ->
-            Just (makeGear 12.0 40.0 "4716.dat")
+            Just (makeGear 10.0 40.0 "4716.dat")
 
         "32905" ->
-            Just (makeGear 12.0 40.0 "32905.dat")
+            Just (makeGear 10.0 40.0 "32905.dat")
 
         "3704" ->
             Just (makeAxle 2 "3704.dat")
@@ -2248,6 +2259,9 @@ knownCatalogPart name =
 
         "3713" ->
             Just (makeGear 9.0 20.0 "3713.dat")
+
+        "6590" ->
+            Just (makeGear 9.0 20.0 "6590.dat")
 
         "4265c" ->
             Just (makeGear 9.0 10.0 "4265c.dat")
@@ -3119,8 +3133,34 @@ makeAxle studs partName =
     }
 
 
+{-| Procedurally generate connection points for a female axle hole with given center, half-thickness, and base ID.
+Generates center (dz=0), front entrance (dz=halfThick), and back entrance (dz=-halfThick) points.
+-}
+makeAxleHolePoints : Int -> Float -> Vec3 -> List ConnectionPoint
+makeAxleHolePoints startId halfThick center =
+    [ { id = startId
+      , connType = TechnicAxleFemale { length = halfThick * 2.0 }
+      , localPosition = center
+      , normal = vec3 0 0 1
+      , tangent = vec3 1 0 0
+      }
+    , { id = startId + 1
+      , connType = TechnicAxleFemale { length = halfThick * 2.0 }
+      , localPosition = Vec3.add center (vec3 0 0 halfThick)
+      , normal = vec3 0 0 1
+      , tangent = vec3 1 0 0
+      }
+    , { id = startId + 2
+      , connType = TechnicAxleFemale { length = halfThick * 2.0 }
+      , localPosition = Vec3.add center (vec3 0 0 -halfThick)
+      , normal = vec3 0 0 -1
+      , tangent = vec3 1 0 0
+      }
+    ]
+
+
 {-| Procedurally generate connectivity descriptor for a Technic gear with given pitch radius and thickness.
-Center axle hole at (0, 0, 0).
+Center axle hole at (0, 0, 0) with center, front entrance, and back entrance points.
 -}
 makeGear : Float -> Float -> String -> PartConnectivity
 makeGear radius thickness partName =
@@ -3129,13 +3169,7 @@ makeGear radius thickness partName =
             thickness / 2.0
 
         connections =
-            [ { id = 1
-              , connType = TechnicAxleFemale { length = thickness }
-              , localPosition = vec3 0 0 0
-              , normal = vec3 0 0 1
-              , tangent = vec3 1 0 0
-              }
-            ]
+            makeAxleHolePoints 1 halfThick (vec3 0 0 0)
 
         boundingBoxes =
             if radius <= 8.0 || halfThick <= 5.0 then

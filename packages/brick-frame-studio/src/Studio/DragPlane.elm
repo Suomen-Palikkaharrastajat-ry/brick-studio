@@ -5,6 +5,7 @@ module Studio.DragPlane exposing
     , WorkingPlane
     , boxesOverlap
     , choose
+    , dwellElevationStep
     , footprintOverlaps
     , freeSpot
     , freeSpotPlacement
@@ -347,6 +348,166 @@ supportTop footprint others =
         |> List.filter (footprintOverlaps footprint)
         |> List.map (\b -> Vec3.getY b.min)
         |> List.foldl min 0
+
+
+{-| Calculate the next elevation offset for a dwelled (idle) horizontal body drag.
+When looking from above (`cameraElevation >= 0`), hovering over an obstacle or
+stack steps upward towards `supportTop`, and hovering over empty space steps
+downward towards the floor.
+When looking from below (`cameraElevation < 0`), hovering steps downward towards
+the underside / bottom of the stack to snap underneath what the user sees.
+-}
+dwellElevationStep :
+    { movedFootprint : Box
+    , originalFootprint : Box
+    , otherBoxes : List Box
+    , currentElevationOffset : Float
+    , cameraElevation : Float
+    }
+    -> Maybe Float
+dwellElevationStep { movedFootprint, originalFootprint, otherBoxes, currentElevationOffset, cameraElevation } =
+    let
+        footprintMinY =
+            Vec3.getY originalFootprint.min
+
+        footprintMaxY =
+            Vec3.getY originalFootprint.max
+
+        overlapping =
+            List.filter (footprintOverlaps movedFootprint) otherBoxes
+
+        partHeight =
+            max 8.0 (footprintMaxY - footprintMinY)
+    in
+    if cameraElevation >= 0.0 then
+        -- Looking from above: reference is footprint bottom resting on top surfaces
+        let
+            currentBottom =
+                footprintMaxY + currentElevationOffset
+
+            supportTopLevel =
+                supportTop movedFootprint otherBoxes
+
+            allTops =
+                0.0 :: List.map (\b -> Vec3.getY b.min) overlapping
+        in
+        if supportTopLevel < currentBottom - 0.5 then
+            -- Lower than support surface -> RISE (more negative Y)
+            let
+                aboveTops =
+                    List.filter (\top -> top < currentBottom - 0.5) allTops
+
+                nextTop =
+                    case List.maximum aboveTops of
+                        Just top ->
+                            top
+
+                        Nothing ->
+                            supportTopLevel
+
+                targetOffset =
+                    nextTop - footprintMaxY
+            in
+            if abs (targetOffset - currentElevationOffset) > 0.1 then
+                Just targetOffset
+
+            else
+                Nothing
+
+        else if supportTopLevel > currentBottom + 0.5 then
+            -- Higher than support surface -> DESCEND (less negative Y)
+            let
+                belowTops =
+                    List.filter (\top -> top > currentBottom + 0.5 && top <= supportTopLevel) allTops
+
+                nextTop =
+                    case List.minimum belowTops of
+                        Just top ->
+                            if (top - currentBottom) > (partHeight + 0.5) then
+                                currentBottom + partHeight
+
+                            else
+                                top
+
+                        Nothing ->
+                            min supportTopLevel (currentBottom + partHeight)
+
+                targetOffset =
+                    nextTop - footprintMaxY
+            in
+            if abs (targetOffset - currentElevationOffset) > 0.1 then
+                Just targetOffset
+
+            else
+                Nothing
+
+        else
+            Nothing
+
+    else
+        -- Looking from below: reference is footprint top snapping to underside surfaces
+        let
+            currentTop =
+                footprintMinY + currentElevationOffset
+
+            allBottoms =
+                0.0 :: List.map (\b -> Vec3.getY b.max) overlapping
+
+            supportBottomLevel =
+                List.foldl max 0.0 (List.map (\b -> Vec3.getY b.max) overlapping)
+        in
+        if supportBottomLevel > currentTop + 0.5 then
+            -- Higher than bottom surface -> MOVE DOWNWARDS (towards underside / bottom, more positive Y)
+            let
+                belowBottoms =
+                    List.filter (\b -> b > currentTop + 0.5) allBottoms
+
+                nextBottom =
+                    case List.minimum belowBottoms of
+                        Just b ->
+                            b
+
+                        Nothing ->
+                            supportBottomLevel
+
+                targetOffset =
+                    nextBottom - footprintMinY
+            in
+            if abs (targetOffset - currentElevationOffset) > 0.1 then
+                Just targetOffset
+
+            else
+                Nothing
+
+        else if supportBottomLevel < currentTop - 0.5 then
+            -- Lower than bottom surface -> MOVE UPWARDS towards underside
+            let
+                aboveBottoms =
+                    List.filter (\b -> b < currentTop - 0.5 && b >= supportBottomLevel) allBottoms
+
+                nextBottom =
+                    case List.maximum aboveBottoms of
+                        Just b ->
+                            if (currentTop - b) > (partHeight + 0.5) then
+                                currentTop - partHeight
+
+                            else
+                                b
+
+                        Nothing ->
+                            max supportBottomLevel (currentTop - partHeight)
+
+                targetOffset =
+                    nextBottom - footprintMinY
+            in
+            if abs (targetOffset - currentElevationOffset) > 0.1 then
+                Just targetOffset
+
+            else
+                Nothing
+
+        else
+            Nothing
 
 
 {-| Everything `targetPosition` needs.

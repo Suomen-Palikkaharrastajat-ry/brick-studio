@@ -1040,9 +1040,13 @@ extractionTests =
                         makeGear 20.0 20.0 "4019.dat"
                 in
                 Expect.all
-                    [ \_ -> Expect.equal 1 (List.length gear8.connections)
+                    [ \_ -> Expect.equal 3 (List.length gear8.connections)
                     , \_ ->
-                        case gear8.connections of
+                        let
+                            center =
+                                List.filter (\c -> c.id == 1) gear8.connections
+                        in
+                        case center of
                             [ c ] ->
                                 Expect.all
                                     [ \_ -> Expect.equal (TechnicAxleFemale { length = 20.0 }) c.connType
@@ -1052,7 +1056,7 @@ extractionTests =
                                     ()
 
                             _ ->
-                                Expect.fail "Expected 1 connection point for gear"
+                                Expect.fail "Expected center connection point for gear"
                     , \_ ->
                         Expect.equal
                             [ { min = vec3 -8.0 -8.0 -10.0, max = vec3 8.0 8.0 10.0 }
@@ -1097,8 +1101,8 @@ extractionTests =
                                     gear40.connections
                         in
                         Expect.all
-                            [ \_ -> Expect.equal 41 (List.length gear40.connections)
-                            , \_ -> Expect.equal 5 (List.length axleHoles)
+                            [ \_ -> Expect.equal 51 (List.length gear40.connections)
+                            , \_ -> Expect.equal 15 (List.length axleHoles)
                             , \_ -> Expect.equal 36 (List.length pinHoles)
                             ]
                             ()
@@ -1135,8 +1139,8 @@ extractionTests =
                                     gear24.connections
                         in
                         Expect.all
-                            [ \_ -> Expect.equal 13 (List.length gear24.connections)
-                            , \_ -> Expect.equal 1 (List.length axleHoles)
+                            [ \_ -> Expect.equal 15 (List.length gear24.connections)
+                            , \_ -> Expect.equal 3 (List.length axleHoles)
                             , \_ -> Expect.equal 12 (List.length pinHoles)
                             ]
                             ()

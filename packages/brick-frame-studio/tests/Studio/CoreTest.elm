@@ -232,6 +232,9 @@ suite =
                                     , modeAnchor = ( 0, 0 )
                                     , baseElevation = 0
                                     , shiftToggle = Nothing
+                                    , dwellTime = 0.0
+                                    , lastDwellPoint = ( 0, 0 )
+                                    , lastDwellStepTime = 0.0
                                     }
                         }
 
@@ -699,6 +702,9 @@ gearGrabbed id model =
                 , modeAnchor = ( 400, 300 )
                 , baseElevation = 0
                 , shiftToggle = Nothing
+                , dwellTime = 0.0
+                , lastDwellPoint = ( 400, 300 )
+                , lastDwellStepTime = 0.0
                 }
     }
 
@@ -1409,6 +1415,9 @@ grabLead lead model =
                 , modeAnchor = ( 400, 300 )
                 , baseElevation = 0
                 , shiftToggle = Nothing
+                , dwellTime = 0.0
+                , lastDwellPoint = ( 400, 300 )
+                , lastDwellStepTime = 0.0
                 }
     }
 
@@ -1498,6 +1507,9 @@ draggingModel model1 =
                 , modeAnchor = ( 0, 0 )
                 , baseElevation = 0
                 , shiftToggle = Nothing
+                , dwellTime = 0.0
+                , lastDwellPoint = ( 0, 0 )
+                , lastDwellStepTime = 0.0
                 }
     }
 
@@ -1958,6 +1970,89 @@ restingSuite =
                     |> (\( m, _, _ ) -> firstPosition m)
                     |> Maybe.map (\p -> toFloat (round (Vec3.getY p)))
                     |> Expect.equal (Just -48)
+        , test "dwelling over a stack raises the brick step-by-step to the top" <|
+            \_ ->
+                let
+                    -- lead at 0, a two-brick column at x = 100
+                    model =
+                        grabbedAt [ vec3 0 -24 0, vec3 100 -24 0, vec3 100 -52 0 ]
+
+                    -- Drag to x = 100 without dwell
+                    ( moved, _, _ ) =
+                        moveTo (screenOf model (vec3 100 0 0)) model
+
+                    heightOf m =
+                        firstPosition m |> Maybe.map (\p -> toFloat (round (Vec3.getY p)))
+
+                    -- Height before dwell: kept at ground level (-24)
+                    heightBeforeDwell =
+                        heightOf moved
+
+                    -- Dwell 800ms: rises to first support level (-52)
+                    ( ticked1, _, _ ) =
+                        Core.update (Core.DragTick 800.0) moved
+
+                    heightAfterStep1 =
+                        heightOf ticked1
+
+                    -- Dwell another 400ms: rises to top of stack (-76)
+                    ( ticked2, _, _ ) =
+                        Core.update (Core.DragTick 400.0) ticked1
+
+                    heightAfterStep2 =
+                        heightOf ticked2
+                in
+                Expect.all
+                    [ \_ -> Expect.equal (Just -24) heightBeforeDwell
+                    , \_ -> Expect.equal (Just -48) heightAfterStep1
+                    , \_ -> Expect.equal (Just -76) heightAfterStep2
+                    ]
+                    ()
+        , test "dwelling over empty space lowers a stacked brick step-by-step to the floor" <|
+            \_ ->
+                let
+                    -- lead at top of stack (Y = -76), column at x = 0
+                    model =
+                        grabbedAt [ vec3 0 -76 0, vec3 0 -24 0, vec3 0 -52 0 ]
+
+                    -- Slide off the column to x = 100 (empty floor)
+                    ( moved, _, _ ) =
+                        moveTo (screenOf model (vec3 100 0 0)) model
+
+                    heightOf m =
+                        firstPosition m |> Maybe.map (\p -> toFloat (round (Vec3.getY p)))
+
+                    heightBeforeDwell =
+                        heightOf moved
+
+                    -- Dwell 800ms: steps down by part height (24 LDU) to -52
+                    ( ticked1, _, _ ) =
+                        Core.update (Core.DragTick 800.0) moved
+
+                    heightAfterStep1 =
+                        heightOf ticked1
+
+                    -- Dwell another 400ms: steps down by part height (24 LDU) to -28
+                    ( ticked2, _, _ ) =
+                        Core.update (Core.DragTick 400.0) ticked1
+
+                    heightAfterStep2 =
+                        heightOf ticked2
+
+                    -- Dwell another 400ms: steps down to floor (-24)
+                    ( ticked3, _, _ ) =
+                        Core.update (Core.DragTick 400.0) ticked2
+
+                    heightAfterStep3 =
+                        heightOf ticked3
+                in
+                Expect.all
+                    [ \_ -> Expect.equal (Just -76) heightBeforeDwell
+                    , \_ -> Expect.equal (Just -52) heightAfterStep1
+                    , \_ -> Expect.equal (Just -28) heightAfterStep2
+                    , \_ -> Expect.equal (Just -24) heightAfterStep3
+                    ]
+                    ()
         ]
 
 
@@ -2218,6 +2313,9 @@ grabPlacementSnapping placementId lead model =
                 , modeAnchor = ( 400, 300 )
                 , baseElevation = 0
                 , shiftToggle = Nothing
+                , dwellTime = 0.0
+                , lastDwellPoint = ( 400, 300 )
+                , lastDwellStepTime = 0.0
                 }
     }
 

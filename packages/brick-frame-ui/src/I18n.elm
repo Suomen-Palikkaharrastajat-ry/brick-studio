@@ -2672,6 +2672,8 @@ touchHelpRows lang config =
                 ++ (if config.technic then
                         [ ( "Mekanismi"
                           , [ ( "Käynnistä / pysäytä (yläpalkki)", "Käynnistä tai pysäytä mekanismi (muokkaus pysäyttää ja kelaa alkuun)" )
+                            , ( "Pyörimissuunta (yläpalkki)", "Käännä moottorin pyörimissuunta (⟳ / ⟲)" )
+                            , ( "Moottorin valinta (yläpalkki)", "Valitse vetävä ratas tai automaattinen tunnistus" )
                             , ( "Rattaat kytkeytyvät", "Ratas joka kohtaa toisen kääntää akseliaan niin että hampaat kytkeytyvät" )
                             , ( "Rataspilleri", "Kun yksi ratas on valittuna, kertoo miten se kytkeytyy lähimpään rattaaseen" )
                             ]
@@ -2741,6 +2743,8 @@ touchHelpRows lang config =
                 ++ (if config.technic then
                         [ ( "Machine"
                           , [ ( "Play / pause (top bar)", "Play or pause the machine (an edit stops it and rewinds)" )
+                            , ( "Direction (top bar)", "Toggle motor rotation direction (⟳ / ⟲)" )
+                            , ( "Motor selector (top bar)", "Select driving gear or use auto-detection" )
                             , ( "Gears turn to mesh", "A gear that meets another turns its axle line so the teeth interlock" )
                             , ( "Gear pill", "With one gear selected, says how it meets its nearest gear" )
                             ]
@@ -2829,6 +2833,7 @@ shortcutsHelpRows lang config =
                 ++ (if config.technic then
                         [ ( "Mekanismi"
                           , [ ( "Välilyönti", "Käynnistä / pysäytä mekanismi (muokkaus pysäyttää ja kelaa alkuun)" )
+                            , ( "R", "Käännä moottorin pyörimissuunta" )
                             , ( "Rattaat kytkeytyvät", "Ratas joka kohtaa toisen kääntää akseliaan niin että hampaat kytkeytyvät" )
                             , ( "Rataspilleri", "Kun yksi ratas on valittuna, kertoo miten se kytkeytyy lähimpään rattaaseen" )
                             ]
@@ -2913,6 +2918,7 @@ shortcutsHelpRows lang config =
                 ++ (if config.technic then
                         [ ( "Machine"
                           , [ ( "Space", "Play / pause the machine (an edit stops it and rewinds)" )
+                            , ( "R", "Toggle motor direction" )
                             , ( "Gears turn to mesh", "A gear that meets another turns its axle line so the teeth interlock" )
                             , ( "Gear pill", "With one gear selected, says how it meets its nearest gear" )
                             ]

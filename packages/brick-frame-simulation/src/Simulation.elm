@@ -18,6 +18,8 @@ module Simulation exposing
     , refreshLods
     , reset
     , rotatingGearIds
+    , setMotorSpeed
+    , setRequestedMotorIndex
     , setTime
     , snapshotTriangles
     , subscriptions
@@ -1212,6 +1214,21 @@ drivenEntitiesFor ids =
                 Nothing ->
                     False
         )
+
+
+{-| Explicitly designate which detected gear acts as the motor (or `Nothing`
+to revert to automatic BFS detection).
+-}
+setRequestedMotorIndex : Maybe Int -> Model -> Model
+setRequestedMotorIndex req model =
+    { model | requestedMotorIndex = req }
+
+
+{-| Set the motor rotation speed in RPM. Negative values reverse the rotation.
+-}
+setMotorSpeed : Float -> Model -> Model
+setMotorSpeed rpm model =
+    Tuple.first (update (SetMotorSpeed rpm) model)
 
 
 {-| Recompute each gear's level of detail from its distance to the camera,

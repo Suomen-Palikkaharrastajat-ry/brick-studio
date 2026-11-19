@@ -204,6 +204,33 @@ cardinalOffsetsForAxis axis distance =
             cardinalOffsets distance
 
 
+{-| Whether two gears can form a perpendicular mesh (bevel, crown, or worm).
+-}
+isPerpendicularCandidate : GearSpec -> GearSpec -> Bool
+isPerpendicularCandidate s1 s2 =
+    case ( s1.kind, s2.kind ) of
+        ( Gear.Types.BevelGear, _ ) ->
+            True
+
+        ( _, Gear.Types.BevelGear ) ->
+            True
+
+        ( Gear.Types.CrownGear, _ ) ->
+            True
+
+        ( _, Gear.Types.CrownGear ) ->
+            True
+
+        ( Gear.Types.WormGear, _ ) ->
+            True
+
+        ( _, Gear.Types.WormGear ) ->
+            True
+
+        _ ->
+            False
+
+
 {-| Find the best gear mesh snap candidate for the currently dragged gear among
 existing placements in the document.
 -}
@@ -244,10 +271,7 @@ solveGearSnap isValid snapDistance activeSnap draggedPlacement draggedSurfaceMat
                         absDot =
                             abs (Vec3.dot draggedAxle targetAxle)
                     in
-                    if absDot < 0.5 then
-                        []
-
-                    else
+                    if absDot >= 0.5 then
                         let
                             meshDistance =
                                 dragSpec.pitchRadius + targetSpec.pitchRadius
@@ -350,6 +374,176 @@ solveGearSnap isValid snapDistance activeSnap draggedPlacement draggedSurfaceMat
                                         Nothing
                         in
                         List.filterMap buildCandidate candidates
+
+                    else if absDot <= 0.35 && isPerpendicularCandidate dragSpec targetSpec then
+                        let
+                            targetCenter =
+                                Mat4.transform targetP.matrix (vec3 0 0 0)
+
+                            meshDistance =
+                                dragSpec.pitchRadius + targetSpec.pitchRadius
+
+                            isActive =
+                                case activeSnap of
+                                    Just a ->
+                                        a.targetPlacementId == targetP.id && isGearSnap a
+
+                                    Nothing ->
+                                        False
+
+                            enterThreshold =
+                                max 24.0 (snapDistance * 1.5)
+
+                            releaseThreshold =
+                                max 32.0 (enterThreshold * 1.5)
+
+                            threshold =
+                                if isActive then
+                                    releaseThreshold
+
+                                else
+                                    enterThreshold
+
+                            cross =
+                                Vec3.cross targetAxle draggedAxle
+
+                            crossLen =
+                                Vec3.length cross
+                        in
+                        if crossLen < 0.01 then
+                            []
+
+                        else
+                            let
+                                normal =
+                                    Vec3.scale (1.0 / crossLen) cross
+
+                                targetAxleCandidate =
+                                    let
+                                        c =
+                                            Vec3.cross targetAxle normal
+                                    in
+                                    if Vec3.dot draggedAxle c >= 0 then
+                                        c
+
+                                    else
+                                        Vec3.scale -1.0 c
+
+                                cosTheta =
+                                    clamp -1.0 1.0 (Vec3.dot draggedAxle targetAxleCandidate)
+
+                                sinTheta =
+                                    Vec3.dot normal (Vec3.cross draggedAxle targetAxleCandidate)
+
+                                theta =
+                                    atan2 sinTheta cosTheta
+
+                                candidateWorldPos s =
+                                    Vec3.add targetCenter (Vec3.scale (s * meshDistance) normal)
+
+                                cand1Pos =
+                                    candidateWorldPos 1.0
+
+                                cand2Pos =
+                                    candidateWorldPos -1.0
+
+                                candPoints =
+                                    [ { worldPos = cand1Pos, distance = Vec3.distance draggedWorldPos cand1Pos }
+                                    , { worldPos = cand2Pos, distance = Vec3.distance draggedWorldPos cand2Pos }
+                                    ]
+                                        |> List.filter (\c -> c.distance <= threshold)
+                                        |> List.sortBy .distance
+
+                                isOccupied pos =
+                                    List.any
+                                        (\p ->
+                                            p.id
+                                                /= targetP.id
+                                                && Vec3.distance (Mat4.transform p.matrix (vec3 0 0 0)) pos
+                                                < 5.0
+                                        )
+                                        otherPlacements
+
+                                buildCandidate cand =
+                                    if isOccupied cand.worldPos then
+                                        Nothing
+
+                                    else
+                                        let
+                                            delta =
+                                                Vec3.sub cand.worldPos draggedWorldPos
+
+                                            translatedMat =
+                                                Mat4.mul (Mat4.makeTranslate delta) draggedSurfaceMatrix
+
+                                            alignedMat =
+                                                if abs theta > 1.0e-4 then
+                                                    Mat4.mul (Mat4.makeTranslate cand.worldPos)
+                                                        (Mat4.mul (Mat4.makeRotate theta normal)
+                                                            (Mat4.mul (Mat4.makeTranslate (Vec3.scale -1.0 cand.worldPos)) translatedMat)
+                                                        )
+
+                                                else
+                                                    translatedMat
+
+                                            partnerInst =
+                                                { id = targetP.id
+                                                , spec = targetSpec
+                                                , color = targetP.color
+                                                , worldPosition = targetCenter
+                                                , worldMatrix = targetP.matrix
+                                                }
+
+                                            movingInst =
+                                                { id = draggedPlacement.id
+                                                , spec = dragSpec
+                                                , color = draggedPlacement.color
+                                                , worldPosition = cand.worldPos
+                                                , worldMatrix = alignedMat
+                                                }
+
+                                            snapMatrix =
+                                                case Phase.meshCorrection { fixed = partnerInst, moving = movingInst } of
+                                                    Just correction ->
+                                                        Mat4.mul alignedMat (Mat4.makeRotate correction.radians (localGearAxis dragSpec))
+
+                                                    Nothing ->
+                                                        alignedMat
+
+                                            candidate =
+                                                { draggedPoint =
+                                                    { id = 1
+                                                    , connType = TechnicAxleFemale { length = 10 }
+                                                    , localPosition = vec3 0 0 0
+                                                    , normal = vec3 0 0 1
+                                                    , tangent = vec3 1 0 0
+                                                    }
+                                                , targetPoint =
+                                                    { pointId = 1
+                                                    , placementId = targetP.id
+                                                    , connType = TechnicAxleFemale { length = 10 }
+                                                    , worldPosition = cand.worldPos
+                                                    , worldNormal = targetAxleCandidate
+                                                    , worldTangent = normal
+                                                    }
+                                                , targetPlacementId = targetP.id
+                                                , targetWorldPosition = cand.worldPos
+                                                , targetWorldNormal = targetAxleCandidate
+                                                , snapMatrix = snapMatrix
+                                                , distance = cand.distance
+                                                , guide = AxleAxisGuide cand.worldPos targetAxleCandidate False
+                                                }
+                                        in
+                                        if isValid candidate then
+                                            Just candidate
+
+                                        else
+                                            Nothing
+                            in
+                            List.filterMap buildCandidate candPoints
+
+                    else
+                        []
             in
             partnerGears
                 |> List.concatMap evaluatePartner

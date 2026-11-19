@@ -39,6 +39,7 @@ suite =
         , snap8TTo16TTests
         , coplanarAndMeshingTests
         , hysteresisTests
+        , perpendicularGearSnapTests
         ]
 
 
@@ -442,6 +443,172 @@ hysteresisTests =
 
                     Nothing ->
                         Expect.fail "Expected hysteresis to maintain snap"
+        ]
+
+
+perpendicularGearSnapTests : Test
+perpendicularGearSnapTests =
+    describe "perpendicular gear snapping"
+        [ test "snaps 12T bevel (32270) to 20T bevel (32269) at 40 LDU distance when axes are perpendicular" <|
+            \_ ->
+                let
+                    targetBevel =
+                        makePlacement 1 "32269.dat" Mat4.identity 16
+
+                    -- Dragged 12T bevel tipped 90 degrees around X (axis along Y instead of Z)
+                    draggedMatrix =
+                        Mat4.mul (Mat4.makeTranslate3 38 0 0) (Mat4.makeRotate (pi / 2) (vec3 1 0 0))
+
+                    draggedBevel =
+                        makePlacement 2 "32270.dat" draggedMatrix 16
+
+                    snap =
+                        GearSnap.solveGearSnap (\_ -> True) 12.0 Nothing draggedBevel draggedMatrix [ targetBevel ]
+                in
+                case snap of
+                    Just s ->
+                        Expect.within (Expect.Absolute 1.0e-3) 40.0 (Vec3.length s.targetWorldPosition)
+
+                    Nothing ->
+                        Expect.fail "Expected perpendicular gear snap for 12T and 20T bevel gears"
+        , test "snaps 8T spur (3647) to 24T crown (3650b) at 40 LDU distance when tipped 90 degrees" <|
+            \_ ->
+                let
+                    crownTarget =
+                        makePlacement 1 "3650b.dat" Mat4.identity 16
+
+                    draggedMatrix =
+                        Mat4.mul (Mat4.makeTranslate3 38 0 0) (Mat4.makeRotate (pi / 2) (vec3 1 0 0))
+
+                    draggedSpur =
+                        makePlacement 2 "3647.dat" draggedMatrix 16
+
+                    snap =
+                        GearSnap.solveGearSnap (\_ -> True) 12.0 Nothing draggedSpur draggedMatrix [ crownTarget ]
+                in
+                case snap of
+                    Just s ->
+                        Expect.within (Expect.Absolute 1.0e-3) 40.0 (Vec3.length s.targetWorldPosition)
+
+                    Nothing ->
+                        Expect.fail "Expected perpendicular gear snap for 8T spur and 24T crown"
+        , test "snaps 1-start worm (4716, R=10) to 24T spur (3648, R=30) at 40 LDU (2 studs) grid distance" <|
+            \_ ->
+                let
+                    spurTarget =
+                        makePlacement 1 "3648.dat" Mat4.identity 16
+
+                    -- Worm rotated 90 degrees around Y (axis along X instead of Z)
+                    draggedMatrix =
+                        Mat4.mul (Mat4.makeTranslate3 0 38 0) (Mat4.makeRotate (pi / 2) (vec3 0 1 0))
+
+                    draggedWorm =
+                        makePlacement 2 "4716.dat" draggedMatrix 16
+
+                    snap =
+                        GearSnap.solveGearSnap (\_ -> True) 12.0 Nothing draggedWorm draggedMatrix [ spurTarget ]
+                in
+                case snap of
+                    Just s ->
+                        Expect.within (Expect.Absolute 1.0e-3) 40.0 (Vec3.length s.targetWorldPosition)
+
+                    Nothing ->
+                        Expect.fail "Expected perpendicular gear snap for worm and 24T spur at 40 LDU"
+        , test "axle snaps into gear center axle hole" <|
+            \_ ->
+                case ( Connectivity.knownCatalogPart "3705.dat", Connectivity.knownCatalogPart "3647.dat" ) of
+                    ( Just axle, Just gear ) ->
+                        let
+                            gearTargetPoints =
+                                List.map (Connectivity.transformPoint Mat4.identity 1) gear.connections
+
+                            hoverMat =
+                                Mat4.makeTranslate3 0 0 15
+
+                            snap =
+                                Connectivity.solveSnap 16.0 0 hoverMat axle.connections gearTargetPoints
+                        in
+                        case snap of
+                            Just s ->
+                                Expect.equal True (List.member s.targetPoint.pointId [ 1, 2, 3 ])
+
+                            Nothing ->
+                                Expect.fail "Expected axle to snap into gear axle hole"
+
+                    _ ->
+                        Expect.fail "Missing catalog parts"
+        , test "axle near 24T gear prioritizes center axle hole over round pin holes" <|
+            \_ ->
+                case ( Connectivity.knownCatalogPart "3705.dat", Connectivity.knownCatalogPart "3648.dat" ) of
+                    ( Just axle, Just gear24T ) ->
+                        let
+                            gearTargetPoints =
+                                List.map (Connectivity.transformPoint Mat4.identity 1) gear24T.connections
+
+                            -- Hover near center front of 24T gear
+                            hoverMat =
+                                Mat4.makeTranslate3 0 0 14
+
+                            snap =
+                                Connectivity.solveSnap 16.0 0 hoverMat axle.connections gearTargetPoints
+                        in
+                        case snap of
+                            Just s ->
+                                -- Point IDs 1, 2, 3 are the center axle hole points (center, front, back)
+                                Expect.equal True (List.member s.targetPoint.pointId [ 1, 2, 3 ])
+
+                            Nothing ->
+                                Expect.fail "Expected axle to snap into 24T gear axle hole"
+
+                    _ ->
+                        Expect.fail "Missing catalog parts"
+        , test "axle snaps into worm gear axle hole" <|
+            \_ ->
+                case ( Connectivity.knownCatalogPart "3705.dat", Connectivity.knownCatalogPart "4716.dat" ) of
+                    ( Just axle, Just worm ) ->
+                        let
+                            wormTargetPoints =
+                                List.map (Connectivity.transformPoint Mat4.identity 1) worm.connections
+
+                            -- Worm front face is at z = 20, hover at z = 25
+                            hoverMat =
+                                Mat4.makeTranslate3 0 0 25
+
+                            snap =
+                                Connectivity.solveSnap 16.0 0 hoverMat axle.connections wormTargetPoints
+                        in
+                        case snap of
+                            Just s ->
+                                Expect.equal True (List.member s.targetPoint.pointId [ 1, 2, 3 ])
+
+                            Nothing ->
+                                Expect.fail "Expected axle to snap into worm gear axle hole"
+
+                    _ ->
+                        Expect.fail "Missing catalog parts"
+        , test "axle snaps into bushing axle hole" <|
+            \_ ->
+                case ( Connectivity.knownCatalogPart "3705.dat", Connectivity.knownCatalogPart "6590.dat" ) of
+                    ( Just axle, Just bushing ) ->
+                        let
+                            bushingTargetPoints =
+                                List.map (Connectivity.transformPoint Mat4.identity 1) bushing.connections
+
+                            hoverMat =
+                                Mat4.makeTranslate3 0 0 15
+
+                            snap =
+                                Connectivity.solveSnap 16.0 0 hoverMat axle.connections bushingTargetPoints
+                        in
+                        case snap of
+                            Just s ->
+                                Expect.equal True (List.member s.targetPoint.pointId [ 1, 2, 3 ])
+
+                            Nothing ->
+                                Expect.fail "Expected axle to snap into bushing axle hole"
+
+                    _ ->
+                        Expect.fail "Missing catalog parts"
         ]
 
 
