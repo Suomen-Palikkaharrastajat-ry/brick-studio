@@ -581,4 +581,66 @@ suite =
                     -- draggedBrick min.y is -80, so targetOffset = -52 - (-80) = 28.0 (moves downwards to snap top of dragged brick under -52).
                     Expect.equal (Just 28.0) stepDown
             ]
+        , describe "rayObstacleCandidate"
+            [ test "hits elevated obstacle top along an oblique ray" <|
+                \_ ->
+                    let
+                        elevatedBox =
+                            { min = vec3 -40 -56 0, max = vec3 0 -32 40 }
+
+                        -- Ray from camera at (0, -150, -100) looking down towards the box at (-20, -56, 20)
+                        rayOrigin =
+                            vec3 0 -150 -100
+
+                        targetPoint =
+                            vec3 -20 -56 20
+
+                        rayDir =
+                            Vec3.normalize (Vec3.sub targetPoint rayOrigin)
+
+                        result =
+                            DragPlane.rayObstacleCandidate
+                                { ray = ( rayOrigin, rayDir )
+                                , otherBoxes = [ elevatedBox ]
+                                , cameraElevation = degrees 35
+                                , margin = 4.0
+                                }
+                    in
+                    case result of
+                        Just cand ->
+                            Expect.all
+                                [ \_ -> Expect.equal -56 (Vec3.getY cand.box.min)
+                                , \_ -> Expect.equal -56 cand.targetY
+                                , \_ -> Expect.within (Expect.Absolute 5.0) -20 (Vec3.getX cand.hitPoint)
+                                , \_ -> Expect.within (Expect.Absolute 6.0) 20 (Vec3.getZ cand.hitPoint)
+                                ]
+                                ()
+
+                        Nothing ->
+                            Expect.fail "expected obstacle hit along the ray"
+            , test "misses obstacle and returns Nothing when ray points to empty space" <|
+                \_ ->
+                    let
+                        elevatedBox =
+                            { min = vec3 -40 -56 0, max = vec3 0 -32 40 }
+
+                        rayOrigin =
+                            vec3 0 -150 -100
+
+                        targetPoint =
+                            vec3 200 0 200
+
+                        rayDir =
+                            Vec3.normalize (Vec3.sub targetPoint rayOrigin)
+
+                        result =
+                            DragPlane.rayObstacleCandidate
+                                { ray = ( rayOrigin, rayDir )
+                                , otherBoxes = [ elevatedBox ]
+                                , cameraElevation = degrees 35
+                                , margin = 4.0
+                                }
+                    in
+                    Expect.equal Nothing result
+            ]
         ]

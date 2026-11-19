@@ -1733,28 +1733,28 @@ shiftSnapSuite =
         partsOrPan =
             Core.DragPartsOrPan Core.OneFingerOrbits
     in
-    describe "Shift snap preference (DragPartsOrPan)"
-        [ test "Shift held before a body drag keeps the regular grid" <|
+    describe "Shift fine move / bit-drag (DragPartsOrPan)"
+        [ test "Shift held before a body drag moves on 1 LDU bit grid" <|
             \_ ->
                 grabbed partsOrPan
                     |> shiftDown
-                    |> xIs 40
-        , test "Shift held while dragging keeps the regular grid and avoids bit mode" <|
+                    |> xIs 37
+        , test "Shift held while dragging switches to 1 LDU bit grid" <|
             \_ ->
                 grabbed partsOrPan
                     |> shiftDown
-                    |> xIs 40
+                    |> xIs 37
         , test "releasing Shift keeps the 20 LDU grid" <|
             \_ ->
                 grabbed partsOrPan
                     |> shiftDown
                     |> shiftUp
                     |> xIs 40
-        , test "the default mode keeps the 20 LDU grid with Shift held" <|
+        , test "the default mode moves on 1 LDU bit grid with Shift held" <|
             \_ ->
                 grabbed Core.DragPartsOrOrbit
                     |> shiftDown
-                    |> xIs 40
+                    |> xIs 37
         , test "a Shift + press on a part grabs it" <|
             \_ ->
                 let
@@ -1858,16 +1858,16 @@ shiftSnapSuite =
                     , \m -> Expect.equal (Just ( firstId, initialSel )) (m.drag |> Maybe.andThen .shiftToggle)
                     ]
                     pressed
-        , test "setShiftHeld records the snap modifier without enabling bit mode" <|
+        , test "setShiftHeld records the snap modifier and enables bit mode during drag" <|
             \_ ->
                 grabbed partsOrPan
                     |> Core.setShiftHeld True
                     |> Expect.all
                         [ \m -> Expect.equal True (Core.shiftHeld m)
                         , \m -> Expect.equal False (Core.fineMove m)
-                        , xIs 40
+                        , xIs 37
                         ]
-        , test "when dragging a brick on touch, a second finger selects closest-snap mode without bit-dragging" <|
+        , test "when dragging a brick on touch, a second finger selects bit-drag mode" <|
             \_ ->
                 let
                     base =
@@ -1888,7 +1888,7 @@ shiftSnapSuite =
                     , \m ->
                         case firstPosition m of
                             Just pos ->
-                                Expect.within (Expect.Absolute 0.51) 40 (Vec3.getX pos)
+                                Expect.within (Expect.Absolute 0.51) 37 (Vec3.getX pos)
 
                             Nothing ->
                                 Expect.fail "the part vanished"
@@ -2063,6 +2063,33 @@ restingSuite =
                     [ \_ -> Expect.equal (Just -24) heightBeforeDwell
                     , \_ -> Expect.equal (Just -48) heightAfterStep1
                     , \_ -> Expect.equal (Just -76) heightAfterStep2
+                    ]
+                    ()
+        , test "dwelling when pointing cursor directly at elevated brick top raises the brick to the stack top" <|
+            \_ ->
+                let
+                    -- lead at 0, a two-brick column at x = 100 (top at -52)
+                    model =
+                        grabbedAt [ vec3 0 -24 0, vec3 100 -24 0, vec3 100 -52 0 ]
+
+                    -- Aim directly at visual top of the elevated brick
+                    ( moved, _, _ ) =
+                        moveTo (screenOf model (vec3 100 -52 0)) model
+
+                    heightOf m =
+                        firstPosition m |> Maybe.map (\p -> toFloat (round (Vec3.getY p)))
+
+                    -- Dwell 550ms: climbs step 1
+                    ( ticked1, _, _ ) =
+                        Core.update (Core.DragTick 550.0) moved
+
+                    -- Dwell another 350ms: climbs step 2 to top
+                    ( ticked2, _, _ ) =
+                        Core.update (Core.DragTick 350.0) ticked1
+                in
+                Expect.all
+                    [ \_ -> Expect.equal (Just -48) (heightOf ticked1)
+                    , \_ -> Expect.equal (Just -76) (heightOf ticked2)
                     ]
                     ()
         , test "dwelling over empty space lowers a stacked brick step-by-step to the floor" <|

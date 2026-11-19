@@ -2180,10 +2180,10 @@ updateInner msg model =
                                         drag.dwellTime + dt
 
                                     dwellThreshold =
-                                        700.0
+                                        500.0
 
                                     stepInterval =
-                                        350.0
+                                        300.0
 
                                     shouldStep =
                                         if nextDwellTime < dwellThreshold then
@@ -2962,7 +2962,7 @@ handleViewportEvent event ( model, cmds, outEvents ) =
                             sqrt (dx * dx + dy * dy)
 
                         dragWithDwell =
-                            if movedDist > 3.0 then
+                            if movedDist > 5.0 then
                                 { drag
                                     | dwellTime = 0.0
                                     , lastDwellPoint = ( x, y )
@@ -3028,11 +3028,7 @@ handleViewportEvent event ( model, cmds, outEvents ) =
                     { model | shiftHeld = held }
 
                 ( refreshed, refreshCmd, refreshEvents ) =
-                    if held then
-                        refreshPlaneDrag nextModel
-
-                    else
-                        ( nextModel, Cmd.none, [] )
+                    refreshPlaneDrag nextModel
             in
             ( refreshed, cmds ++ [ refreshCmd ], outEvents ++ refreshEvents )
 
@@ -3153,15 +3149,16 @@ grabPart ( x, y ) model =
                 )
 
 
-{-| Whether explicit fine-move mode (1 LDU step, free of magnetic snapping) is active.
+{-| Whether explicit fine-move mode (1 LDU step, free of magnetic snapping) is active:
+either through the fineMove toggle or while holding Shift.
 -}
 isBitDrag : Model -> Bool
 isBitDrag model =
-    model.fineMove
+    model.fineMove || model.shiftHeld
 
 
 {-| The grid step of a body drag on the working plane: 1 LDU in fine-move mode,
-else the configured grid. Shift changes snap ranking, not the move grid.
+else the configured grid.
 -}
 dragGridStep : Model -> Float
 dragGridStep model =
@@ -3172,9 +3169,8 @@ dragGridStep model =
         toFloat (max 1 model.gridStep)
 
 
-{-| Re-run the body drag in progress after Shift changes, so the snap-ranking
-preference applies without waiting for the mouse to move. Only for a host that
-grabs with Shift (see `dragModeGrabsWithShift`).
+{-| Re-run the body drag in progress after Shift changes, so the 1 LDU fine-move
+mode and snap suppression apply immediately without waiting for the mouse to move.
 -}
 refreshPlaneDrag : Model -> ( Model, Cmd Msg, List Event )
 refreshPlaneDrag model =
@@ -3182,11 +3178,7 @@ refreshPlaneDrag model =
         Just drag ->
             case drag.kind of
                 PlaneDrag _ ->
-                    if dragModeGrabsWithShift model.dragMode then
-                        moveDrag drag drag.lastPoint model
-
-                    else
-                        ( model, Cmd.none, [] )
+                    moveDrag drag drag.lastPoint model
 
                 _ ->
                     ( model, Cmd.none, [] )
@@ -3257,14 +3249,23 @@ moveLinearDrag drag handle point model =
 dwellStep : Drag -> Vec3 -> Model -> Maybe Float
 dwellStep drag grab model =
     let
+        renderElevation =
+            -drag.elevationOffset
+
+        effectiveGrab =
+            Vec3.add grab (vec3 0 renderElevation 0)
+
         plane =
-            Maybe.withDefault (DragPlane.choose model.viewport.camera grab) drag.plane
+            DragPlane.choose model.viewport.camera effectiveGrab
 
         ( x, y ) =
             drag.lastPoint
 
-        cursor =
+        screenRay =
             Pick.screenRay model.viewport.camera model.viewport.width model.viewport.height x y
+
+        cursor =
+            screenRay
                 |> Maybe.andThen (DragPlane.intersect plane)
 
         originalPlacements =
@@ -3312,31 +3313,66 @@ dwellStep drag grab model =
                 origPos =
                     Transform.position leadP.matrix
 
-                targetPos =
-                    DragPlane.targetPosition
-                        { plane = plane
-                        , cursor = cursorPoint
-                        , original = origPos
-                        , gridStep = dragGridStep model
-                        , verticalStep = dragGridStep model
-                        , offset = Connectivity.studOffset leadConn leadP.matrix
-                        , elevationOffset = drag.elevationOffset
-                        , footprint = footprint
-                        , others = otherBoxes
-                        , keepHeight = not model.dragSettles && plane.mode == DragPlane.Horizontal
-                        }
+                rayObstacle =
+                    case screenRay of
+                        Just ( rOrigin, rDir ) ->
+                            let
+                                rayLDraw =
+                                    ( DragPlane.toLDraw rOrigin, DragPlane.toLDraw rDir )
+                            in
+                            DragPlane.rayObstacleCandidate
+                                { ray = rayLDraw
+                                , otherBoxes = otherBoxes
+                                , cameraElevation = model.viewport.camera.elevation
+                                , margin = 4.0
+                                }
+
+                        Nothing ->
+                            Nothing
+
+                ( currX, currZ ) =
+                    case rayObstacle of
+                        Just cand ->
+                            let
+                                hx =
+                                    Vec3.getX cand.hitPoint
+
+                                hz =
+                                    Vec3.getZ cand.hitPoint
+
+                                step =
+                                    dragGridStep model
+
+                                offset =
+                                    Connectivity.studOffset leadConn leadP.matrix
+                            in
+                            ( DragPlane.snapTo offset.x step hx
+                            , DragPlane.snapTo offset.z step hz
+                            )
+
+                        Nothing ->
+                            let
+                                targetPos =
+                                    DragPlane.targetPosition
+                                        { plane = plane
+                                        , cursor = cursorPoint
+                                        , original = origPos
+                                        , gridStep = dragGridStep model
+                                        , verticalStep = dragGridStep model
+                                        , offset = Connectivity.studOffset leadConn leadP.matrix
+                                        , elevationOffset = drag.elevationOffset
+                                        , footprint = footprint
+                                        , others = otherBoxes
+                                        , keepHeight = not model.dragSettles && plane.mode == DragPlane.Horizontal
+                                        }
+                            in
+                            ( Vec3.getX targetPos, Vec3.getZ targetPos )
 
                 ox =
                     Vec3.getX origPos
 
                 oz =
                     Vec3.getZ origPos
-
-                currX =
-                    Vec3.getX targetPos
-
-                currZ =
-                    Vec3.getZ targetPos
 
                 movedFootprint =
                     { min = Vec3.add footprint.min (vec3 (currX - ox) 0 (currZ - oz))
@@ -3358,8 +3394,14 @@ dwellStep drag grab model =
 movePlaneDrag : Drag -> Vec3 -> ( Float, Float ) -> Model -> ( Model, Cmd Msg, List Event )
 movePlaneDrag initialDrag grab ( x, y ) model =
     let
+        renderElevation =
+            -initialDrag.elevationOffset
+
+        effectiveGrab =
+            Vec3.add grab (vec3 0 renderElevation 0)
+
         plane =
-            Maybe.withDefault (DragPlane.choose model.viewport.camera grab) initialDrag.plane
+            DragPlane.choose model.viewport.camera effectiveGrab
 
         drag =
             { initialDrag | plane = Just plane }

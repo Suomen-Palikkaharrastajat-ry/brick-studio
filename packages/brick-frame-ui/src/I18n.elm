@@ -2255,20 +2255,20 @@ ringShiftBitPill : Language -> String
 ringShiftBitPill lang =
     case lang of
         Fi ->
-            "Shift · Lähin kohdistus"
+            "Shift · Pikkuliike"
 
         En ->
-            "Shift · Closest snap"
+            "Shift · Bit"
 
 
 ringShiftBitTip : Language -> String
 ringShiftBitTip lang =
     case lang of
         Fi ->
-            "Shift: suosi lähintä magneettista kohdistusta"
+            "Shift: siirrä 1 LDU ilman kohdistusta"
 
         En ->
-            "Shift: prefer the closest magnetic snap candidate"
+            "Shift: drag by 1 LDU without snapping (bit-dragging)"
 
 
 ringMoveThePart : Language -> String

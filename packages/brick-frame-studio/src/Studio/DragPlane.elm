@@ -1,6 +1,7 @@
 module Studio.DragPlane exposing
     ( Box
     , Mode(..)
+    , ObstacleCandidate
     , Target
     , WorkingPlane
     , boxesOverlap
@@ -10,6 +11,7 @@ module Studio.DragPlane exposing
     , freeSpot
     , freeSpotPlacement
     , intersect
+    , rayObstacleCandidate
     , snapTo
     , steepElevation
     , supportTop
@@ -57,6 +59,7 @@ ground top is Y = 0.
 import Math.Matrix4 as Mat4 exposing (Mat4)
 import Math.Vector3 as Vec3 exposing (Vec3, vec3)
 import Render.Camera exposing (Camera)
+import Render.Pick as Pick
 
 
 {-| An axis-aligned box, in LDraw coordinates unless stated otherwise.
@@ -348,6 +351,77 @@ supportTop footprint others =
         |> List.filter (footprintOverlaps footprint)
         |> List.map (\b -> Vec3.getY b.min)
         |> List.foldl min 0
+
+
+{-| An obstacle hit along the screen ray.
+-}
+type alias ObstacleCandidate =
+    { hitPoint : Vec3
+    , targetY : Float
+    , box : Box
+    }
+
+
+{-| Finds the closest obstacle along a 3D ray (both in LDraw coordinates).
+Tests candidate obstacle boxes expanded by `margin` LDU. Returns the 3D entry
+hit point along the ray, the target support surface Y level (top when viewed from above,
+underside when viewed from below), and the obstacle box.
+-}
+rayObstacleCandidate :
+    { ray : ( Vec3, Vec3 )
+    , otherBoxes : List Box
+    , cameraElevation : Float
+    , margin : Float
+    }
+    -> Maybe ObstacleCandidate
+rayObstacleCandidate { ray, otherBoxes, cameraElevation, margin } =
+    let
+        ( rayOrigin, rayDir ) =
+            ray
+
+        testBox box =
+            let
+                bMin =
+                    vec3
+                        (Vec3.getX box.min - margin)
+                        (Vec3.getY box.min - margin)
+                        (Vec3.getZ box.min - margin)
+
+                bMax =
+                    vec3
+                        (Vec3.getX box.max + margin)
+                        (Vec3.getY box.max + margin)
+                        (Vec3.getZ box.max + margin)
+            in
+            case Pick.rayAabbHit rayOrigin rayDir bMin bMax of
+                Just t ->
+                    if t > 0.0 then
+                        let
+                            targetY =
+                                if cameraElevation >= 0.0 then
+                                    Vec3.getY box.min
+
+                                else
+                                    Vec3.getY box.max
+
+                            hitPoint =
+                                Vec3.add rayOrigin (Vec3.scale t rayDir)
+                        in
+                        Just ( t, { hitPoint = hitPoint, targetY = targetY, box = box } )
+
+                    else
+                        Nothing
+
+                Nothing ->
+                    Nothing
+
+        hits =
+            List.filterMap testBox otherBoxes
+    in
+    hits
+        |> List.sortBy Tuple.first
+        |> List.head
+        |> Maybe.map Tuple.second
 
 
 {-| Calculate the next elevation offset for a dwelled (idle) horizontal body drag.
