@@ -40,6 +40,7 @@ module Studio.Core exposing
     , hasClipboard
     , hasSelection
     , init
+    , isBitDrag
     , isDragging
     , isGlued
     , lightDirection

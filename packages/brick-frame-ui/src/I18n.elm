@@ -1895,7 +1895,7 @@ ringBitStep : Language -> String
 ringBitStep lang =
     case lang of
         Fi ->
-            "Pikkuliike (1 LDU)"
+            "Pikkuliike"
 
         En ->
             "Bit step"

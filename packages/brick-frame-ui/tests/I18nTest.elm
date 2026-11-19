@@ -105,7 +105,7 @@ suite =
                         , \_ -> Expect.equal "Stud step" (I18n.ringStudStep En)
                         , \_ -> Expect.equal "Puolinuppiliike" (I18n.ringHalfStudStep Fi)
                         , \_ -> Expect.equal "Half-stud step" (I18n.ringHalfStudStep En)
-                        , \_ -> Expect.equal "Pikkuliike (1 LDU)" (I18n.ringBitStep Fi)
+                        , \_ -> Expect.equal "Pikkuliike" (I18n.ringBitStep Fi)
                         , \_ -> Expect.equal "Bit step" (I18n.ringBitStep En)
                         , \_ -> Expect.equal "Leikkaa" (I18n.ringCut Fi)
                         , \_ -> Expect.equal "Cut" (I18n.ringCut En)
