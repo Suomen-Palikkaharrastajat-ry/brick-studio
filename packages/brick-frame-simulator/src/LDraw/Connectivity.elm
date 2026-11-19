@@ -2165,22 +2165,40 @@ knownCatalogPart name =
             Just (makeGear 30.0 20.0 "3650.dat")
 
         "18938" ->
+            let
+                holes =
+                    [ 40.0, -40.0 ]
+                        |> List.indexedMap
+                            (\i x ->
+                                let
+                                    baseId =
+                                        1 + i * 3
+                                in
+                                [ { id = baseId
+                                  , connType = TechnicPinFemale { length = 20.0 }
+                                  , localPosition = vec3 x -10 0
+                                  , normal = vec3 0 -1 0
+                                  , tangent = vec3 0 0 1
+                                  }
+                                , { id = baseId + 1
+                                  , connType = TechnicPinFemale { length = 20.0 }
+                                  , localPosition = vec3 x -20 0
+                                  , normal = vec3 0 -1 0
+                                  , tangent = vec3 0 0 1
+                                  }
+                                , { id = baseId + 2
+                                  , connType = TechnicPinFemale { length = 20.0 }
+                                  , localPosition = vec3 x 0 0
+                                  , normal = vec3 0 1 0
+                                  , tangent = vec3 0 0 1
+                                  }
+                                ]
+                            )
+                        |> List.concat
+            in
             Just
                 { part = "18938.dat"
-                , connections =
-                    [ { id = 1
-                      , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 40 -20 0
-                      , normal = vec3 0 -1 0
-                      , tangent = vec3 0 0 1
-                      }
-                    , { id = 2
-                      , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 -40 -20 0
-                      , normal = vec3 0 -1 0
-                      , tangent = vec3 0 0 1
-                      }
-                    ]
+                , connections = holes
                 , boundingBoxes = [ { min = vec3 -77 -20 -77, max = vec3 77 0 77 } ]
                 }
 
@@ -2320,7 +2338,7 @@ knownCatalogPart name =
                 , connections =
                     [ { id = 1
                       , connType = TechnicPinMale { length = 10.0, friction = True }
-                      , localPosition = vec3 -10 0 0
+                      , localPosition = vec3 -5 0 0
                       , normal = vec3 -1 0 0
                       , tangent = vec3 0 1 0
                       }
@@ -2332,7 +2350,7 @@ knownCatalogPart name =
                       }
                     ]
                 , boundingBoxes =
-                    [ { min = vec3 -20 -8 -8, max = vec3 4 8 8 } ]
+                    [ { min = vec3 -10 -8 -8, max = vec3 4 8 8 } ]
                 }
 
         "89678" ->
@@ -2342,7 +2360,7 @@ knownCatalogPart name =
                 , connections =
                     [ { id = 1
                       , connType = TechnicPinMale { length = 10.0, friction = True }
-                      , localPosition = vec3 -10 0 0
+                      , localPosition = vec3 -5 0 0
                       , normal = vec3 -1 0 0
                       , tangent = vec3 0 1 0
                       }
@@ -2354,7 +2372,7 @@ knownCatalogPart name =
                       }
                     ]
                 , boundingBoxes =
-                    [ { min = vec3 -20 -8 -8, max = vec3 4 8 8 } ]
+                    [ { min = vec3 -10 -8 -8, max = vec3 4 8 8 } ]
                 }
 
         "2711" ->
@@ -2433,31 +2451,10 @@ knownCatalogPart name =
             -- Technic Turntable 28 Tooth Bottom
             let
                 pinHoles =
-                    [ { id = 1
-                      , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 20 20 0
-                      , normal = vec3 0 0 1
-                      , tangent = vec3 1 0 0
-                      }
-                    , { id = 2
-                      , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 -20 20 0
-                      , normal = vec3 0 0 1
-                      , tangent = vec3 1 0 0
-                      }
-                    , { id = 3
-                      , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 20 20 0
-                      , normal = vec3 0 0 -1
-                      , tangent = vec3 1 0 0
-                      }
-                    , { id = 4
-                      , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 -20 20 0
-                      , normal = vec3 0 0 -1
-                      , tangent = vec3 1 0 0
-                      }
-                    ]
+                    makeGearPinHoles 1
+                        [ ( 20, 20 )
+                        , ( -20, 20 )
+                        ]
             in
             Just
                 { part = "99009.dat"
@@ -2470,31 +2467,10 @@ knownCatalogPart name =
             -- Technic Turntable 28 Tooth Top
             let
                 pinHoles =
-                    [ { id = 1
-                      , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 20 -20 -10
-                      , normal = vec3 0 0 1
-                      , tangent = vec3 1 0 0
-                      }
-                    , { id = 2
-                      , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 -20 -20 -10
-                      , normal = vec3 0 0 1
-                      , tangent = vec3 1 0 0
-                      }
-                    , { id = 3
-                      , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 20 -20 -10
-                      , normal = vec3 0 0 -1
-                      , tangent = vec3 1 0 0
-                      }
-                    , { id = 4
-                      , connType = TechnicPinFemale { length = 20.0 }
-                      , localPosition = vec3 -20 -20 -10
-                      , normal = vec3 0 0 -1
-                      , tangent = vec3 1 0 0
-                      }
-                    ]
+                    makeGearPinHoles 1
+                        [ ( 20, -20 )
+                        , ( -20, -20 )
+                        ]
             in
             Just
                 { part = "99010.dat"
@@ -2934,7 +2910,7 @@ makeTechnicPin len friction partName =
             else
                 ( 20.0, 10.0, 20.0 )
 
-        connections =
+        baseConnections =
             [ { id = 1
               , connType = TechnicPinMale { length = connLength, friction = friction }
               , localPosition = vec3 pegCenter 0 0
@@ -2948,6 +2924,20 @@ makeTechnicPin len friction partName =
               , tangent = vec3 0 1 0
               }
             ]
+
+        connections =
+            if len >= 12.0 then
+                baseConnections
+                    ++ [ { id = 3
+                         , connType = TechnicPinMale { length = connLength, friction = friction }
+                         , localPosition = vec3 0 0 0
+                         , normal = vec3 1 0 0
+                         , tangent = vec3 0 1 0
+                         }
+                       ]
+
+            else
+                baseConnections
 
         bbox =
             [ { min = vec3 -halfExtent -8 -8, max = vec3 halfExtent 8 8 } ]

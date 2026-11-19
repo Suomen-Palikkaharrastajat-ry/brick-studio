@@ -458,9 +458,9 @@ extractionTests =
                                     |> List.sort
                         in
                         Expect.all
-                            [ \_ -> Expect.equal 2 (List.length conn.connections)
-                            , \_ -> Expect.equal 2 (List.length frictionPins)
-                            , \_ -> Expect.equal [ -20.0, 20.0 ] xPositions
+                            [ \_ -> Expect.equal 3 (List.length conn.connections)
+                            , \_ -> Expect.equal 3 (List.length frictionPins)
+                            , \_ -> Expect.equal [ -20.0, 0.0, 20.0 ] xPositions
                             , \_ ->
                                 case conn.boundingBoxes of
                                     [ box ] ->
@@ -539,6 +539,8 @@ extractionTests =
                             [ \_ -> Expect.equal 2 (List.length conn.connections)
                             , \_ -> Expect.equal 1 (List.length pins)
                             , \_ -> Expect.equal 1 (List.length studs)
+                            , \_ -> Expect.equal (Just (vec3 -5 0 0)) (List.head pins |> Maybe.map .localPosition)
+                            , \_ -> Expect.equal [ { min = vec3 -10 -8 -8, max = vec3 4 8 8 } ] conn.boundingBoxes
                             ]
                             ()
 
@@ -568,6 +570,8 @@ extractionTests =
                             [ \_ -> Expect.equal 2 (List.length conn.connections)
                             , \_ -> Expect.equal 1 (List.length pins)
                             , \_ -> Expect.equal 1 (List.length studs)
+                            , \_ -> Expect.equal (Just (vec3 -5 0 0)) (List.head pins |> Maybe.map .localPosition)
+                            , \_ -> Expect.equal [ { min = vec3 -10 -8 -8, max = vec3 4 8 8 } ] conn.boundingBoxes
                             ]
                             ()
 
@@ -777,10 +781,10 @@ extractionTests =
                                 List.filter (\p -> p.connType == TechnicPinMale { length = 30.0, friction = False }) c.connections
                         in
                         Expect.all
-                            [ \_ -> Expect.equal 2 (List.length conn1.connections)
-                            , \_ -> Expect.equal 2 (List.length (frictionlessPins conn1))
-                            , \_ -> Expect.equal 2 (List.length conn2.connections)
-                            , \_ -> Expect.equal 2 (List.length (frictionlessPins conn2))
+                            [ \_ -> Expect.equal 3 (List.length conn1.connections)
+                            , \_ -> Expect.equal 3 (List.length (frictionlessPins conn1))
+                            , \_ -> Expect.equal 3 (List.length conn2.connections)
+                            , \_ -> Expect.equal 3 (List.length (frictionlessPins conn2))
                             ]
                             ()
 
@@ -1241,10 +1245,10 @@ extractionTests =
                                     |> List.sort
                         in
                         Expect.all
-                            [ \_ -> Expect.equal [ ( 2, 0 ), ( 4, 0 ), ( 4, 0 ) ] [ connectorCounts turntable60, connectorCounts base28, connectorCounts top28 ]
-                            , \_ -> Expect.equal [ -1, -1, 1, 1 ] (pinNormalZ base28)
-                            , \_ -> Expect.equal [ -1, -1, 1, 1 ] (pinNormalZ top28)
-                            , \_ -> Expect.equal [ ( -20, -20, -10 ), ( -20, -20, -10 ), ( 20, -20, -10 ), ( 20, -20, -10 ) ] (pinPositions top28)
+                            [ \_ -> Expect.equal [ ( 6, 0 ), ( 6, 0 ), ( 6, 0 ) ] [ connectorCounts turntable60, connectorCounts base28, connectorCounts top28 ]
+                            , \_ -> Expect.equal [ -1, -1, 1, 1, 1, 1 ] (pinNormalZ base28)
+                            , \_ -> Expect.equal [ -1, -1, 1, 1, 1, 1 ] (pinNormalZ top28)
+                            , \_ -> Expect.equal [ ( -20, -20, -10 ), ( -20, -20, 0 ), ( -20, -20, 10 ), ( 20, -20, -10 ), ( 20, -20, 0 ), ( 20, -20, 10 ) ] (pinPositions top28)
                             ]
                             ()
 
