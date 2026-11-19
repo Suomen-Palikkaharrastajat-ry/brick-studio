@@ -1377,6 +1377,63 @@ grabbedAt positions =
     grabLead (List.head positions |> Maybe.withDefault (vec3 0 0 0)) (loadedAt positions)
 
 
+{-| Bricks loaded at `positions`, with multiple placements in `groupIds` selected
+and dragged together as a group, lead brick grabbed at its top centre.
+-}
+grabbedGroupAt : Int -> List Vec3 -> Core.Model
+grabbedGroupAt count positions =
+    let
+        model =
+            loadedAt positions
+
+        groupIds =
+            Document.placements model.document |> List.take count |> List.map .id
+
+        leadPos =
+            List.head positions |> Maybe.withDefault (vec3 0 0 0)
+
+        grab =
+            Gizmo.toRender leadPos
+
+        vp =
+            model.viewport
+
+        cam =
+            vp.camera
+    in
+    { model
+        | viewport = Viewport.captureDrag { vp | camera = { cam | target = grab }, mousePressed = True }
+        , selection = Set.fromList groupIds
+        , altHeld = True
+        , drag =
+            Just
+                { kind = PlaneDrag grab
+                , plane = Nothing
+                , ids = groupIds
+                , start = ( 400, 300 )
+                , lastPoint = ( 400, 300 )
+                , original = model.document
+                , amount = 0
+                , elevationOffset = 0
+                , axisLock = Nothing
+                , modeAnchor = ( 400, 300 )
+                , baseElevation = 0
+                , shiftToggle = Nothing
+                , dwellTime = 0.0
+                , lastDwellPoint = ( 400, 300 )
+                , lastDwellStepTime = 0.0
+                }
+    }
+
+
+placementYAt : Int -> Core.Model -> Maybe Float
+placementYAt index model =
+    Core.getPlacements model
+        |> List.drop index
+        |> List.head
+        |> Maybe.map (\p -> toFloat (round (Vec3.getY (Transform.position p.matrix))))
+
+
 {-| `model` with its first placement grabbed at its origin `lead` (LDraw), as
 `grabbedAt` does.
 -}
@@ -2051,6 +2108,143 @@ restingSuite =
                     , \_ -> Expect.equal (Just -52) heightAfterStep1
                     , \_ -> Expect.equal (Just -28) heightAfterStep2
                     , \_ -> Expect.equal (Just -24) heightAfterStep3
+                    ]
+                    ()
+        , test "dwelling over a stack raises a group of bricks rigidly step-by-step to the top" <|
+            \_ ->
+                let
+                    -- 2-brick group at x = 0 (lead) and x = 40; obstacle stack at x = 100
+                    model =
+                        grabbedGroupAt 2 [ vec3 0 -24 0, vec3 40 -24 0, vec3 100 -24 0, vec3 100 -52 0 ]
+
+                    -- Drag group to x = 100 without dwell
+                    ( moved, _, _ ) =
+                        moveTo (screenOf model (vec3 100 0 0)) model
+
+                    height1 m =
+                        placementYAt 0 m
+
+                    height2 m =
+                        placementYAt 1 m
+
+                    -- Before dwell: both kept at ground level (-24)
+                    beforeDwell =
+                        ( height1 moved, height2 moved )
+
+                    -- Dwell 800ms: rises to first support level (-48)
+                    ( ticked1, _, _ ) =
+                        Core.update (Core.DragTick 800.0) moved
+
+                    afterStep1 =
+                        ( height1 ticked1, height2 ticked1 )
+
+                    -- Dwell another 400ms: rises to top of stack (-76)
+                    ( ticked2, _, _ ) =
+                        Core.update (Core.DragTick 400.0) ticked1
+
+                    afterStep2 =
+                        ( height1 ticked2, height2 ticked2 )
+                in
+                Expect.all
+                    [ \_ -> Expect.equal ( Just -24, Just -24 ) beforeDwell
+                    , \_ -> Expect.equal ( Just -48, Just -48 ) afterStep1
+                    , \_ -> Expect.equal ( Just -76, Just -76 ) afterStep2
+                    ]
+                    ()
+        , test "dwelling over empty space lowers a stacked group of bricks step-by-step to the floor" <|
+            \_ ->
+                let
+                    -- 2-brick group stacked at top (Y = -76), column at x = 0
+                    model =
+                        grabbedGroupAt 2 [ vec3 0 -76 0, vec3 40 -76 0, vec3 0 -24 0, vec3 0 -52 0 ]
+
+                    -- Slide off the column to x = 100 (empty floor)
+                    ( moved, _, _ ) =
+                        moveTo (screenOf model (vec3 100 0 0)) model
+
+                    height1 m =
+                        placementYAt 0 m
+
+                    height2 m =
+                        placementYAt 1 m
+
+                    beforeDwell =
+                        ( height1 moved, height2 moved )
+
+                    -- Dwell 800ms: steps down by part height (24 LDU) to -52
+                    ( ticked1, _, _ ) =
+                        Core.update (Core.DragTick 800.0) moved
+
+                    afterStep1 =
+                        ( height1 ticked1, height2 ticked1 )
+
+                    -- Dwell another 400ms: steps down to -28
+                    ( ticked2, _, _ ) =
+                        Core.update (Core.DragTick 400.0) ticked1
+
+                    afterStep2 =
+                        ( height1 ticked2, height2 ticked2 )
+
+                    -- Dwell another 400ms: steps down to floor (-24)
+                    ( ticked3, _, _ ) =
+                        Core.update (Core.DragTick 400.0) ticked2
+
+                    afterStep3 =
+                        ( height1 ticked3, height2 ticked3 )
+                in
+                Expect.all
+                    [ \_ -> Expect.equal ( Just -76, Just -76 ) beforeDwell
+                    , \_ -> Expect.equal ( Just -52, Just -52 ) afterStep1
+                    , \_ -> Expect.equal ( Just -28, Just -28 ) afterStep2
+                    , \_ -> Expect.equal ( Just -24, Just -24 ) afterStep3
+                    ]
+                    ()
+        , test "dwelling over a stack viewed from below lowers a group of bricks to snap underneath" <|
+            \_ ->
+                let
+                    baseModel =
+                        grabbedGroupAt 2 [ vec3 0 -72 0, vec3 40 -72 0, vec3 100 -72 0, vec3 100 -48 0 ]
+
+                    vp =
+                        baseModel.viewport
+
+                    cam =
+                        vp.camera
+
+                    -- Invert camera elevation to view from below
+                    model =
+                        { baseModel | viewport = { vp | camera = { cam | elevation = -0.5 } } }
+
+                    ( moved, _, _ ) =
+                        moveTo (project model 72 (vec3 100 0 0)) model
+
+                    height1 m =
+                        placementYAt 0 m
+
+                    height2 m =
+                        placementYAt 1 m
+
+                    beforeDwell =
+                        ( height1 moved, height2 moved )
+
+                    -- Dwell 800ms: steps down towards underside (-48)
+                    ( ticked1, _, _ ) =
+                        Core.update (Core.DragTick 800.0) moved
+
+                    afterStep1 =
+                        ( height1 ticked1, height2 ticked1 )
+
+                    -- Dwell another 400ms: steps down below the obstacle (-24)
+                    ( ticked2, _, _ ) =
+                        Core.update (Core.DragTick 400.0) ticked1
+
+                    afterStep2 =
+                        ( height1 ticked2, height2 ticked2 )
+                in
+                Expect.all
+                    [ \_ -> Expect.equal ( Just -72, Just -72 ) beforeDwell
+                    , \_ -> Expect.equal ( Just -48, Just -48 ) afterStep1
+                    , \_ -> Expect.equal ( Just -24, Just -24 ) afterStep2
                     ]
                     ()
         ]
