@@ -3552,7 +3552,7 @@ view config model =
                         ++ config.extraEntities model.camera model.renderStyle aspect
 
                 ( Nothing, Nothing ) ->
-                    []
+                    config.extraEntities model.camera model.renderStyle aspect
     in
     WebGL.toHtmlWith
         [ WebGL.antialias

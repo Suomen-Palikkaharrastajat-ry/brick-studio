@@ -21,6 +21,7 @@ module I18n exposing
     , cameraControls
       -- Context Ring & Mobile Toolbar
     , cameraDragTip
+    , cameraFloor
     , cameraPositionAria
     , cameraRealistic
     , cameraResetView
@@ -1776,6 +1777,16 @@ cameraRealistic lang =
             "Realistic rendering"
 
 
+cameraFloor : Language -> String
+cameraFloor lang =
+    case lang of
+        Fi ->
+            "Pohjalevy"
+
+        En ->
+            "Baseplate floor"
+
+
 cameraTakeSnapshot : Language -> String
 cameraTakeSnapshot lang =
     case lang of
@@ -2666,6 +2677,7 @@ touchHelpRows lang config =
                        , ( "Napauta palloa", "Siirry suoraan mallin kyseiselle puolelle" )
                        , ( "Zoomaussäädin", "Lähennä ja loitonna" )
                        , ( "Palauta näkymä", "Sovita koko malli näkymään" )
+                       , ( "Pohjalevy-painike", "Kytke pohjalevy päälle tai pois" )
                        ]
                      )
                    ]
@@ -2737,6 +2749,7 @@ touchHelpRows lang config =
                        , ( "Tap the globe", "Fly to that side of the model" )
                        , ( "Zoom slider", "Zoom in and out" )
                        , ( "Reset view", "Fit the whole model in view" )
+                       , ( "Baseplate button", "Toggle baseplate floor on or off" )
                        ]
                      )
                    ]
@@ -2826,7 +2839,7 @@ shortcutsHelpRows lang config =
                        , ( "Kaksi sormea tyhjällä tilalla", "Kierrä; nipistä tai levitä zoomataksesi" )
                        , ( "Rulla  + -", "Zoom" )
                        , ( "1 2 3 4 5 6  `", "Näkymät: edestä, takaa, vasemmalta, oikealta, ylhäältä, alhaalta, 3/4" )
-                       , ( "G", "Katutason kävely, päälle / pois" )
+                       , ( "G", "Pohjalevy, päälle / pois" )
                        ]
                      )
                    ]
@@ -2911,7 +2924,7 @@ shortcutsHelpRows lang config =
                        , ( "Two fingers on empty space", "Orbit; spread or pinch to zoom" )
                        , ( "Wheel  + -", "Zoom" )
                        , ( "1 2 3 4 5 6  `", "Views: front, back, left, right, top, bottom, 3/4" )
-                       , ( "G", "Street-level walk, on / off" )
+                       , ( "G", "Baseplate floor, on / off" )
                        ]
                      )
                    ]
