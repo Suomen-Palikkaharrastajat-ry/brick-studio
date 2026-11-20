@@ -213,6 +213,7 @@ encodeRequestWithCrop config =
         , height = Nothing
         , timeBudgetMs = Nothing
         , animation = Nothing
+        , viewAspect = Nothing
         }
 
 
@@ -223,6 +224,10 @@ An animation is encoded with an explicit `"motion"`: `"motor"` when
 `framesExtraTriangles` is `Just` (a static camera, with each frame's turning
 gears as that frame's extra triangles; a frame may be empty), otherwise
 `"turntable"` (the camera makes one full turn around its target).
+
+`viewAspect`, when given, is the aspect of the live view the camera was framed
+in: the camera keeps that aspect, `crop` is the frame within the view, and
+`width` × `height` is the exact output size.
 
 -}
 encodeRequestWithOptions :
@@ -237,6 +242,7 @@ encodeRequestWithOptions :
     , height : Maybe Int
     , timeBudgetMs : Maybe Int
     , animation : Maybe { fps : Int, durationSeconds : Float, framesExtraTriangles : Maybe (List (List Float)) }
+    , viewAspect : Maybe Float
     }
     -> Encode.Value
 encodeRequestWithOptions config =
@@ -254,6 +260,14 @@ encodeRequestWithOptions config =
             case config.lightDirection of
                 Just dir ->
                     [ ( "lightDirection", encodeVec3 dir ) ]
+
+                Nothing ->
+                    []
+
+        viewAspectFields =
+            case config.viewAspect of
+                Just aspect ->
+                    [ ( "viewAspect", Encode.float aspect ) ]
 
                 Nothing ->
                     []
@@ -337,6 +351,7 @@ encodeRequestWithOptions config =
            )
          ]
             ++ lightFields
+            ++ viewAspectFields
             ++ cropFields
             ++ outlineFields
             ++ shaderFields

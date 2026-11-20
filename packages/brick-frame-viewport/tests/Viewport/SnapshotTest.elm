@@ -278,6 +278,7 @@ suite =
                                         , durationSeconds = 4.0
                                         , framesExtraTriangles = Just [ [ 1.0, 2.0, 3.0 ], [ 4.0, 5.0, 6.0 ] ]
                                         }
+                                , viewAspect = Nothing
                                 }
                     in
                     Expect.all
@@ -335,6 +336,7 @@ animationRequest frames =
         , height = Nothing
         , timeBudgetMs = Nothing
         , animation = Just { fps = 10, durationSeconds = 2.0, framesExtraTriangles = frames }
+        , viewAspect = Nothing
         }
 
 

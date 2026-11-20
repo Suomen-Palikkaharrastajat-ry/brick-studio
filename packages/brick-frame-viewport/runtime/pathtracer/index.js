@@ -191,14 +191,19 @@ function checkStride(triangles) {
 }
 
 /**
- * Output size of a request: `width` × `height`, or for a crop the crop's
- * aspect scaled so its longer side matches the longer requested side (at
- * least 64 pixels each way). `baseAspect` is the uncropped aspect.
+ * Output size of a request and the aspect of the uncropped camera view
+ * (`baseAspect`). With a positive `viewAspect` (a frame on a live viewport of
+ * that aspect), `width` × `height` is the exact output size and `crop` is the
+ * frame within the viewport. Otherwise the uncropped view has the requested
+ * aspect, and a crop keeps the crop's aspect scaled so its longer side
+ * matches the longer requested side (at least 64 pixels each way).
  */
-function renderSize(request) {
+export function renderSize(request) {
   let width = Math.round(request.width)
   let height = Math.round(request.height)
   if (!(width > 0 && height > 0)) throw new Error('Render size must be positive')
+  const viewAspect = Number(request.viewAspect)
+  if (viewAspect > 0 && Number.isFinite(viewAspect)) return { width, height, baseAspect: viewAspect }
   const baseAspect = width / height
   const maxWidth = width
   const maxHeight = height
@@ -218,7 +223,7 @@ function renderSize(request) {
 /**
  * Starts a persistent render session (see the module header). `request` is
  * the contract payload without the per-frame parts: `width`, `height`,
- * `transparent`, `crop`, `outlineEdges`, `shader`, `lightDirection`,
+ * `viewAspect` (see `renderSize`), `transparent`, `crop`, `outlineEdges`, `shader`, `lightDirection`,
  * `triangles` (the static geometry, an array or typed array of 14 numbers per
  * triangle; may be empty when every frame brings its own triangles) and
  * optionally `groundMinY`, the lowest model Y over all frames, which pins the

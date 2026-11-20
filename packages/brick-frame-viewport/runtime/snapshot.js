@@ -454,7 +454,10 @@ async function startAnimationPathTrace(ports, request, deps = {}) {
         onProgress: (p) => {
           if (p.fraction >= 1 && sampledAt === null) sampledAt = Date.now()
           if (!isCurrent()) return
-          sendProgress(f, samplingShare * p.fraction, p.samples, p.stage ?? 'sampling')
+          // Only the first frame builds the scene; later frames just re-capture
+          // their guides, which is part of sampling as far as the user can tell.
+          const stage = p.stage === 'preparing' && f > 0 ? 'sampling' : (p.stage ?? 'sampling')
+          sendProgress(f, samplingShare * p.fraction, p.samples, stage)
         },
       })
       const endedAt = Date.now()

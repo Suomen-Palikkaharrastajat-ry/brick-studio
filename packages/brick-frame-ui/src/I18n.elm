@@ -233,7 +233,9 @@ module I18n exposing
     , snapshotAspect16_9
     , snapshotAspect1_1
     , snapshotAspect4_3
-    , snapshotAspectFree
+    , snapshotAspectView
+    , snapshotCameraHint
+    , snapshotCameraTitle
     , snapshotClose
     , snapshotCloseCancels
     , snapshotElapsed
@@ -3336,16 +3338,6 @@ snapshotResetCrop lang =
             "Reset crop"
 
 
-snapshotAspectFree : Language -> String
-snapshotAspectFree lang =
-    case lang of
-        Fi ->
-            "Vapaa"
-
-        En ->
-            "Free"
-
-
 snapshotAspect16_9 : Language -> String
 snapshotAspect16_9 _ =
     "16:9"
@@ -3920,3 +3912,37 @@ snapshotProgressLabel lang =
 
         En ->
             "Render progress"
+
+
+snapshotCameraTitle : Language -> String
+snapshotCameraTitle lang =
+    case lang of
+        Fi ->
+            "Kamera"
+
+        En ->
+            "Camera"
+
+
+{-| How to frame the shot with the camera overlay open.
+-}
+snapshotCameraHint : Language -> String
+snapshotCameraHint lang =
+    case lang of
+        Fi ->
+            "Vedä kiertääksesi · rulla zoomaa · oikea painike tai kaksi sormea siirtää"
+
+        En ->
+            "Drag to orbit · scroll to zoom · right-drag or two fingers to pan"
+
+
+{-| The frame shape that follows the view itself, with no bars.
+-}
+snapshotAspectView : Language -> String
+snapshotAspectView lang =
+    case lang of
+        Fi ->
+            "Näkymä"
+
+        En ->
+            "View"

@@ -367,6 +367,7 @@ function fakeSessions({ hang = false, width = 64, height = 48 } = {}) {
           })
         }
         const n = frame.samplesPerPixel
+        frame.onProgress?.({ fraction: 0, samples: 0, stage: 'preparing' })
         frame.onProgress?.({ fraction: 0.5, samples: Math.floor(n / 2) })
         frame.onProgress?.({ fraction: 1, samples: n })
         return { dataUrl: mockWebpDataUrl(64, 48), width: 64, height: 48, samples: n }
@@ -430,6 +431,10 @@ test('a turntable animation renders every frame at the size-based N and reports 
     { fraction: 1, samples: n, stage: 'assembling', elapsedMs: undefined, etaMs: null, frame: 5, totalFrames: 5, targetSamples: n },
   )
   assert.deepEqual(sent.progress[0].stage, 'preparing', 'the first report says the scene is being prepared')
+  assert.ok(
+    sent.progress.every((p) => p.frame === 1 || p.stage !== 'preparing'),
+    'only the first frame reports preparing',
+  )
   assert.equal(sent.progress[0].etaMs, null, 'no estimate before any work is done')
   assert.ok(sent.progress.every((p) => Number.isInteger(p.elapsedMs) && p.elapsedMs >= 0))
   const midFrames = sent.progress.filter((p) => p.frame >= 2 && p.stage !== 'assembling')

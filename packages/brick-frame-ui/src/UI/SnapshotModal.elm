@@ -5,6 +5,7 @@ module UI.SnapshotModal exposing
     , AnimResolution(..)
     , AnimSpeed(..)
     , AspectPreset(..)
+    , CameraActions
     , CropRect
     , DragState(..)
     , FramingActions
@@ -29,6 +30,8 @@ module UI.SnapshotModal exposing
     , defaultCrop
     , effectiveDimensions
     , effectiveFilename
+    , frameOutputSize
+    , frameRect
     , getAnimDuration
     , getAnimFps
     , getAnimResolution
@@ -63,8 +66,10 @@ module UI.SnapshotModal exposing
     , setReady
     , setShader
     , shaderToString
+    , startCameraRendering
     , startRendering
     , view
+    , viewCameraOverlay
     , viewFramingWithLanguage
     , viewWithLanguage
     )
@@ -402,6 +407,7 @@ type alias Model =
     , progress : Progress
     , progressDetail : ProgressDetail
     , gesture : Maybe GestureState
+    , cameraView : Maybe { width : Int, height : Int }
     }
 
 
@@ -446,6 +452,7 @@ init config =
     , progress = { fraction = 0, samples = 0 }
     , progressDetail = initialProgressDetail
     , gesture = Nothing
+    , cameraView = Nothing
     }
 
 
@@ -473,6 +480,7 @@ initFraming config =
     , progress = { fraction = 0, samples = 0 }
     , progressDetail = initialProgressDetail
     , gesture = Nothing
+    , cameraView = Nothing
     }
 
 
@@ -829,6 +837,16 @@ own aspect ratio, as the path tracer does (never below 64 px).
 -}
 outputSize : Model -> { width : Int, height : Int }
 outputSize model =
+    case model.cameraView of
+        Just viewSize ->
+            frameOutputSize viewSize model
+
+        Nothing ->
+            cropOutputSize model
+
+
+cropOutputSize : Model -> { width : Int, height : Int }
+cropOutputSize model =
     let
         dims =
             effectiveDimensions model
@@ -2088,6 +2106,10 @@ viewStyles =
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
+.snapshot-camera-scroll div { flex-wrap: nowrap !important; }
+.snapshot-camera-scroll button { white-space: nowrap; flex: none; }
+.snapshot-camera-scroll { scrollbar-width: none; }
+.snapshot-camera-scroll::-webkit-scrollbar { display: none; }
 """
         ]
 
@@ -2192,7 +2214,11 @@ viewBody lang actions model =
         ]
 
 
-viewToolbar : Language -> FramingActions msg -> Model -> Html msg
+viewToolbar :
+    Language
+    -> { a | onSetAspect : AspectPreset -> msg, onInteraction : InteractionMsg -> msg }
+    -> Model
+    -> Html msg
 viewToolbar lang actions model =
     let
         activeAspect =
@@ -2240,7 +2266,7 @@ viewToolbar lang actions model =
                 ++ (case activeMode of
                         ModeStill ->
                             [ -- 2. Aspect Ratio presets (Still mode only)
-                              aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectFree lang) (activeAspect == AspectFree)
+                              aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectView lang) (activeAspect == AspectFree)
                             , aspectPill (actions.onSetAspect Aspect16_9) (I18n.snapshotAspect16_9 lang) (activeAspect == Aspect16_9)
                             , aspectPill (actions.onSetAspect Aspect4_3) (I18n.snapshotAspect4_3 lang) (activeAspect == Aspect4_3)
                             , aspectPill (actions.onSetAspect Aspect1_1) (I18n.snapshotAspect1_1 lang) (activeAspect == Aspect1_1)
@@ -2557,6 +2583,363 @@ viewCropBox mode crop =
                 , viewHandle "top: calc(50% - 5px); left: -5px;"
                 , viewHandle "top: calc(50% - 5px); right: -5px;"
                 ]
+
+
+
+-- CAMERA OVERLAY
+
+
+{-| Actions of the camera overlay (`viewCameraOverlay`).
+-}
+type alias CameraActions msg =
+    { onClose : msg
+    , onStartRender : msg
+    , onSetAspect : AspectPreset -> msg
+    , onInteraction : InteractionMsg -> msg
+    }
+
+
+{-| Room the camera overlay keeps clear around the frame for its bars, in CSS
+pixels of a view of the given size. Both bars stay one line high at any width
+(the settings scroll sideways, the labels truncate), so this does not depend
+on how wide the view is.
+-}
+cameraInsets : { width : Int, height : Int } -> { top : Float, bottom : Float, side : Float }
+cameraInsets viewSize =
+    let
+        h =
+            toFloat viewSize.height
+    in
+    { top = min 76 (h * 0.16)
+    , bottom = min 88 (h * 0.18)
+    , side = 16
+    }
+
+
+{-| Width-to-height ratio of the camera frame, or `Nothing` for the shape of
+the view itself (`AspectFree`, shown as "View"). Animations are always 16:9.
+-}
+frameAspect : Model -> Maybe Float
+frameAspect model =
+    case model.mode of
+        ModeAnimation ->
+            Just (16 / 9)
+
+        ModeStill ->
+            case model.aspect of
+                AspectFree ->
+                    Nothing
+
+                Aspect16_9 ->
+                    Just (16 / 9)
+
+                Aspect4_3 ->
+                    Just (4 / 3)
+
+                Aspect1_1 ->
+                    Just 1
+
+
+{-| The camera frame over a live view of `width` × `height` CSS pixels, as
+fractions of the view from its top-left corner: the largest rectangle of the
+frame's aspect that fits between the overlay's bars, centred. This is the
+`crop` of the render request, and the view's own aspect is its `viewAspect`.
+-}
+frameRect : { width : Int, height : Int } -> Model -> CropRect
+frameRect viewSize model =
+    let
+        w =
+            toFloat (max 1 viewSize.width)
+
+        h =
+            toFloat (max 1 viewSize.height)
+
+        insets =
+            cameraInsets viewSize
+
+        availW =
+            max 1 (w - 2 * insets.side)
+
+        availH =
+            max 1 (h - insets.top - insets.bottom)
+
+        target =
+            Maybe.withDefault (availW / availH) (frameAspect model)
+
+        ( fw, fh ) =
+            if availW / availH > target then
+                ( availH * target, availH )
+
+            else
+                ( availW, availW / target )
+    in
+    { x = (insets.side + (availW - fw) / 2) / w
+    , y = (insets.top + (availH - fh) / 2) / h
+    , width = fw / w
+    , height = fh / h
+    }
+
+
+{-| Output size in pixels of a render of the camera frame over a view of the
+given size. A still keeps the quality preset's long side (1280, 1920 or 2560)
+and the frame's aspect; an animation has its resolution preset's size.
+-}
+frameOutputSize : { width : Int, height : Int } -> Model -> { width : Int, height : Int }
+frameOutputSize viewSize model =
+    case model.mode of
+        ModeAnimation ->
+            animDimensions model.animRes
+
+        ModeStill ->
+            let
+                rect =
+                    frameRect viewSize model
+
+                aspect =
+                    (rect.width * toFloat (max 1 viewSize.width)) / (rect.height * toFloat (max 1 viewSize.height))
+
+                long =
+                    (qualityDimensions model.quality).width
+            in
+            if aspect >= 1 then
+                { width = long, height = max 64 (round (toFloat long / aspect)) }
+
+            else
+                { width = max 64 (round (toFloat long * aspect)), height = long }
+
+
+{-| Start rendering the camera frame over a view of the given size: like
+`startRendering`, and the modal then describes the output by that frame.
+-}
+startCameraRendering : { width : Int, height : Int } -> Model -> Model
+startCameraRendering viewSize model =
+    let
+        rendering =
+            startRendering model
+    in
+    { rendering | crop = frameRect viewSize model, cameraView = Just viewSize }
+
+
+{-| The camera overlay, drawn over the live 3D view while framing and while
+rendering: the view outside the frame is dimmed, the frame has a thin border
+and thirds, and floating bars hold the settings, the output size and the
+Render and Close buttons.
+
+The overlay lets pointer input through to the view, so the host keeps
+orbiting, zooming and panning the camera as in the design view (and should
+route that input to the camera only). While rendering it blocks input and
+shows the progress inside the frame. `view` is the size of the 3D view in CSS
+pixels, which must fill the window under the overlay.
+
+-}
+viewCameraOverlay : Language -> CameraActions msg -> { width : Int, height : Int } -> Model -> Html msg
+viewCameraOverlay lang actions viewSize model =
+    let
+        rect =
+            frameRect viewSize model
+
+        rendering =
+            isRendering model
+
+        pct v =
+            String.fromFloat (v * 100) ++ "%"
+
+        mask attrs =
+            div
+                ([ Attr.style "position" "absolute"
+                 , Attr.style "background" cameraMask
+                 , Attr.style "pointer-events" "none"
+                 ]
+                    ++ attrs
+                )
+                []
+
+        size =
+            frameOutputSize viewSize model
+
+        outputLabel =
+            case model.mode of
+                ModeAnimation ->
+                    I18n.snapshotAnimationSubtitle lang size (animationFrameCount model)
+
+                ModeStill ->
+                    I18n.snapshotStillSubtitle lang size
+
+        thirdLine attrs =
+            div
+                ([ Attr.style "position" "absolute"
+                 , Attr.style "background" "rgba(255, 255, 255, 0.18)"
+                 ]
+                    ++ attrs
+                )
+                []
+    in
+    div
+        [ Attr.style "position" "fixed"
+        , Attr.style "inset" "0"
+        , Attr.style "z-index" "40"
+        , Attr.style "pointer-events"
+            (if rendering then
+                "auto"
+
+             else
+                "none"
+            )
+        , Attr.attribute "role" "region"
+        , Attr.attribute "aria-label" (I18n.snapshotCameraTitle lang)
+        , Attr.attribute "data-testid" "snapshot-camera"
+        ]
+        [ viewStyles
+        , mask [ Attr.style "top" "0", Attr.style "left" "0", Attr.style "right" "0", Attr.style "height" (pct rect.y) ]
+        , mask [ Attr.style "top" (pct (rect.y + rect.height)), Attr.style "left" "0", Attr.style "right" "0", Attr.style "bottom" "0" ]
+        , mask [ Attr.style "top" (pct rect.y), Attr.style "height" (pct rect.height), Attr.style "left" "0", Attr.style "width" (pct rect.x) ]
+        , mask [ Attr.style "top" (pct rect.y), Attr.style "height" (pct rect.height), Attr.style "left" (pct (rect.x + rect.width)), Attr.style "right" "0" ]
+        , div
+            [ Attr.style "position" "absolute"
+            , Attr.style "left" (pct rect.x)
+            , Attr.style "top" (pct rect.y)
+            , Attr.style "width" (pct rect.width)
+            , Attr.style "height" (pct rect.height)
+            , Attr.style "box-sizing" "border-box"
+            , Attr.style "border" "1px solid rgba(255, 255, 255, 0.8)"
+            , Attr.style "box-shadow" "0 0 0 1px rgba(0, 0, 0, 0.35)"
+            , Attr.style "pointer-events" "none"
+            , Attr.attribute "data-testid" "snapshot-camera-frame"
+            ]
+            (if rendering then
+                [ viewProgressOverlay lang model ]
+
+             else
+                [ thirdLine [ Attr.style "left" "33.333%", Attr.style "top" "0", Attr.style "bottom" "0", Attr.style "width" "1px" ]
+                , thirdLine [ Attr.style "left" "66.667%", Attr.style "top" "0", Attr.style "bottom" "0", Attr.style "width" "1px" ]
+                , thirdLine [ Attr.style "top" "33.333%", Attr.style "left" "0", Attr.style "right" "0", Attr.style "height" "1px" ]
+                , thirdLine [ Attr.style "top" "66.667%", Attr.style "left" "0", Attr.style "right" "0", Attr.style "height" "1px" ]
+                ]
+            )
+        , div
+            (cameraBar
+                [ Attr.style "top" "12px"
+                , Attr.attribute "data-testid" "snapshot-camera-settings"
+                ]
+            )
+            [ div
+                [ Attr.style "font-size" "13px"
+                , Attr.style "font-weight" "600"
+                , Attr.style "display" "flex"
+                , Attr.style "align-items" "center"
+                , Attr.style "gap" "6px"
+                , Attr.style "white-space" "nowrap"
+                , Attr.style "flex" "none"
+                ]
+                [ Icon.featherSized 16 "camera", text (I18n.snapshotCameraTitle lang) ]
+            , if rendering then
+                text ""
+
+              else
+                div
+                    [ Attr.class "snapshot-camera-scroll"
+                    , Attr.style "min-width" "0"
+                    , Attr.style "flex" "1 1 auto"
+                    , Attr.style "overflow-x" "auto"
+                    ]
+                    [ viewToolbar lang actions model ]
+            ]
+        , div
+            (cameraBar
+                [ Attr.style "bottom" "12px"
+                , Attr.attribute "data-testid" "snapshot-camera-actions"
+                ]
+            )
+            [ div
+                [ Attr.style "display" "flex"
+                , Attr.style "flex-direction" "column"
+                , Attr.style "gap" "2px"
+                , Attr.style "min-width" "0"
+                , Attr.style "flex" "1 1 auto"
+                ]
+                [ span (oneLine [ Attr.style "font-size" "13px", Attr.style "font-weight" "600" ]) [ text outputLabel ]
+                , if rendering then
+                    -- The progress inside the frame says how to cancel.
+                    text ""
+
+                  else
+                    span (oneLine [ Attr.style "font-size" "12px", Attr.style "color" Theme.textMuted, Attr.title (I18n.snapshotCameraHint lang) ])
+                        [ text (I18n.snapshotCameraHint lang) ]
+                ]
+            , div [ Attr.style "display" "flex", Attr.style "gap" "8px", Attr.style "margin-left" "auto", Attr.style "flex" "none" ]
+                (Button.secondary actions.onClose (I18n.snapshotClose lang)
+                    :: (if rendering then
+                            []
+
+                        else
+                            [ button
+                                [ Attr.type_ "button"
+                                , Html.Events.onClick actions.onStartRender
+                                , Attr.class "ui-button touch-target"
+                                , Attr.attribute "data-testid" "snapshot-camera-render"
+                                , Attr.style "display" "inline-flex"
+                                , Attr.style "align-items" "center"
+                                , Attr.style "gap" "8px"
+                                , Attr.style "padding" "8px 18px"
+                                , Attr.style "border" ("1px solid " ++ Theme.brand)
+                                , Attr.style "border-radius" "6px"
+                                , Attr.style "font-weight" "600"
+                                , Attr.style "font-size" "13px"
+                                , Attr.style "cursor" "pointer"
+                                , Attr.style "background" Theme.brandYellow
+                                , Attr.style "color" Theme.brand
+                                ]
+                                [ Icon.feather "camera"
+                                , text (I18n.snapshotRenderAction lang)
+                                ]
+                            ]
+                       )
+                )
+            ]
+        ]
+
+
+{-| Text kept to one line, cut with an ellipsis when it does not fit.
+-}
+oneLine : List (Html.Attribute msg) -> List (Html.Attribute msg)
+oneLine attrs =
+    [ Attr.style "white-space" "nowrap"
+    , Attr.style "overflow" "hidden"
+    , Attr.style "text-overflow" "ellipsis"
+    ]
+        ++ attrs
+
+
+{-| Dim over the view outside the camera frame.
+-}
+cameraMask : String
+cameraMask =
+    "rgba(2, 6, 10, 0.72)"
+
+
+{-| A floating bar of the camera overlay, centred horizontally; `attrs` place it.
+-}
+cameraBar : List (Html.Attribute msg) -> List (Html.Attribute msg)
+cameraBar attrs =
+    [ Attr.style "position" "absolute"
+    , Attr.style "left" "50%"
+    , Attr.style "transform" "translateX(-50%)"
+    , Attr.style "width" "max-content"
+    , Attr.style "max-width" "calc(100% - 24px)"
+    , Attr.style "box-sizing" "border-box"
+    , Attr.style "display" "flex"
+    , Attr.style "align-items" "center"
+    , Attr.style "flex-wrap" "nowrap"
+    , Attr.style "gap" "12px"
+    , Attr.style "padding" "8px 12px"
+    , Attr.style "background" "var(--color-bg-page)"
+    , Attr.style "color" "var(--color-text-primary)"
+    , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+    , Attr.style "border-radius" "10px"
+    , Attr.style "box-shadow" "0 10px 30px -10px rgba(0, 0, 0, 0.6)"
+    , Attr.style "pointer-events" "auto"
+    ]
+        ++ attrs
 
 
 viewProgressOverlay : Language -> Model -> Html msg

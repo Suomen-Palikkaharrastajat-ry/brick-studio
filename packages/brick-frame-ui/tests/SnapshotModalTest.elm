@@ -8,6 +8,7 @@ import Html.Attributes as HtmlAttr
 import I18n exposing (Language(..))
 import Json.Encode as Encode
 import Test exposing (Test, describe, test)
+import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import UI.SnapshotModal as SnapshotModal
@@ -22,6 +23,7 @@ type TestMsg
     | SetAspect SnapshotModal.AspectPreset
     | ResetCrop
     | Interaction SnapshotModal.InteractionMsg
+    | Render
 
 
 testActions : SnapshotModal.Actions TestMsg
@@ -449,7 +451,7 @@ suite =
                         |> SnapshotModal.viewFramingWithLanguage En testFramingActions
                         |> Query.fromHtml
                         |> Expect.all
-                            [ \q -> Query.has [ Selector.tag "button", Selector.text "Free" ] q
+                            [ \q -> Query.has [ Selector.tag "button", Selector.text "View" ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "16:9" ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "4:3" ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "1:1" ] q
@@ -542,7 +544,7 @@ suite =
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-1x") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-half") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-quarter") ] q
-                            , \q -> Query.hasNot [ Selector.text "Free" ] q
+                            , \q -> Query.hasNot [ Selector.text "View" ] q
                             , \q -> Query.hasNot [ Selector.text "16:9" ] q
                             , \q -> Query.hasNot [ Selector.text "4:3" ] q
                             , \q -> Query.hasNot [ Selector.text "1:1" ] q
@@ -591,4 +593,117 @@ suite =
                         ]
                         modal
             ]
+        , describe "Camera overlay"
+            [ test "a 16:9 frame letterboxes a wide view between the bars, centred" <|
+                \_ ->
+                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                        |> SnapshotModal.setAspect SnapshotModal.Aspect16_9
+                        |> SnapshotModal.frameRect { width = 1280, height = 800 }
+                        |> roundRect
+                        -- 76 px top bar, 88 px bottom bar: 636 px high, 1130.7 wide.
+                        |> Expect.equal (roundRect { x = 74.67 / 1280, y = 76 / 800, width = 1130.67 / 1280, height = 636 / 800 })
+            , test "a 1:1 frame on a tall view fills the width" <|
+                \_ ->
+                    let
+                        rect =
+                            SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                                |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
+                                |> SnapshotModal.frameRect { width = 390, height = 844 }
+                    in
+                    Expect.all
+                        [ \r -> Expect.within (Expect.Absolute 1.0e-6) (358 / 390) r.width
+                        , \r -> Expect.within (Expect.Absolute 1.0e-6) (358 / 844) r.height
+                        , \r -> Expect.within (Expect.Absolute 1.0e-6) (16 / 390) r.x
+                        ]
+                        rect
+            , test "the view-shaped frame takes all the room between the bars" <|
+                \_ ->
+                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                        |> SnapshotModal.frameRect { width = 1000, height = 1000 }
+                        |> roundRect
+                        |> Expect.equal (roundRect { x = 0.016, y = 0.076, width = 0.968, height = 0.836 })
+            , test "a still keeps the quality preset's long side and the frame's aspect" <|
+                \_ ->
+                    let
+                        framing =
+                            SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+
+                        sizeFor aspect quality =
+                            framing
+                                |> SnapshotModal.setAspect aspect
+                                |> SnapshotModal.setQuality quality
+                                |> SnapshotModal.frameOutputSize { width = 1280, height = 800 }
+                    in
+                    [ sizeFor SnapshotModal.Aspect16_9 SnapshotModal.QualityStandard
+                    , sizeFor SnapshotModal.Aspect1_1 SnapshotModal.QualityHigh
+                    , sizeFor SnapshotModal.Aspect4_3 SnapshotModal.QualityFast
+                    ]
+                        |> Expect.equal
+                            [ { width = 1920, height = 1080 }
+                            , { width = 2560, height = 2560 }
+                            , { width = 1280, height = 960 }
+                            ]
+            , test "an animation frame is 16:9 at the resolution preset" <|
+                \_ ->
+                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                        |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
+                        |> SnapshotModal.setMode SnapshotModal.ModeAnimation
+                        |> (\modal ->
+                                ( SnapshotModal.frameOutputSize { width = 1280, height = 800 } modal
+                                , SnapshotModal.frameRect { width = 1280, height = 800 } modal |> (\r -> round (r.width * 1280 / (r.height * 800) * 1000))
+                                )
+                           )
+                        |> Expect.equal ( { width = 854, height = 480 }, 1778 )
+            , test "framing shows the frame, the settings and Render, and lets input through" <|
+                \_ ->
+                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                        |> SnapshotModal.setAspect SnapshotModal.Aspect16_9
+                        |> SnapshotModal.viewCameraOverlay En cameraActions { width = 1280, height = 800 }
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-frame") ]
+                            , Query.has [ Selector.text "1920 × 1080 PNG of the current view" ]
+                            , Query.has [ Selector.text "View" ]
+                            , Query.has [ Selector.text "Drag to orbit · scroll to zoom · right-drag or two fingers to pan" ]
+                            , Query.has [ Selector.attribute (HtmlAttr.style "pointer-events" "none") ]
+                            , Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-render") ]
+                                >> Event.simulate Event.click
+                                >> Event.expect Render
+                            ]
+            , test "rendering blocks input, hides the settings and shows progress in the frame" <|
+                \_ ->
+                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                        |> SnapshotModal.startCameraRendering { width = 1280, height = 800 }
+                        |> SnapshotModal.viewCameraOverlay En cameraActions { width = 1280, height = 800 }
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-frame") ]
+                                >> Query.has [ Selector.attribute (HtmlAttr.attribute "role" "progressbar") ]
+                            , Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-render") ]
+                            , Query.hasNot [ Selector.text "View" ]
+                            , Query.has [ Selector.attribute (HtmlAttr.style "pointer-events" "auto") ]
+                            ]
+            , test "after a camera render the result describes the framed output" <|
+                \_ ->
+                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                        |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
+                        |> SnapshotModal.startCameraRendering { width = 1280, height = 800 }
+                        |> SnapshotModal.setReady { dataUrl = "data:image/png;base64,abc", filename = "r.png" }
+                        |> SnapshotModal.outputSize
+                        |> Expect.equal { width = 1920, height = 1920 }
+            ]
         ]
+
+
+cameraActions : SnapshotModal.CameraActions TestMsg
+cameraActions =
+    { onClose = Close
+    , onStartRender = Render
+    , onSetAspect = SetAspect
+    , onInteraction = Interaction
+    }
+
+
+roundRect : SnapshotModal.CropRect -> List Int
+roundRect r =
+    List.map (\v -> round (v * 10000)) [ r.x, r.y, r.width, r.height ]

@@ -7,6 +7,7 @@ the model and which events it reports to the host.
 import Dict
 import Expect
 import Http
+import Json.Decode as Decode
 import LDraw.Document as Document exposing (Document)
 import LDraw.Parser as Parser
 import LDraw.Resolve as Resolve exposing (PartStatus(..))
@@ -102,6 +103,41 @@ suite =
                             , \m -> Expect.within (Expect.Absolute 0.0001) 1.5 m.camera.azimuth
                             , \m -> Expect.within (Expect.Absolute 0.0001) 400 m.camera.distance
                             ]
+            ]
+        , describe "snapshotFrameRequest"
+            [ test "renders the frame of the live view at the exact size, with the view's aspect" <|
+                \_ ->
+                    let
+                        request =
+                            update (WindowResize 1600 900) idle
+                                |> Tuple.first
+                                |> Viewport.snapshotFrameRequest
+                                    { filename = "r.png"
+                                    , extraTriangles = []
+                                    , crop = { x = 0.1, y = 0.2, width = 0.5, height = 0.6 }
+                                    , shader = Just "glossy"
+                                    , width = 1280
+                                    , height = 720
+                                    , timeBudgetMs = Just 8000
+                                    , animation = Nothing
+                                    }
+
+                        field name decoder =
+                            Decode.decodeValue (Decode.field name decoder) request
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal (Ok (1600 / 900)) (field "viewAspect" Decode.float)
+                        , \_ -> Expect.equal (Ok ( 1280, 720 )) (Decode.decodeValue (Decode.map2 Tuple.pair (Decode.field "width" Decode.int) (Decode.field "height" Decode.int)) request)
+                        , \_ -> Expect.equal (Ok 0.5) (Decode.decodeValue (Decode.at [ "crop", "width" ] Decode.float) request)
+                        , \_ -> Expect.equal (Ok 0.2) (Decode.decodeValue (Decode.at [ "crop", "y" ] Decode.float) request)
+                        ]
+                        ()
+            , test "the other request builders leave viewAspect out" <|
+                \_ ->
+                    Viewport.snapshotRequest { filename = "r.png", extraTriangles = [] } idle
+                        |> Decode.decodeValue (Decode.field "viewAspect" Decode.float)
+                        |> Result.toMaybe
+                        |> Expect.equal Nothing
             ]
         , describe "input events"
             [ test "WindowResize stores the size" <|

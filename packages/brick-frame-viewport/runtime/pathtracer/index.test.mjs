@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Worker } from 'node:worker_threads'
-import { createRenderSession, renderSnapshot, samplesPerPixelFor } from './index.js'
+import { createRenderSession, renderSize, renderSnapshot, samplesPerPixelFor } from './index.js'
 
 const WORKER_HREF = new URL('./worker.js', import.meta.url).href
 
@@ -315,4 +315,19 @@ test('a frame reports its stages in order: preparing, sampling, then finishing l
   for (let i = 1; i < stages.length; i++) {
     assert.ok(order[stages[i]] >= order[stages[i - 1]], `stages never go back: ${stages}`)
   }
+})
+
+test('renderSize: with viewAspect the size is exact and the crop is relative to that view', () => {
+  assert.deepEqual(renderSize({ width: 1920, height: 1080, viewAspect: 1.6, crop: { x: 0.1, y: 0.2, width: 0.8, height: 0.711 } }), {
+    width: 1920,
+    height: 1080,
+    baseAspect: 1.6,
+  })
+  // Without viewAspect: the old rule, the crop's aspect at the longer requested side.
+  assert.deepEqual(renderSize({ width: 1920, height: 1080, crop: { x: 0, y: 0, width: 0.5, height: 1 } }), {
+    width: 1707,
+    height: 1920,
+    baseAspect: 1920 / 1080,
+  })
+  assert.deepEqual(renderSize({ width: 640, height: 360, viewAspect: 0 }), { width: 640, height: 360, baseAspect: 640 / 360 })
 })

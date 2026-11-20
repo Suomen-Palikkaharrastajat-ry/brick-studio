@@ -35,6 +35,7 @@ module Viewport exposing
     , setShiftPressGrabs
     , setSpacePan
     , setTwoFingerOrbits
+    , snapshotFrameRequest
     , snapshotPreviewRequest
     , snapshotRequest
     , snapshotRequestWithCrop
@@ -3455,6 +3456,48 @@ snapshotRequestWithOptions config model =
         , height = config.height
         , timeBudgetMs = config.timeBudgetMs
         , animation = config.animation
+        , viewAspect = Nothing
+        }
+
+
+{-| Build a `captureRender` request for a frame drawn over this live viewport:
+the render uses the viewport's own camera and aspect, `crop` is the frame as
+fractions of the viewport (x, y from the top left), and `width` × `height` is
+the exact output size, whose aspect should match the frame's on screen.
+-}
+snapshotFrameRequest :
+    { filename : String
+    , extraTriangles : List Float
+    , crop : Snapshot.CropRect
+    , shader : Maybe String
+    , width : Int
+    , height : Int
+    , timeBudgetMs : Maybe Int
+    , animation : Maybe { fps : Int, durationSeconds : Float, framesExtraTriangles : Maybe (List (List Float)) }
+    }
+    -> Model
+    -> Encode.Value
+snapshotFrameRequest config model =
+    Snapshot.encodeRequestWithOptions
+        { filename = config.filename
+        , camera = model.camera
+        , lightDirection = lightDirection model
+        , triangles =
+            Snapshot.sceneTriangles
+                { scene = model.scene
+                , instanced = model.instancedScene
+                , hidden = model.hiddenSources
+                , activeSources = model.activeSources
+                }
+                ++ config.extraTriangles
+        , crop = Just config.crop
+        , outlineEdges = Nothing
+        , shader = config.shader
+        , width = Just config.width
+        , height = Just config.height
+        , timeBudgetMs = config.timeBudgetMs
+        , animation = config.animation
+        , viewAspect = Just (toFloat (max 1 model.width) / toFloat (max 1 model.height))
         }
 
 
