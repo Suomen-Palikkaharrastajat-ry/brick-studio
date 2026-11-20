@@ -443,6 +443,26 @@ suite =
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-2s") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-4s") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-6s") ] q
+                            , \q -> Query.hasNot [ Selector.text "Free" ] q
+                            , \q -> Query.hasNot [ Selector.text "16:9" ] q
+                            , \q -> Query.hasNot [ Selector.text "4:3" ] q
+                            , \q -> Query.hasNot [ Selector.text "1:1" ] q
                             ]
+            , test "preview phase allows browser dragging and does not re-enter framing on pointer down" <|
+                \_ ->
+                    let
+                        modal =
+                            readyModel
+                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerDown 0 { x = 0.5, y = 0.5 })
+                    in
+                    Expect.all
+                        [ \m -> SnapshotModal.isFraming m |> Expect.equal False
+                        , \m ->
+                            SnapshotModal.viewFramingWithLanguage En testFramingActions m
+                                |> Query.fromHtml
+                                |> Query.find [ Selector.tag "img", Selector.attribute (HtmlAttr.attribute "draggable" "true") ]
+                                |> Query.has [ Selector.attribute (HtmlAttr.style "pointer-events" "auto") ]
+                        ]
+                        modal
             ]
         ]

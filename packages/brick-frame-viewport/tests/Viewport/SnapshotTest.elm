@@ -272,7 +272,12 @@ suite =
                                 , width = Just 854
                                 , height = Just 480
                                 , timeBudgetMs = Just 15000
-                                , animation = Just { fps = 15, durationSeconds = 4.0 }
+                                , animation =
+                                    Just
+                                        { fps = 15
+                                        , durationSeconds = 4.0
+                                        , framesExtraTriangles = Just [ [ 1.0, 2.0, 3.0 ], [ 4.0, 5.0, 6.0 ] ]
+                                        }
                                 }
                     in
                     Expect.all
@@ -282,6 +287,9 @@ suite =
                         , \_ ->
                             Decode.decodeValue (Decode.at [ "animation", "durationSeconds" ] Decode.float) request
                                 |> Expect.equal (Ok 4.0)
+                        , \_ ->
+                            Decode.decodeValue (Decode.at [ "animation", "framesExtraTriangles" ] (Decode.list (Decode.list Decode.float))) request
+                                |> Expect.equal (Ok [ [ 1.0, 2.0, 3.0 ], [ 4.0, 5.0, 6.0 ] ])
                         , \_ ->
                             Decode.decodeValue (Decode.field "shader" Decode.string) request
                                 |> Expect.equal (Ok "glossy")

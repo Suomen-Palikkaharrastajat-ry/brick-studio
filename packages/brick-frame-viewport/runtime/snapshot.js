@@ -239,7 +239,13 @@ async function startAnimationPathTrace(ports, request) {
   const anim = request.animation || {}
   const fps = Math.max(1, Math.min(60, Math.round(anim.fps || 15)))
   const durationSeconds = Math.max(0.5, Math.min(30, Number(anim.durationSeconds) || 4.0))
-  const totalFrames = Math.max(1, Math.round(fps * durationSeconds))
+  const framesExtraTriangles =
+    Array.isArray(anim.framesExtraTriangles) && anim.framesExtraTriangles.length > 0
+      ? anim.framesExtraTriangles
+      : null
+  const totalFrames = framesExtraTriangles
+    ? framesExtraTriangles.length
+    : Math.max(1, Math.round(fps * durationSeconds))
   const frameDurationMs = Math.max(10, Math.round(1000 / fps))
 
   const totalBudgetMs = request.timeBudgetMs || 20000
@@ -254,6 +260,7 @@ async function startAnimationPathTrace(ports, request) {
   const dy = camPos[1] - camTarget[1]
   const dz = camPos[2] - camTarget[2]
 
+  const baseTriangles = request.triangles || []
   const frames = []
   let renderWidth = request.width || 854
   let renderHeight = request.height || 480
@@ -262,17 +269,34 @@ async function startAnimationPathTrace(ports, request) {
     for (let f = 0; f < totalFrames; f++) {
       if (controller.signal.aborted || activeRender !== controller) return
 
-      const angle = (2 * Math.PI * f) / totalFrames
-      const rx = dx * Math.cos(angle) + dz * Math.sin(angle)
-      const rz = -dx * Math.sin(angle) + dz * Math.cos(angle)
-      const frameCamera = {
-        ...request.camera,
-        position: [camTarget[0] + rx, camTarget[1] + dy, camTarget[2] + rz],
+      let frameCamera = request.camera
+      if (!framesExtraTriangles) {
+        const angle = (2 * Math.PI * f) / totalFrames
+        const rx = dx * Math.cos(angle) + dz * Math.sin(angle)
+        const rz = -dx * Math.sin(angle) + dz * Math.cos(angle)
+        frameCamera = {
+          ...request.camera,
+          position: [camTarget[0] + rx, camTarget[1] + dy, camTarget[2] + rz],
+        }
+      }
+
+      let frameTriangles = baseTriangles
+      if (framesExtraTriangles && framesExtraTriangles[f]?.length > 0) {
+        const extra = framesExtraTriangles[f]
+        if (baseTriangles instanceof Float32Array) {
+          const combined = new Float32Array(baseTriangles.length + extra.length)
+          combined.set(baseTriangles, 0)
+          combined.set(extra, baseTriangles.length)
+          frameTriangles = combined
+        } else {
+          frameTriangles = baseTriangles.concat(extra)
+        }
       }
 
       const frameReq = {
         ...request,
         camera: frameCamera,
+        triangles: frameTriangles,
         timeBudgetMs: frameBudgetMs,
       }
 

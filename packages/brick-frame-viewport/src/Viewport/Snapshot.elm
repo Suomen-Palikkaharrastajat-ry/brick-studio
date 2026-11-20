@@ -230,7 +230,7 @@ encodeRequestWithOptions :
     , width : Maybe Int
     , height : Maybe Int
     , timeBudgetMs : Maybe Int
-    , animation : Maybe { fps : Int, durationSeconds : Float }
+    , animation : Maybe { fps : Int, durationSeconds : Float, framesExtraTriangles : Maybe (List (List Float)) }
     }
     -> Encode.Value
 encodeRequestWithOptions config =
@@ -287,11 +287,25 @@ encodeRequestWithOptions config =
         animFields =
             case config.animation of
                 Just anim ->
+                    let
+                        framesField =
+                            case anim.framesExtraTriangles of
+                                Just frames ->
+                                    [ ( "framesExtraTriangles"
+                                      , Encode.list (Encode.list Encode.float) frames
+                                      )
+                                    ]
+
+                                Nothing ->
+                                    []
+                    in
                     [ ( "animation"
                       , Encode.object
-                            [ ( "fps", Encode.int anim.fps )
-                            , ( "durationSeconds", Encode.float anim.durationSeconds )
-                            ]
+                            ([ ( "fps", Encode.int anim.fps )
+                             , ( "durationSeconds", Encode.float anim.durationSeconds )
+                             ]
+                                ++ framesField
+                            )
                       )
                     ]
 

@@ -230,43 +230,19 @@ animSecondsValue dur =
             6.0
 
 
-{-| Calculate pixel dimensions for an animation based on resolution and aspect ratio preset.
+{-| Calculate pixel dimensions for an animation based on resolution preset (widescreen 16:9).
 -}
-animDimensions : AnimResolution -> AspectPreset -> { width : Int, height : Int }
-animDimensions res aspect =
+animDimensions : AnimResolution -> { width : Int, height : Int }
+animDimensions res =
     case res of
         Res720p ->
-            case aspect of
-                Aspect1_1 ->
-                    { width = 720, height = 720 }
-
-                Aspect4_3 ->
-                    { width = 960, height = 720 }
-
-                _ ->
-                    { width = 1280, height = 720 }
+            { width = 1280, height = 720 }
 
         Res480p ->
-            case aspect of
-                Aspect1_1 ->
-                    { width = 480, height = 480 }
-
-                Aspect4_3 ->
-                    { width = 640, height = 480 }
-
-                _ ->
-                    { width = 854, height = 480 }
+            { width = 854, height = 480 }
 
         Res360p ->
-            case aspect of
-                Aspect1_1 ->
-                    { width = 360, height = 360 }
-
-                Aspect4_3 ->
-                    { width = 480, height = 360 }
-
-                _ ->
-                    { width = 640, height = 360 }
+            { width = 640, height = 360 }
 
 
 {-| State for the interactive pre-render framing phase.
@@ -855,7 +831,12 @@ setMode : OutputMode -> Model -> Model
 setMode mode model =
     let
         updated =
-            { model | mode = mode }
+            case mode of
+                ModeAnimation ->
+                    { model | mode = ModeAnimation, crop = defaultCrop, aspect = Aspect16_9 }
+
+                ModeStill ->
+                    { model | mode = ModeStill }
     in
     case model.phase of
         Preview _ ->
@@ -863,8 +844,8 @@ setMode mode model =
                 | phase =
                     Framing
                         { previewUrl = model.previewUrl
-                        , crop = model.crop
-                        , aspect = model.aspect
+                        , crop = updated.crop
+                        , aspect = updated.aspect
                         }
                 , gesture = Nothing
             }
@@ -977,7 +958,7 @@ effectiveDimensions model =
         ModeAnimation ->
             let
                 dims =
-                    animDimensions model.animRes model.aspect
+                    animDimensions model.animRes
 
                 totalFrames =
                     round (animSecondsValue model.animDuration * toFloat (animFpsValue model.animFps))
@@ -1057,36 +1038,6 @@ handleInteraction msg model =
                 SelectAnimDuration dur ->
                     setAnimDuration dur model
 
-                PointerDown _ _ ->
-                    let
-                        framingModel =
-                            { model
-                                | phase =
-                                    Framing
-                                        { previewUrl = model.previewUrl
-                                        , crop = model.crop
-                                        , aspect = model.aspect
-                                        }
-                                , gesture = Nothing
-                            }
-                    in
-                    handleInteraction msg framingModel
-
-                Wheel _ _ ->
-                    let
-                        framingModel =
-                            { model
-                                | phase =
-                                    Framing
-                                        { previewUrl = model.previewUrl
-                                        , crop = model.crop
-                                        , aspect = model.aspect
-                                        }
-                                , gesture = Nothing
-                            }
-                    in
-                    handleInteraction msg framingModel
-
                 _ ->
                     model
 
@@ -1111,56 +1062,83 @@ handleInteraction msg model =
                     setAnimDuration dur model
 
                 Wheel deltaY pointer ->
-                    let
-                        scale =
-                            clamp 0.85 1.18 (1.0 + deltaY * 0.0015)
+                    if model.mode == ModeAnimation then
+                        let
+                            scale =
+                                clamp 0.85 1.18 (1.0 + deltaY * 0.0015)
 
-                        maybeRatio =
-                            aspectRatioRatio data.aspect
+                            newDim =
+                                clamp 0.2 1.0 (data.crop.width * scale)
 
-                        ( targetW, targetH ) =
-                            case maybeRatio of
-                                Nothing ->
-                                    ( clamp 0.08 1.0 (data.crop.width * scale)
-                                    , clamp 0.08 1.0 (data.crop.height * scale)
-                                    )
+                            newX =
+                                (1.0 - newDim) / 2.0
 
-                                Just ratio ->
-                                    let
-                                        rawW =
-                                            clamp 0.08 (min 1.0 ratio) (data.crop.width * scale)
+                            newY =
+                                (1.0 - newDim) / 2.0
 
-                                        rawH =
-                                            rawW / ratio
-                                    in
-                                    if rawH > 1.0 then
-                                        ( 1.0 * ratio, 1.0 )
+                            newCrop =
+                                { x = newX, y = newY, width = newDim, height = newDim }
+                        in
+                        { model
+                            | crop = newCrop
+                            , phase = Framing { data | crop = newCrop }
+                        }
 
-                                    else
-                                        ( rawW, rawH )
+                    else
+                        let
+                            scale =
+                                clamp 0.85 1.18 (1.0 + deltaY * 0.0015)
 
-                        relX =
-                            clamp 0.0 1.0 ((pointer.x - data.crop.x) / max 0.001 data.crop.width)
+                            maybeRatio =
+                                aspectRatioRatio data.aspect
 
-                        relY =
-                            clamp 0.0 1.0 ((pointer.y - data.crop.y) / max 0.001 data.crop.height)
+                            ( targetW, targetH ) =
+                                case maybeRatio of
+                                    Nothing ->
+                                        ( clamp 0.08 1.0 (data.crop.width * scale)
+                                        , clamp 0.08 1.0 (data.crop.height * scale)
+                                        )
 
-                        newX =
-                            clamp 0.0 (1.0 - targetW) (pointer.x - relX * targetW)
+                                    Just ratio ->
+                                        let
+                                            rawW =
+                                                clamp 0.08 (min 1.0 ratio) (data.crop.width * scale)
 
-                        newY =
-                            clamp 0.0 (1.0 - targetH) (pointer.y - relY * targetH)
+                                            rawH =
+                                                rawW / ratio
+                                        in
+                                        if rawH > 1.0 then
+                                            ( 1.0 * ratio, 1.0 )
 
-                        newCrop =
-                            { x = newX, y = newY, width = targetW, height = targetH }
-                    in
-                    { model
-                        | crop = newCrop
-                        , phase = Framing { data | crop = newCrop }
-                    }
+                                        else
+                                            ( rawW, rawH )
+
+                            relX =
+                                clamp 0.0 1.0 ((pointer.x - data.crop.x) / max 0.001 data.crop.width)
+
+                            relY =
+                                clamp 0.0 1.0 ((pointer.y - data.crop.y) / max 0.001 data.crop.height)
+
+                            newX =
+                                clamp 0.0 (1.0 - targetW) (pointer.x - relX * targetW)
+
+                            newY =
+                                clamp 0.0 (1.0 - targetH) (pointer.y - relY * targetH)
+
+                            newCrop =
+                                { x = newX, y = newY, width = targetW, height = targetH }
+                        in
+                        { model
+                            | crop = newCrop
+                            , phase = Framing { data | crop = newCrop }
+                        }
 
                 PointerDown pointerId point ->
-                    case model.gesture of
+                    if model.mode == ModeAnimation then
+                        model
+
+                    else
+                        case model.gesture of
                         Just (SinglePointer id1 _) ->
                             if pointerId /= id1 then
                                 let
@@ -1937,7 +1915,15 @@ viewHeader lang model =
             , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
             , Attr.style "color" Theme.textMuted
             ]
-            [ text "PNG" ]
+            [ text
+                (case model.mode of
+                    ModeAnimation ->
+                        "WebP"
+
+                    ModeStill ->
+                        "PNG"
+                )
+            ]
         ]
 
 
@@ -2012,18 +1998,18 @@ viewToolbar lang actions model =
                optionPill "mode-still" (actions.onInteraction (SelectOutputMode ModeStill)) (I18n.snapshotModeStill lang) (activeMode == ModeStill)
              , optionPill "mode-anim" (actions.onInteraction (SelectOutputMode ModeAnimation)) (I18n.snapshotModeAnimation lang) (activeMode == ModeAnimation)
              , toolbarDivider
-
-             -- 2. Aspect Ratio presets (shared by both modes)
-             , aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectFree lang) (activeAspect == AspectFree)
-             , aspectPill (actions.onSetAspect Aspect16_9) (I18n.snapshotAspect16_9 lang) (activeAspect == Aspect16_9)
-             , aspectPill (actions.onSetAspect Aspect4_3) (I18n.snapshotAspect4_3 lang) (activeAspect == Aspect4_3)
-             , aspectPill (actions.onSetAspect Aspect1_1) (I18n.snapshotAspect1_1 lang) (activeAspect == Aspect1_1)
-             , toolbarDivider
              ]
                 ++ (case activeMode of
                         ModeStill ->
-                            [ -- 3. Shader presets
-                              optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
+                            [ -- 2. Aspect Ratio presets (Still mode only)
+                              aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectFree lang) (activeAspect == AspectFree)
+                            , aspectPill (actions.onSetAspect Aspect16_9) (I18n.snapshotAspect16_9 lang) (activeAspect == Aspect16_9)
+                            , aspectPill (actions.onSetAspect Aspect4_3) (I18n.snapshotAspect4_3 lang) (activeAspect == Aspect4_3)
+                            , aspectPill (actions.onSetAspect Aspect1_1) (I18n.snapshotAspect1_1 lang) (activeAspect == Aspect1_1)
+                            , toolbarDivider
+
+                            -- 3. Shader presets
+                            , optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
                             , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
                             , toolbarDivider
 
@@ -2034,25 +2020,25 @@ viewToolbar lang actions model =
                             ]
 
                         ModeAnimation ->
-                            [ -- 3. Fixed resolutions
+                            [ -- 2. Fixed resolutions (Animation mode is 16:9 widescreen)
                               optionPill "anim-res-720p" (actions.onInteraction (SelectAnimResolution Res720p)) (I18n.snapshotAnimRes720p lang) (activeRes == Res720p)
                             , optionPill "anim-res-480p" (actions.onInteraction (SelectAnimResolution Res480p)) (I18n.snapshotAnimRes480p lang) (activeRes == Res480p)
                             , optionPill "anim-res-360p" (actions.onInteraction (SelectAnimResolution Res360p)) (I18n.snapshotAnimRes360p lang) (activeRes == Res360p)
                             , toolbarDivider
 
-                            -- 4. FPS
+                            -- 3. FPS
                             , optionPill "anim-fps-10" (actions.onInteraction (SelectAnimFps Fps10)) (I18n.snapshotAnimFps10 lang) (activeFps == Fps10)
                             , optionPill "anim-fps-15" (actions.onInteraction (SelectAnimFps Fps15)) (I18n.snapshotAnimFps15 lang) (activeFps == Fps15)
                             , optionPill "anim-fps-30" (actions.onInteraction (SelectAnimFps Fps30)) (I18n.snapshotAnimFps30 lang) (activeFps == Fps30)
                             , toolbarDivider
 
-                            -- 5. Duration
+                            -- 4. Duration
                             , optionPill "anim-dur-2s" (actions.onInteraction (SelectAnimDuration Dur2s)) (I18n.snapshotAnimDur2s lang) (activeDur == Dur2s)
                             , optionPill "anim-dur-4s" (actions.onInteraction (SelectAnimDuration Dur4s)) (I18n.snapshotAnimDur4s lang) (activeDur == Dur4s)
                             , optionPill "anim-dur-6s" (actions.onInteraction (SelectAnimDuration Dur6s)) (I18n.snapshotAnimDur6s lang) (activeDur == Dur6s)
                             , toolbarDivider
 
-                            -- 6. Shader presets
+                            -- 5. Shader presets
                             , optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
                             , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
                             ]
@@ -2115,36 +2101,65 @@ viewStage lang actions model =
                     "wait"
 
                 _ ->
-                    case model.gesture of
-                        Just (SinglePointer _ (PanDrag _ _)) ->
-                            "move"
+                    case model.mode of
+                        ModeAnimation ->
+                            "default"
 
-                        Just (SinglePointer _ (HandleDrag _ _ _)) ->
-                            "grabbing"
+                        ModeStill ->
+                            case model.gesture of
+                                Just (SinglePointer _ (PanDrag _ _)) ->
+                                    "move"
 
-                        _ ->
-                            "crosshair"
+                                Just (SinglePointer _ (HandleDrag _ _ _)) ->
+                                    "grabbing"
+
+                                _ ->
+                                    "crosshair"
+
+        eventListeners =
+            case model.phase of
+                Preview _ ->
+                    []
+
+                _ ->
+                    [ Html.Events.on "pointerdown" (Decode.map actions.onInteraction pointerDownDecoder)
+                    , Html.Events.on "pointermove" (Decode.map actions.onInteraction pointerMoveDecoder)
+                    , Html.Events.on "pointerup" (Decode.map actions.onInteraction (pointerIdDecoder PointerUp))
+                    , Html.Events.on "pointercancel" (Decode.map actions.onInteraction (pointerIdDecoder PointerCancel))
+                    , Html.Events.on "pointerleave" (Decode.map actions.onInteraction (pointerIdDecoder PointerUp))
+                    , Html.Events.preventDefaultOn "wheel" (Decode.map (\( msg, stop ) -> ( actions.onInteraction msg, stop )) wheelDecoder)
+                    ]
     in
     div
-        [ Attr.style "position" "relative"
-        , Attr.style "width" "100%"
-        , Attr.style "aspect-ratio" "16 / 9"
-        , Attr.style "background" previewBackground
-        , Attr.style "background-image" "radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)"
-        , Attr.style "background-size" "16px 16px"
-        , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
-        , Attr.style "border-radius" "8px"
-        , Attr.style "overflow" "hidden"
-        , Attr.style "user-select" "none"
-        , Attr.style "touch-action" "none"
-        , Attr.style "cursor" cursorStyle
-        , Html.Events.on "pointerdown" (Decode.map actions.onInteraction pointerDownDecoder)
-        , Html.Events.on "pointermove" (Decode.map actions.onInteraction pointerMoveDecoder)
-        , Html.Events.on "pointerup" (Decode.map actions.onInteraction (pointerIdDecoder PointerUp))
-        , Html.Events.on "pointercancel" (Decode.map actions.onInteraction (pointerIdDecoder PointerCancel))
-        , Html.Events.on "pointerleave" (Decode.map actions.onInteraction (pointerIdDecoder PointerUp))
-        , Html.Events.preventDefaultOn "wheel" (Decode.map (\( msg, stop ) -> ( actions.onInteraction msg, stop )) wheelDecoder)
-        ]
+        ([ Attr.style "position" "relative"
+         , Attr.style "width" "100%"
+         , Attr.style "aspect-ratio" "16 / 9"
+         , Attr.style "background" previewBackground
+         , Attr.style "background-image" "radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)"
+         , Attr.style "background-size" "16px 16px"
+         , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+         , Attr.style "border-radius" "8px"
+         , Attr.style "overflow" "hidden"
+         , Attr.style "user-select"
+            (case model.phase of
+                Preview _ ->
+                    "auto"
+
+                _ ->
+                    "none"
+            )
+         , Attr.style "touch-action"
+            (case model.phase of
+                Preview _ ->
+                    "auto"
+
+                _ ->
+                    "none"
+            )
+         , Attr.style "cursor" cursorStyle
+         ]
+            ++ eventListeners
+        )
         (case model.phase of
             Preview data ->
                 [ img
@@ -2154,20 +2169,22 @@ viewStage lang actions model =
                     , Attr.style "height" "100%"
                     , Attr.style "object-fit" "contain"
                     , Attr.style "display" "block"
-                    , Attr.style "pointer-events" "none"
+                    , Attr.style "pointer-events" "auto"
+                    , Attr.style "user-select" "auto"
+                    , Attr.attribute "draggable" "true"
                     ]
                     []
                 ]
 
             Rendering ->
                 [ viewRoughPreview model.previewUrl lang
-                , viewCropBox model.crop
+                , viewCropBox model.mode model.crop
                 , viewProgressOverlay lang model.progress
                 ]
 
             _ ->
                 [ viewRoughPreview model.previewUrl lang
-                , viewCropBox model.crop
+                , viewCropBox model.mode model.crop
                 ]
         )
 
@@ -2210,69 +2227,89 @@ viewRoughPreview maybeUrl lang =
                 ]
 
 
-viewCropBox : CropRect -> Html msg
-viewCropBox crop =
-    div
-        [ Attr.style "position" "absolute"
-        , Attr.style "left" (String.fromFloat (crop.x * 100.0) ++ "%")
-        , Attr.style "top" (String.fromFloat (crop.y * 100.0) ++ "%")
-        , Attr.style "width" (String.fromFloat (crop.width * 100.0) ++ "%")
-        , Attr.style "height" (String.fromFloat (crop.height * 100.0) ++ "%")
-        , Attr.style "box-sizing" "border-box"
-        , Attr.style "border" ("2px solid " ++ Theme.brandYellow)
-        , Attr.style "box-shadow" "0 0 0 9999px rgba(0, 0, 0, 0.55)"
-        , Attr.style "pointer-events" "none"
-        ]
-        [ -- Grid line 1/3 horizontal
-          div
-            [ Attr.style "position" "absolute"
-            , Attr.style "left" "0"
-            , Attr.style "right" "0"
-            , Attr.style "top" "33.33%"
-            , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
-            , Attr.style "pointer-events" "none"
-            ]
-            []
-        , -- Grid line 2/3 horizontal
-          div
-            [ Attr.style "position" "absolute"
-            , Attr.style "left" "0"
-            , Attr.style "right" "0"
-            , Attr.style "top" "66.66%"
-            , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
-            , Attr.style "pointer-events" "none"
-            ]
-            []
-        , -- Grid line 1/3 vertical
-          div
-            [ Attr.style "position" "absolute"
-            , Attr.style "top" "0"
-            , Attr.style "bottom" "0"
-            , Attr.style "left" "33.33%"
-            , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
-            , Attr.style "pointer-events" "none"
-            ]
-            []
-        , -- Grid line 2/3 vertical
-          div
-            [ Attr.style "position" "absolute"
-            , Attr.style "top" "0"
-            , Attr.style "bottom" "0"
-            , Attr.style "left" "66.66%"
-            , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
-            , Attr.style "pointer-events" "none"
-            ]
-            []
-        , -- 8 handles (4 corners + 4 edge centers)
-          viewHandle "top: -5px; left: -5px;"
-        , viewHandle "top: -5px; right: -5px;"
-        , viewHandle "bottom: -5px; left: -5px;"
-        , viewHandle "bottom: -5px; right: -5px;"
-        , viewHandle "top: -5px; left: calc(50% - 5px);"
-        , viewHandle "bottom: -5px; left: calc(50% - 5px);"
-        , viewHandle "top: calc(50% - 5px); left: -5px;"
-        , viewHandle "top: calc(50% - 5px); right: -5px;"
-        ]
+viewCropBox : OutputMode -> CropRect -> Html msg
+viewCropBox mode crop =
+    case mode of
+        ModeAnimation ->
+            if crop.width >= 0.999 && crop.height >= 0.999 then
+                text ""
+
+            else
+                div
+                    [ Attr.style "position" "absolute"
+                    , Attr.style "left" (String.fromFloat (crop.x * 100.0) ++ "%")
+                    , Attr.style "top" (String.fromFloat (crop.y * 100.0) ++ "%")
+                    , Attr.style "width" (String.fromFloat (crop.width * 100.0) ++ "%")
+                    , Attr.style "height" (String.fromFloat (crop.height * 100.0) ++ "%")
+                    , Attr.style "box-sizing" "border-box"
+                    , Attr.style "border" ("2px solid " ++ Theme.brandYellow)
+                    , Attr.style "box-shadow" "0 0 0 9999px rgba(0, 0, 0, 0.55)"
+                    , Attr.style "pointer-events" "none"
+                    ]
+                    []
+
+        ModeStill ->
+            div
+                [ Attr.style "position" "absolute"
+                , Attr.style "left" (String.fromFloat (crop.x * 100.0) ++ "%")
+                , Attr.style "top" (String.fromFloat (crop.y * 100.0) ++ "%")
+                , Attr.style "width" (String.fromFloat (crop.width * 100.0) ++ "%")
+                , Attr.style "height" (String.fromFloat (crop.height * 100.0) ++ "%")
+                , Attr.style "box-sizing" "border-box"
+                , Attr.style "border" ("2px solid " ++ Theme.brandYellow)
+                , Attr.style "box-shadow" "0 0 0 9999px rgba(0, 0, 0, 0.55)"
+                , Attr.style "pointer-events" "none"
+                ]
+                [ -- Grid line 1/3 horizontal
+                  div
+                    [ Attr.style "position" "absolute"
+                    , Attr.style "left" "0"
+                    , Attr.style "right" "0"
+                    , Attr.style "top" "33.33%"
+                    , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
+                    , Attr.style "pointer-events" "none"
+                    ]
+                    []
+                , -- Grid line 2/3 horizontal
+                  div
+                    [ Attr.style "position" "absolute"
+                    , Attr.style "left" "0"
+                    , Attr.style "right" "0"
+                    , Attr.style "top" "66.66%"
+                    , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
+                    , Attr.style "pointer-events" "none"
+                    ]
+                    []
+                , -- Grid line 1/3 vertical
+                  div
+                    [ Attr.style "position" "absolute"
+                    , Attr.style "top" "0"
+                    , Attr.style "bottom" "0"
+                    , Attr.style "left" "33.33%"
+                    , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
+                    , Attr.style "pointer-events" "none"
+                    ]
+                    []
+                , -- Grid line 2/3 vertical
+                  div
+                    [ Attr.style "position" "absolute"
+                    , Attr.style "top" "0"
+                    , Attr.style "bottom" "0"
+                    , Attr.style "left" "66.66%"
+                    , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
+                    , Attr.style "pointer-events" "none"
+                    ]
+                    []
+                , -- 8 handles (4 corners + 4 edge centers)
+                  viewHandle "top: -5px; left: -5px;"
+                , viewHandle "top: -5px; right: -5px;"
+                , viewHandle "bottom: -5px; left: -5px;"
+                , viewHandle "bottom: -5px; right: -5px;"
+                , viewHandle "top: -5px; left: calc(50% - 5px);"
+                , viewHandle "bottom: -5px; left: calc(50% - 5px);"
+                , viewHandle "top: calc(50% - 5px); left: -5px;"
+                , viewHandle "top: calc(50% - 5px); right: -5px;"
+                ]
 
 
 viewProgressOverlay : Language -> Progress -> Html msg

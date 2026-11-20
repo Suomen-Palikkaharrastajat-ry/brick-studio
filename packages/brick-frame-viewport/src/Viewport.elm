@@ -3431,7 +3431,7 @@ snapshotRequestWithOptions :
     , width : Maybe Int
     , height : Maybe Int
     , timeBudgetMs : Maybe Int
-    , animation : Maybe { fps : Int, durationSeconds : Float }
+    , animation : Maybe { fps : Int, durationSeconds : Float, framesExtraTriangles : Maybe (List (List Float)) }
     }
     -> Model
     -> Encode.Value
