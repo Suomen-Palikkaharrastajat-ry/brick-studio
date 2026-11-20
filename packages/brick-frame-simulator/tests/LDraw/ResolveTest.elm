@@ -57,6 +57,38 @@ suite =
                             [ "/ldraw/p/48/stud.dat"
                             , "https://example.com/ldraw/p/48/stud.dat"
                             ]
+            , test "8-subdivision primitive prefix routes directly to p/8/" <|
+                \_ ->
+                    partCandidateUrls testConfig "8/1-4cyli.dat"
+                        |> Expect.equal
+                            [ "/ldraw/p/8/1-4cyli.dat"
+                            , "https://example.com/ldraw/p/8/1-4cyli.dat"
+                            ]
+            , test "st4j primitive prioritizes p/ before parts/" <|
+                \_ ->
+                    partCandidateUrls testConfig "st4jfil4.dat"
+                        |> List.head
+                        |> Expect.equal (Just "/ldraw/p/st4jfil4.dat")
+            , test "wpin primitive prioritizes p/ before parts/" <|
+                \_ ->
+                    partCandidateUrls testConfig "wpin2.dat"
+                        |> List.head
+                        |> Expect.equal (Just "/ldraw/p/wpin2.dat")
+            , test "axle primitive prioritizes p/ before parts/" <|
+                \_ ->
+                    partCandidateUrls testConfig "axlehole.dat"
+                        |> List.head
+                        |> Expect.equal (Just "/ldraw/p/axlehole.dat")
+            , test "empty primitive prioritizes p/ before parts/" <|
+                \_ ->
+                    partCandidateUrls testConfig "empty.dat"
+                        |> List.head
+                        |> Expect.equal (Just "/ldraw/p/empty.dat")
+            , test "Parser normaliseName preserves 8/ prefix when stripped from p/8/" <|
+                \_ ->
+                    Parser.splitMpd "0 FILE p/8/1-4cyli.dat\n"
+                        |> Dict.keys
+                        |> Expect.equal [ "8/1-4cyli.dat" ]
             ]
         , describe "resolverConfig"
             [ test "infers bundlesBase from /raw primaryBase" <|

@@ -149,6 +149,35 @@ function determinant(m) {
 
 const datTextCache = new Map()
 
+const PRIMITIVE_PREFIX_RE =
+  /^(stud|ring|edge|cyli|cylo|cyl|disc|ndis|rin|con|chrd|tang|box|tooth|toot|connect|peghole|npeghol|stu|typest|axl|clh|clip|znap|wpin|tri|bush|fillet|filstud|logo|rect|joint|arm|mstud|zstud|hipstud|dhinge|ddoor|dtooth|dtrunc|dsnap|dnpeg|dconn|phandle|handle|fric|primo|slotm|ridge|bump|knob|empty|ribt|plug|duplo|duphandle|st4j|stx|steer|daxle|rail|beamhol|clikit|finger)/
+
+export function isLikelyPrimitive(normalized) {
+  return (
+    normalized.startsWith('p/') ||
+    normalized.startsWith('48/') ||
+    normalized.startsWith('8/') ||
+    normalized.includes('-') ||
+    /^[tr]\d{2}[a-z]/.test(normalized) ||
+    /^h\d/.test(normalized) ||
+    PRIMITIVE_PREFIX_RE.test(normalized)
+  )
+}
+
+export function candidateRelativePaths(normalized) {
+  if (normalized.startsWith('parts/') || normalized.startsWith('p/')) {
+    return [normalized]
+  } else if (normalized.startsWith('s/')) {
+    return [`parts/${normalized}`]
+  } else if (normalized.startsWith('48/') || normalized.startsWith('8/')) {
+    return [`p/${normalized}`]
+  } else if (isLikelyPrimitive(normalized)) {
+    return [`p/${normalized}`, `parts/${normalized}`, `parts/s/${normalized}`]
+  } else {
+    return [`parts/${normalized}`, `parts/s/${normalized}`, `p/${normalized}`]
+  }
+}
+
 async function fetchDatText(file, ldrawBase) {
   const normalized = file.toLowerCase().replace(/\\/g, '/')
   const key = `${ldrawBase}:${normalized}`
@@ -156,25 +185,8 @@ async function fetchDatText(file, ldrawBase) {
 
   const pending = (async () => {
     const base = ldrawBase.replace(/\/+$/, '')
-    const isPrimitive =
-      normalized.startsWith('p/') ||
-      normalized.startsWith('48/') ||
-      normalized.startsWith('8/') ||
-      normalized.includes('-') ||
-      /^(stud|ring|edge|cyl|disc|box|tooth|peghole|bush|rect|joint)/.test(normalized)
-
-    const urls = []
-    if (normalized.startsWith('parts/') || normalized.startsWith('p/')) {
-      urls.push(`${base}/${normalized}`)
-    } else if (normalized.startsWith('s/')) {
-      urls.push(`${base}/parts/${normalized}`)
-    } else if (normalized.startsWith('48/') || normalized.startsWith('8/')) {
-      urls.push(`${base}/p/${normalized}`)
-    } else if (isPrimitive) {
-      urls.push(`${base}/p/${normalized}`, `${base}/parts/${normalized}`, `${base}/parts/s/${normalized}`)
-    } else {
-      urls.push(`${base}/parts/${normalized}`, `${base}/parts/s/${normalized}`, `${base}/p/${normalized}`)
-    }
+    const relativePaths = candidateRelativePaths(normalized)
+    const urls = relativePaths.map((p) => `${base}/${p}`)
 
     for (const url of urls) {
       try {
@@ -189,11 +201,7 @@ async function fetchDatText(file, ldrawBase) {
     }
 
     if (base.startsWith('http://') || base.startsWith('https://')) {
-      const fallbackUrls = [
-        `/raw/parts/${normalized}`,
-        `/raw/parts/s/${normalized}`,
-        `/raw/p/${normalized}`,
-      ]
+      const fallbackUrls = relativePaths.map((p) => `/raw/${p}`)
       for (const url of fallbackUrls) {
         try {
           const resp = await fetch(url)

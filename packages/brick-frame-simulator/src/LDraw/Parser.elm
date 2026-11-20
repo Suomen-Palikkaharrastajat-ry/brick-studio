@@ -363,6 +363,9 @@ stripLeadingSegments value =
     else if String.startsWith "p/48/" value then
         "48/" ++ String.dropLeft 5 value
 
+    else if String.startsWith "p/8/" value then
+        "8/" ++ String.dropLeft 4 value
+
     else if String.startsWith "p/" value then
         String.dropLeft 2 value
 

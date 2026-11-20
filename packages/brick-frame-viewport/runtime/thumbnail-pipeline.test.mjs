@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { cleanPartTitle, partTitle, resolvePartTitle, MAX_TITLE_HOPS } from './thumbnail-pipeline.js'
+import {
+  cleanPartTitle,
+  partTitle,
+  resolvePartTitle,
+  MAX_TITLE_HOPS,
+  isLikelyPrimitive,
+  candidateRelativePaths,
+} from './thumbnail-pipeline.js'
 
 // A stub library: file name -> .dat text. Lookups are recorded to check hops.
 function stubLoader(files) {
@@ -85,4 +92,71 @@ test('a file that does not start with a meta line has no title', async () => {
 test('resolvePartTitle works with a bare loader function', async () => {
   const load = async (name) => (name === 'only.dat' ? '0 Only One\n' : null)
   assert.equal(await resolvePartTitle('only.dat', load), 'Only One')
+})
+
+test('isLikelyPrimitive identifies primitives and subfiles correctly', () => {
+  const primitives = [
+    'st4jfil4.dat',
+    'wpin2.dat',
+    'wpin2a.dat',
+    'wpin.dat',
+    'empty.dat',
+    'wpinhol2.dat',
+    't01o0556.dat',
+    'axlehole.dat',
+    'axl5hol9.dat',
+    'axl5ho10.dat',
+    'axl5hol8.dat',
+    'axlehol2.dat',
+    'axl3hole.dat',
+    'stud.dat',
+    '1-4cyli.dat',
+    '8/1-4cyli.dat',
+    '48/stud.dat',
+  ]
+  for (const name of primitives) {
+    assert.equal(isLikelyPrimitive(name), true, `Expected ${name} to be classified as primitive`)
+  }
+
+  const parts = ['3001.dat', '3647.dat', '4185.dat', '32062.dat', '11214.dat']
+  for (const name of parts) {
+    assert.equal(isLikelyPrimitive(name), false, `Expected ${name} to NOT be classified as primitive`)
+  }
+})
+
+test('candidateRelativePaths prioritizes correct directories and eliminates spurious 404s', () => {
+  // 8/ and 48/ primitives map directly to p/
+  assert.deepEqual(candidateRelativePaths('8/1-4cyli.dat'), ['p/8/1-4cyli.dat'])
+  assert.deepEqual(candidateRelativePaths('48/stud.dat'), ['p/48/stud.dat'])
+
+  // Explicit p/ or parts/ keep their path
+  assert.deepEqual(candidateRelativePaths('p/stud.dat'), ['p/stud.dat'])
+  assert.deepEqual(candidateRelativePaths('parts/3001.dat'), ['parts/3001.dat'])
+
+  // Subparts s/ map directly to parts/s/
+  assert.deepEqual(candidateRelativePaths('s/3001s01.dat'), ['parts/s/3001s01.dat'])
+
+  // Geometric primitives prioritize p/ before parts/
+  assert.deepEqual(candidateRelativePaths('st4jfil4.dat'), [
+    'p/st4jfil4.dat',
+    'parts/st4jfil4.dat',
+    'parts/s/st4jfil4.dat',
+  ])
+  assert.deepEqual(candidateRelativePaths('wpin2.dat'), [
+    'p/wpin2.dat',
+    'parts/wpin2.dat',
+    'parts/s/wpin2.dat',
+  ])
+  assert.deepEqual(candidateRelativePaths('axlehole.dat'), [
+    'p/axlehole.dat',
+    'parts/axlehole.dat',
+    'parts/s/axlehole.dat',
+  ])
+
+  // Normal parts prioritize parts/ before p/
+  assert.deepEqual(candidateRelativePaths('3001.dat'), [
+    'parts/3001.dat',
+    'parts/s/3001.dat',
+    'p/3001.dat',
+  ])
 })
