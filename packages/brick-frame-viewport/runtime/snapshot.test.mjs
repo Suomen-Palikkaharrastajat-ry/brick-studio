@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   WEBP_QUALITY,
+  animationEtaMs,
   animationMotion,
   animationSamplesOverride,
   copyWebglCanvasTo2d,
@@ -9,6 +10,7 @@ import {
   encodeWebp,
   fittedSize,
   initSnapshots,
+  stillProgressReporter,
 } from './snapshot.js'
 import { samplesPerPixelFor } from './pathtracer/index.js'
 
@@ -423,7 +425,15 @@ test('a turntable animation renders every frame at the size-based N and reports 
   const fractions = sent.progress.map((p) => p.fraction)
   for (let i = 1; i < fractions.length; i++) assert.ok(fractions[i] >= fractions[i - 1], `fractions ${fractions}`)
   const last = sent.progress[sent.progress.length - 1]
-  assert.deepEqual(last, { fraction: 1, samples: n, frame: 5, totalFrames: 5, targetSamples: n })
+  assert.deepEqual(
+    { ...last, elapsedMs: undefined },
+    { fraction: 1, samples: n, stage: 'assembling', elapsedMs: undefined, etaMs: null, frame: 5, totalFrames: 5, targetSamples: n },
+  )
+  assert.deepEqual(sent.progress[0].stage, 'preparing', 'the first report says the scene is being prepared')
+  assert.equal(sent.progress[0].etaMs, null, 'no estimate before any work is done')
+  assert.ok(sent.progress.every((p) => Number.isInteger(p.elapsedMs) && p.elapsedMs >= 0))
+  const midFrames = sent.progress.filter((p) => p.frame >= 2 && p.stage !== 'assembling')
+  assert.ok(midFrames.every((p) => Number.isInteger(p.etaMs) && p.etaMs >= 0), 'an estimate once a frame is done')
   assert.ok(sent.progress.every((p) => p.samples <= n), 'samples is the current frame\'s samples per pixel')
   // A frame's sampling fills only part of its slot; denoise and encode take the rest.
   const midFrame = sent.progress.find((p) => p.frame === 1 && p.samples === n)
@@ -569,4 +579,39 @@ test('without motion, an empty frame list falls back to a turntable', async () =
   const { session } = await renderAnimation({ fps: 10, durationSeconds: 0.5, framesExtraTriangles: [] })
   assert.equal(session.frames.length, 5)
   assert.equal(new Set(session.frames.map((f) => f.camera.position.join(','))).size, 5)
+})
+
+test('stillProgressReporter adds elapsed time and the time left in the budget plus the finish', () => {
+  let t = 1000
+  const sent = []
+  const report = stillProgressReporter((p) => sent.push(p), { width: 100, height: 100, timeBudgetMs: 8000 }, () => t)
+  t = 3000
+  report({ fraction: 0.25, samples: 3, stage: 'sampling' })
+  // 6 s of the 8 s budget left, plus 100 × 100 px of finishing.
+  assert.deepEqual(sent[0], { fraction: 0.25, samples: 3, stage: 'sampling', elapsedMs: 2000, etaMs: 6000 + 25 })
+  t = 9500
+  report({ fraction: 1, samples: 20, stage: 'finishing' })
+  assert.equal(sent[1].etaMs, 25, 'finishing leaves only the finish estimate')
+  t = 9600
+  report({ fraction: 1, samples: 20, stage: 'finishing' })
+  assert.equal(sent[2].etaMs, 0, 'and counts it down')
+  assert.equal(sent[2].elapsedMs, 8600)
+})
+
+test('stillProgressReporter clamps the budget like renderSnapshot', () => {
+  const sent = []
+  const report = stillProgressReporter((p) => sent.push(p), { width: 0, height: 0 }, () => 0)
+  report({ fraction: 0, samples: 0, stage: 'preparing' })
+  assert.equal(sent[0].etaMs, 30000, 'the default 30 s budget when none is given')
+})
+
+test('animationEtaMs estimates from finished frames, skipping the scene-building first one', () => {
+  assert.equal(animationEtaMs({ frameMs: [], totalFrames: 10, frame: 0, frameFraction: 0.01, frameElapsedMs: 500 }), null)
+  // Frame 0 half done in 2 s: 4 s a frame, 9.5 frames left.
+  assert.equal(animationEtaMs({ frameMs: [], totalFrames: 10, frame: 0, frameFraction: 0.5, frameElapsedMs: 2000 }), 38000)
+  // Only frame 0 done: its time is all there is.
+  assert.equal(animationEtaMs({ frameMs: [5000], totalFrames: 10, frame: 1, frameFraction: 0, frameElapsedMs: 0 }), 45000)
+  // Frames 1 and 2 took 3 s each; frame 0's 5 s is left out. 6.5 frames left.
+  assert.equal(animationEtaMs({ frameMs: [5000, 3000, 3000], totalFrames: 10, frame: 3, frameFraction: 0.5, frameElapsedMs: 1500 }), 19500)
+  assert.equal(animationEtaMs({ frameMs: [3000, 3000], totalFrames: 2, frame: 2, frameFraction: 0, frameElapsedMs: 0 }), 0)
 })

@@ -18,10 +18,14 @@
  *   instead (see "Animations" below).
  * - `cancelSnapshot` (Elm → JS): stops the render in flight and terminates
  *   its workers. Nothing is sent for a cancelled render.
- * - `snapshotProgress` (JS → Elm): `{ fraction, samples }`, at most about
- *   four times a second while a still renders. Animations add `frame`
- *   (1-based), `totalFrames` and `targetSamples`, and report after every
- *   worker pass.
+ * - `snapshotProgress` (JS → Elm): `{ fraction, samples, stage, elapsedMs,
+ *   etaMs }`, at most about four times a second while a still renders.
+ *   `stage` is `"preparing"`, `"sampling"`, `"finishing"` (denoise and
+ *   encode) or, for animations, `"assembling"` (building the WebP file).
+ *   `elapsedMs` counts from the start of the render and `etaMs` estimates
+ *   the time left, or is null while there is nothing to estimate from yet.
+ *   Animations add `frame` (1-based), `totalFrames` and `targetSamples`, and
+ *   report after every worker pass.
  * - `snapshotReady` (JS → Elm): `{ dataUrl, filename }`, sent as soon as the
  *   PNG (or animated WebP) is encoded.
  * - `snapshotFailed` (JS → Elm): a string error message, e.g. no triangles or
@@ -56,7 +60,7 @@
  * `deps.createRenderSession` replaces the session factory for animations, and
  * `deps.sessionOptions` is passed to it (e.g. `createWorker`, `workerCount`).
  */
-import { createRenderSession, renderSnapshot, samplesPerPixelFor } from './pathtracer/index.js'
+import { clampBudget, createRenderSession, renderSnapshot, samplesPerPixelFor, yieldToPaint } from './pathtracer/index.js'
 import { triangleMinY } from './pathtracer/scene.js'
 import { muxWebpAnimation } from './webp-anim.js'
 
@@ -77,6 +81,10 @@ const REVOKE_DELAY_MS = 60000
 export const WEBP_QUALITY = 0.92
 /** Share of a frame's progress that is sampling, until a frame has been timed. */
 const DEFAULT_SAMPLING_SHARE = 0.75
+/** Main-thread denoise and encode time per pixel, for a still's estimate. */
+const FINISH_MS_PER_PIXEL = 0.0025
+/** Share of the first frame that must be done before it is used to estimate. */
+const MIN_ESTIMATE_FRACTION = 0.05
 /** Most samples per pixel an explicit `animation.samplesPerPixel` may ask for. */
 const MAX_OVERRIDE_SAMPLES = 256
 
@@ -226,6 +234,52 @@ function cancelRender() {
   render.abort()
 }
 
+/**
+ * Wraps a still render's `send` so each progress report also carries
+ * `elapsedMs` and `etaMs`. The time left is what remains of the time budget
+ * (clamped like `renderSnapshot` does) plus an estimate of the main-thread
+ * finish, and during `"finishing"` only what remains of that estimate.
+ */
+export function stillProgressReporter(send, request, now = Date.now) {
+  const startedAt = now()
+  const ms = request.timeBudgetMs
+  const budget = clampBudget(ms, ms > 0 && ms <= 1000 ? 30 : undefined)
+  const finishMs = Math.max(0, (request.width || 0) * (request.height || 0) * FINISH_MS_PER_PIXEL)
+  let finishingAt = null
+  return (progress) => {
+    const t = now()
+    const elapsed = t - startedAt
+    let eta
+    if (progress.stage === 'finishing') {
+      if (finishingAt === null) finishingAt = t
+      eta = Math.max(0, finishMs - (t - finishingAt))
+    } else {
+      eta = Math.max(0, budget - elapsed) + finishMs
+    }
+    send({ ...progress, elapsedMs: Math.round(elapsed), etaMs: Math.round(eta) })
+  }
+}
+
+/**
+ * Time left in an animation, in ms, or null before there is anything to go
+ * on. `frameMs` holds the durations of the frames done so far; frame 0 also
+ * builds the scene, so later frames are averaged without it once there are
+ * any. Before the first frame is done, its own pace is used once it is at
+ * least MIN_ESTIMATE_FRACTION done.
+ */
+export function animationEtaMs({ frameMs, totalFrames, frame, frameFraction, frameElapsedMs }) {
+  const remaining = Math.max(0, totalFrames - frame - frameFraction)
+  if (frameMs.length > 0) {
+    const steady = frameMs.length > 1 ? frameMs.slice(1) : frameMs
+    const average = steady.reduce((a, b) => a + b, 0) / steady.length
+    return Math.round(average * remaining)
+  }
+  if (frameFraction >= MIN_ESTIMATE_FRACTION) {
+    return Math.round((frameElapsedMs / frameFraction) * remaining)
+  }
+  return null
+}
+
 /** Path-traced render; reports progress, then the PNG or a failure message. */
 function startPathTrace(ports, request) {
   cancelRender()
@@ -234,7 +288,7 @@ function startPathTrace(ports, request) {
   const filename = request.filename || DEFAULT_FILENAME
   renderSnapshot(request, {
     signal: controller.signal,
-    onProgress: (progress) => ports.snapshotProgress?.send(progress),
+    onProgress: stillProgressReporter((progress) => ports.snapshotProgress?.send(progress), request),
   })
     .then(({ dataUrl }) => {
       if (activeRender !== controller) return
@@ -352,15 +406,27 @@ async function startAnimationPathTrace(ports, request, deps = {}) {
     /** Sampling and finishing (denoise, encode) time of the frames done so far. */
     let samplingMs = 0
     let finishingMs = 0
-    const sendProgress = (f, frameFraction, frameSamples) => {
+    const animationStartedAt = Date.now()
+    /** Wall time of each finished frame. */
+    const frameMs = []
+    let frameStartedAt = animationStartedAt
+    const sendProgress = (f, frameFraction, frameSamples, stage) => {
+      const now = Date.now()
       ports.snapshotProgress?.send({
         fraction: Math.min(1, (f + frameFraction) / totalFrames),
         samples: frameSamples,
+        stage,
+        elapsedMs: now - animationStartedAt,
+        etaMs:
+          stage === 'assembling'
+            ? null
+            : animationEtaMs({ frameMs, totalFrames, frame: f, frameFraction, frameElapsedMs: now - frameStartedAt }),
         frame: f + 1,
         totalFrames,
         targetSamples: spp,
       })
     }
+    sendProgress(0, 0, 0, 'preparing')
 
     for (let f = 0; f < totalFrames; f++) {
       if (!isCurrent()) return
@@ -379,6 +445,7 @@ async function startAnimationPathTrace(ports, request, deps = {}) {
       // Fixed for the frame, so its progress never goes back.
       const samplingShare = samplingMs > 0 ? samplingMs / (samplingMs + finishingMs) : DEFAULT_SAMPLING_SHARE
       const startedAt = Date.now()
+      frameStartedAt = startedAt
       let sampledAt = null
       const { dataUrl } = await session.renderFrame({
         camera: frameCamera,
@@ -387,22 +454,25 @@ async function startAnimationPathTrace(ports, request, deps = {}) {
         onProgress: (p) => {
           if (p.fraction >= 1 && sampledAt === null) sampledAt = Date.now()
           if (!isCurrent()) return
-          sendProgress(f, samplingShare * p.fraction, p.samples)
+          sendProgress(f, samplingShare * p.fraction, p.samples, p.stage ?? 'sampling')
         },
       })
       const endedAt = Date.now()
       samplingMs += (sampledAt ?? endedAt) - startedAt
       finishingMs += endedAt - (sampledAt ?? endedAt)
+      frameMs.push(endedAt - startedAt)
 
       frames.push({ dataUrl, durationMs: frameDurationMs })
 
       if (!isCurrent()) return
-      sendProgress(f, 1, spp)
+      sendProgress(f, 1, spp, f + 1 < totalFrames ? 'sampling' : 'assembling')
     }
 
     if (activeRender !== controller) return
-    activeRender = null
     session.close()
+    await yieldToPaint()
+    if (activeRender !== controller) return
+    activeRender = null
 
     const { dataUrl: animatedWebpUrl } = muxWebpAnimation(frames, {
       width: session.width,

@@ -22,6 +22,11 @@
  * The frame resolves to `{ dataUrl, width, height, samples }`, where
  * `samples` is the fewest samples in any row. Progress arrives at most 4
  * times a second in budget mode, and once per worker pass otherwise.
+ * Progress carries `stage`: `"preparing"` until every worker has built the
+ * frame's scene and guide buffers, then `"sampling"`, and one last report
+ * with `"finishing"` (fraction 1) just before the main thread denoises and
+ * encodes; the render then yields once (see `yieldToPaint`) so a host can
+ * show that stage before the main thread blocks.
  *
  * Samples are seeded per pixel and sample number, so a frame rendered to N
  * samples is the same image for any worker count.
@@ -42,12 +47,33 @@ const DEFAULT_BUDGET_MS = 30000
 const MIN_BUDGET_MS = 5000
 const MAX_BUDGET_MS = 120000
 const PROGRESS_INTERVAL_MS = 250
+/** Longest wait for a paint before denoising, for hidden tabs without frames. */
+const PAINT_WAIT_MS = 100
 const TRIANGLE_STRIDE = 14
 
 /** Time budget in ms, defaulting to 30 s and clamped to [min, 120 s] (min defaults to 5 s). */
 export function clampBudget(ms, min = MIN_BUDGET_MS) {
   const value = Number.isFinite(ms) ? ms : DEFAULT_BUDGET_MS
   return Math.min(MAX_BUDGET_MS, Math.max(min, value))
+}
+
+/**
+ * Resolves after the browser has had a chance to paint (an animation frame
+ * plus a task), or after PAINT_WAIT_MS when frames are not delivered (hidden
+ * tabs). Resolves at once where there is no `requestAnimationFrame` (Node).
+ */
+export function yieldToPaint() {
+  if (typeof globalThis.requestAnimationFrame !== 'function') return Promise.resolve()
+  return new Promise((resolve) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      resolve()
+    }
+    globalThis.requestAnimationFrame(() => setTimeout(finish, 0))
+    setTimeout(finish, PAINT_WAIT_MS)
+  })
 }
 
 /** One worker per spare core, never fewer than one. */
@@ -275,6 +301,7 @@ export function createRenderSession(request, options = {}) {
   function emitProgress(state) {
     if (pending !== state || !state.onProgress) return
     const samples = Math.min(...state.latest)
+    const stage = state.guideCount < count ? 'preparing' : 'sampling'
     let fraction
     if (state.budget !== null) {
       fraction = Math.min(1, (Date.now() - state.startedAt) / state.budget)
@@ -283,11 +310,18 @@ export function createRenderSession(request, options = {}) {
       for (let i = 0; i < count; i++) done += Math.min(state.target, state.latest[i]) * rowsOf[i]
       fraction = Math.min(1, done / (height * state.target))
     }
-    state.onProgress({ fraction, samples })
+    state.onProgress({ fraction, samples, stage })
   }
 
   async function finish(state) {
     const done = state.results
+    if (state.onProgress) {
+      let reached = Infinity
+      for (const r of done) for (const n of r.counts) reached = Math.min(reached, n)
+      state.onProgress({ fraction: 1, samples: Number.isFinite(reached) ? reached : 0, stage: 'finishing' })
+      await yieldToPaint()
+      if (pending !== state) return
+    }
     const { sums, albedo, normal, depthBuffer } = assemble(
       done.map((r, i) => ({ ...r, guide: state.guides[i] })),
       width,
@@ -325,6 +359,7 @@ export function createRenderSession(request, options = {}) {
     if (!state || msg.frame !== state.frame) return
     if (msg.type === 'guide') {
       state.guides[msg.index] = { albedo: msg.albedo, normal: msg.normal, depth: msg.depth }
+      state.guideCount++
     } else if (msg.type === 'progress') {
       state.latest[msg.index] = msg.samples
       emitProgress(state)
@@ -342,8 +377,8 @@ export function createRenderSession(request, options = {}) {
    * Renders one frame. `camera` is the contract camera; `extraTriangles` adds
    * geometry for this frame only; `samplesPerPixel` (a positive integer)
    * picks fixed-sample mode, otherwise `timeBudgetMs` and
-   * `minBudgetMs` set the time budget. `onProgress({ fraction, samples })`
-   * reports this frame's progress.
+   * `minBudgetMs` set the time budget. `onProgress({ fraction, samples,
+   * stage })` reports this frame's progress (see the module header).
    */
   function renderFrame(frameOptions = {}) {
     if (failure) return Promise.reject(failure)
@@ -385,6 +420,7 @@ export function createRenderSession(request, options = {}) {
         target: fixed,
         results: new Array(count),
         guides: new Array(count),
+        guideCount: 0,
         latest: new Array(count).fill(0),
         remaining: count,
         startedAt: Date.now(),
@@ -399,6 +435,7 @@ export function createRenderSession(request, options = {}) {
           copy ? [copy.buffer] : [],
         )
       }
+      emitProgress(state)
       if (budget !== null) {
         state.stopTimer = setTimeout(() => {
           if (pending !== state) return

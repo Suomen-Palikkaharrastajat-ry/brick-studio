@@ -229,36 +229,48 @@ module I18n exposing
     , snapshotAnimSpeed1x
     , snapshotAnimSpeedHalf
     , snapshotAnimSpeedQuarter
+    , snapshotAnimationSubtitle
     , snapshotAspect16_9
     , snapshotAspect1_1
     , snapshotAspect4_3
     , snapshotAspectFree
     , snapshotClose
-      -- Language Switcher
+    , snapshotCloseCancels
+    , snapshotElapsed
+    , snapshotEstimatingTime
     , snapshotFormatPng
     , snapshotFormatWebp
+    , snapshotFrameCount
+    , snapshotFrameOf
+      -- Language Switcher
     , snapshotFramingDesc
     , snapshotFramingLoading
     , snapshotFramingTitle
     , snapshotModeAnimation
     , snapshotModeStill
-    , snapshotPathTracing
+    , snapshotProgressLabel
     , snapshotQualityFast
     , snapshotQualityHigh
     , snapshotQualityStandard
     , snapshotReadyToSave
     , snapshotReframe
     , snapshotRenderAction
-    , snapshotRenderNotice
     , snapshotRenderingAnimation
     , snapshotResetCrop
+    , snapshotSamplesOf
+    , snapshotSamplesPerPixel
     , snapshotSaveImage
+    , snapshotSavedImage
+    , snapshotSavedNotice
     , snapshotShaderGlossy
     , snapshotShaderMatte
     , snapshotShaderUsed
-    , snapshotSavedImage
-    , snapshotSavedNotice
-    , snapshotSubtitle
+    , snapshotStageAssembling
+    , snapshotStageFinishing
+    , snapshotStagePreparing
+    , snapshotStageSampling
+    , snapshotStillSubtitle
+    , snapshotTimeLeft
     , snapshotTitle
     , technicAxles
     , technicBeams
@@ -3264,16 +3276,6 @@ snapshotTitle lang =
             "Snapshot"
 
 
-snapshotSubtitle : Language -> String
-snapshotSubtitle lang =
-    case lang of
-        Fi ->
-            "1920 × 1080 PNG-kuva nykyisestä näkymästä"
-
-        En ->
-            "A 1920 × 1080 PNG of the current view"
-
-
 snapshotFramingTitle : Language -> String
 snapshotFramingTitle lang =
     case lang of
@@ -3417,26 +3419,6 @@ snapshotQualityHigh lang =
 
         En ->
             "High"
-
-
-snapshotPathTracing : Language -> Int -> String
-snapshotPathTracing lang samples =
-    case lang of
-        Fi ->
-            "Säteenseuranta… " ++ String.fromInt samples ++ " näytettä"
-
-        En ->
-            "Path tracing… " ++ String.fromInt samples ++ " samples"
-
-
-snapshotRenderNotice : Language -> String
-snapshotRenderNotice lang =
-    case lang of
-        Fi ->
-            "Luodaan säteenseurattu kuva; tämä kestää noin 30 sekuntia."
-
-        En ->
-            "Rendering a path-traced image; this takes about 30 seconds."
 
 
 snapshotSaveImage : Language -> String
@@ -3717,3 +3699,224 @@ shareClose lang =
 
         En ->
             "Close"
+
+
+snapshotStillSubtitle : Language -> { width : Int, height : Int } -> String
+snapshotStillSubtitle lang size =
+    case lang of
+        Fi ->
+            pixelSize size ++ " PNG-kuva nykyisestä näkymästä"
+
+        En ->
+            pixelSize size ++ " PNG of the current view"
+
+
+snapshotAnimationSubtitle : Language -> { width : Int, height : Int } -> Int -> String
+snapshotAnimationSubtitle lang size frames =
+    case lang of
+        Fi ->
+            pixelSize size ++ " WebP-animaatio, " ++ String.fromInt frames ++ " kuvaa"
+
+        En ->
+            pixelSize size ++ " WebP animation, " ++ String.fromInt frames ++ " frames"
+
+
+pixelSize : { width : Int, height : Int } -> String
+pixelSize size =
+    String.fromInt size.width ++ " × " ++ String.fromInt size.height
+
+
+snapshotStagePreparing : Language -> String
+snapshotStagePreparing lang =
+    case lang of
+        Fi ->
+            "Valmistellaan näkymää…"
+
+        En ->
+            "Preparing the scene…"
+
+
+snapshotStageSampling : Language -> String
+snapshotStageSampling lang =
+    case lang of
+        Fi ->
+            "Säteenseuranta…"
+
+        En ->
+            "Path tracing…"
+
+
+snapshotStageFinishing : Language -> String
+snapshotStageFinishing lang =
+    case lang of
+        Fi ->
+            "Poistetaan kohinaa ja tallennetaan…"
+
+        En ->
+            "Removing noise and encoding…"
+
+
+snapshotStageAssembling : Language -> String
+snapshotStageAssembling lang =
+    case lang of
+        Fi ->
+            "Kootaan animaatiota…"
+
+        En ->
+            "Assembling the animation…"
+
+
+{-| "Frame 7 of 20", with a 1-based frame number.
+-}
+snapshotFrameOf : Language -> Int -> Int -> String
+snapshotFrameOf lang frame total =
+    case lang of
+        Fi ->
+            "Kuva " ++ String.fromInt frame ++ " / " ++ String.fromInt total
+
+        En ->
+            "Frame " ++ String.fromInt frame ++ " of " ++ String.fromInt total
+
+
+snapshotFrameCount : Language -> Int -> String
+snapshotFrameCount lang total =
+    case lang of
+        Fi ->
+            String.fromInt total ++ " kuvaa"
+
+        En ->
+            String.fromInt total ++ " frames"
+
+
+snapshotSamplesOf : Language -> Int -> Int -> String
+snapshotSamplesOf lang samples target =
+    case lang of
+        Fi ->
+            String.fromInt samples ++ " / " ++ String.fromInt target ++ " näytettä"
+
+        En ->
+            String.fromInt samples ++ " of " ++ String.fromInt target ++ " samples"
+
+
+snapshotSamplesPerPixel : Language -> Int -> String
+snapshotSamplesPerPixel lang samples =
+    case lang of
+        Fi ->
+            String.fromInt samples ++ " näytettä pikseliä kohden"
+
+        En ->
+            String.fromInt samples ++ " samples per pixel"
+
+
+{-| Estimated time left, rounded so it does not jitter: "a few seconds" up
+to 10 s, 5 s steps below a minute, 10 s steps below 10 minutes, whole
+minutes after that.
+-}
+snapshotTimeLeft : Language -> Int -> String
+snapshotTimeLeft lang ms =
+    case ( lang, approxDuration ms ) of
+        ( Fi, Nothing ) ->
+            "Valmista muutaman sekunnin kuluttua"
+
+        ( En, Nothing ) ->
+            "A few seconds left"
+
+        ( Fi, Just duration ) ->
+            "Jäljellä noin " ++ duration
+
+        ( En, Just duration ) ->
+            "About " ++ duration ++ " left"
+
+
+{-| `Nothing` for 10 s or less, otherwise the rounded duration, e.g. "25 s",
+"3 min 20 s" or "12 min".
+-}
+approxDuration : Int -> Maybe String
+approxDuration ms =
+    let
+        secs =
+            ceiling (toFloat (max 0 ms) / 1000)
+    in
+    if secs <= 10 then
+        Nothing
+
+    else if secs < 60 then
+        Just (String.fromInt (5 * ceiling (toFloat secs / 5)) ++ " s")
+
+    else if secs < 600 then
+        let
+            rounded =
+                10 * round (toFloat secs / 10)
+
+            seconds =
+                modBy 60 rounded
+        in
+        Just
+            (String.fromInt (rounded // 60)
+                ++ " min"
+                ++ (if seconds == 0 then
+                        ""
+
+                    else
+                        " " ++ String.fromInt seconds ++ " s"
+                   )
+            )
+
+    else
+        Just (String.fromInt (round (toFloat secs / 60)) ++ " min")
+
+
+snapshotEstimatingTime : Language -> String
+snapshotEstimatingTime lang =
+    case lang of
+        Fi ->
+            "Arvioidaan kestoa…"
+
+        En ->
+            "Estimating time left…"
+
+
+{-| Elapsed time as a clock, "1:05" (or "1:02:05" past an hour).
+-}
+snapshotElapsed : Language -> Int -> String
+snapshotElapsed lang ms =
+    let
+        total =
+            max 0 ms // 1000
+
+        pad n =
+            String.padLeft 2 '0' (String.fromInt n)
+
+        clock =
+            if total >= 3600 then
+                String.fromInt (total // 3600) ++ ":" ++ pad (modBy 60 (total // 60)) ++ ":" ++ pad (modBy 60 total)
+
+            else
+                String.fromInt (total // 60) ++ ":" ++ pad (modBy 60 total)
+    in
+    case lang of
+        Fi ->
+            "kulunut " ++ clock
+
+        En ->
+            clock ++ " elapsed"
+
+
+snapshotCloseCancels : Language -> String
+snapshotCloseCancels lang =
+    case lang of
+        Fi ->
+            "Ikkunan sulkeminen keskeyttää renderöinnin."
+
+        En ->
+            "Closing the dialog cancels the render."
+
+
+snapshotProgressLabel : Language -> String
+snapshotProgressLabel lang =
+    case lang of
+        Fi ->
+            "Renderöinnin edistyminen"
+
+        En ->
+            "Render progress"

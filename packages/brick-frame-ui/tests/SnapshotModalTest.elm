@@ -6,6 +6,7 @@ module SnapshotModalTest exposing (suite)
 import Expect
 import Html.Attributes as HtmlAttr
 import I18n exposing (Language(..))
+import Json.Encode as Encode
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
@@ -136,7 +137,7 @@ suite =
                         ()
             ]
         , describe "Rendering view"
-            [ test "shows the sample count, a progress bar and the honest time estimate" <|
+            [ test "a legacy progress report shows path tracing, the samples and the percentage" <|
                 \_ ->
                     SnapshotModal.init { filename = "render.png" }
                         |> SnapshotModal.setProgress { fraction = 0.42, samples = 42 }
@@ -144,20 +145,115 @@ suite =
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ Selector.attribute (HtmlAttr.attribute "role" "dialog") ]
-                            , Query.has [ Selector.text "Path tracing… 42 samples" ]
+                            , Query.has [ Selector.text "Path tracing…" ]
+                            , Query.has [ Selector.text "42 samples per pixel" ]
                             , Query.has [ Selector.attribute (HtmlAttr.attribute "role" "progressbar") ]
                             , Query.has [ Selector.attribute (HtmlAttr.attribute "aria-valuenow" "42") ]
-                            , Query.has [ Selector.text "Rendering a path-traced image; this takes about 30 seconds." ]
+                            , Query.has [ Selector.text "42 %" ]
+                            , Query.has [ Selector.text "Estimating time left…" ]
+                            , Query.has [ Selector.text "Closing the dialog cancels the render." ]
                             , Query.has [ Selector.tag "button", Selector.text "Close" ]
-                            , Query.hasNot [ Selector.text "Raytrac" ]
+                            , Query.hasNot [ Selector.text "about 30 seconds" ]
                             , Query.hasNot [ Selector.tag "input" ]
                             ]
-            , test "starts at zero samples before any progress report" <|
+            , test "starts by preparing the scene before any progress report" <|
                 \_ ->
                     SnapshotModal.init { filename = "render.png" }
                         |> SnapshotModal.view testActions
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Path tracing… 0 samples" ]
+                        |> Expect.all
+                            [ Query.has [ Selector.text "Preparing the scene…" ]
+                            , Query.has [ Selector.text "0 %" ]
+                            ]
+            , test "a still's full report shows samples, time left and time elapsed" <|
+                \_ ->
+                    SnapshotModal.init { filename = "render.png" }
+                        |> SnapshotModal.setProgressValue
+                            (Encode.object
+                                [ ( "fraction", Encode.float 0.5 )
+                                , ( "samples", Encode.int 12 )
+                                , ( "stage", Encode.string "sampling" )
+                                , ( "elapsedMs", Encode.int 65000 )
+                                , ( "etaMs", Encode.int 200000 )
+                                ]
+                            )
+                        |> SnapshotModal.view testActions
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.text "Path tracing…" ]
+                            , Query.has [ Selector.text "12 samples per pixel" ]
+                            , Query.has [ Selector.text "About 3 min 20 s left · 1:05 elapsed" ]
+                            , Query.has [ Selector.text "50 %" ]
+                            ]
+            , test "an animation report shows the frame, its samples and the stage" <|
+                \_ ->
+                    SnapshotModal.init { filename = "render.webp" }
+                        |> SnapshotModal.setProgressValue
+                            (Encode.object
+                                [ ( "fraction", Encode.float 0.3 )
+                                , ( "samples", Encode.int 10 )
+                                , ( "stage", Encode.string "finishing" )
+                                , ( "frame", Encode.int 7 )
+                                , ( "totalFrames", Encode.int 20 )
+                                , ( "targetSamples", Encode.int 10 )
+                                , ( "elapsedMs", Encode.int 42000 )
+                                , ( "etaMs", Encode.int 8000 )
+                                ]
+                            )
+                        |> SnapshotModal.view testActions
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.text "Removing noise and encoding…" ]
+                            , Query.has [ Selector.text "Frame 7 of 20 · 10 of 10 samples" ]
+                            , Query.has [ Selector.text "A few seconds left · 0:42 elapsed" ]
+                            ]
+            , test "assembling shows the frame count and no estimate" <|
+                \_ ->
+                    SnapshotModal.init { filename = "render.webp" }
+                        |> SnapshotModal.setProgressValue
+                            (Encode.object
+                                [ ( "fraction", Encode.float 1 )
+                                , ( "samples", Encode.int 10 )
+                                , ( "stage", Encode.string "assembling" )
+                                , ( "frame", Encode.int 20 )
+                                , ( "totalFrames", Encode.int 20 )
+                                , ( "targetSamples", Encode.int 10 )
+                                , ( "elapsedMs", Encode.int 125000 )
+                                , ( "etaMs", Encode.null )
+                                ]
+                            )
+                        |> SnapshotModal.view testActions
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.text "Assembling the animation…" ]
+                            , Query.has [ Selector.text "20 frames" ]
+                            , Query.has [ Selector.text "Estimating time left… · 2:05 elapsed" ]
+                            ]
+            , test "a report that does not decode leaves the progress unchanged" <|
+                \_ ->
+                    SnapshotModal.init { filename = "render.png" }
+                        |> SnapshotModal.setProgress { fraction = 0.25, samples = 4 }
+                        |> SnapshotModal.setProgressValue (Encode.object [ ( "fraction", Encode.string "half" ) ])
+                        |> .progress
+                        |> Expect.equal { fraction = 0.25, samples = 4 }
+            , test "time left is rounded so it does not jitter" <|
+                \_ ->
+                    [ 4000, 23000, 61000, 125000, 754000 ]
+                        |> List.map (I18n.snapshotTimeLeft En)
+                        |> Expect.equal
+                            [ "A few seconds left"
+                            , "About 25 s left"
+                            , "About 1 min left"
+                            , "About 2 min 10 s left"
+                            , "About 13 min left"
+                            ]
+            , test "the animation subtitle names the size and frame count" <|
+                \_ ->
+                    SnapshotModal.init { filename = "render.webp" }
+                        |> SnapshotModal.setMode SnapshotModal.ModeAnimation
+                        |> SnapshotModal.view testActions
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "854 × 480 WebP animation, 20 frames" ]
             ]
         , describe "Failed view"
             [ test "shows the error and a Close button, without Save" <|
@@ -191,7 +287,7 @@ suite =
                     readyModel
                         |> SnapshotModal.view testActions
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "A 1920 × 1080 PNG of the current view" ]
+                        |> Query.has [ Selector.text "1920 × 1080 PNG of the current view" ]
             ]
         , describe "Framing phase"
             [ test "initFraming initializes with default crop and AspectFree" <|

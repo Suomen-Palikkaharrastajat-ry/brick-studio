@@ -296,3 +296,23 @@ test('samplesPerPixelFor spends about 4M samples a frame, within [6, 32]', () =>
   assert.equal(samplesPerPixelFor(3840, 2160), 6)
   assert.equal(samplesPerPixelFor(64, 48), 32)
 })
+
+test('a frame reports its stages in order: preparing, sampling, then finishing last', async () => {
+  const { createWorker } = recordingFactory()
+  const session = createRenderSession(baseRequest(), { workerCount: 2, createWorker, encodePng: fakeEncode([]) })
+  const progress = []
+  try {
+    await session.renderFrame({ camera: CAMERA, samplesPerPixel: 3, onProgress: (p) => progress.push(p) })
+  } finally {
+    session.close()
+  }
+  const stages = progress.map((p) => p.stage)
+  assert.equal(stages[0], 'preparing', 'reported before any worker is ready')
+  assert.deepEqual(progress[0], { fraction: 0, samples: 0, stage: 'preparing' })
+  assert.ok(stages.includes('sampling'), `stages ${stages}`)
+  assert.deepEqual(progress[progress.length - 1], { fraction: 1, samples: 3, stage: 'finishing' })
+  const order = { preparing: 0, sampling: 1, finishing: 2 }
+  for (let i = 1; i < stages.length; i++) {
+    assert.ok(order[stages[i]] >= order[stages[i - 1]], `stages never go back: ${stages}`)
+  }
+})

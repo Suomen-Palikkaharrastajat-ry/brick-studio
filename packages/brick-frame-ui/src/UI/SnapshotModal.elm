@@ -18,7 +18,9 @@ module UI.SnapshotModal exposing
     , Point
     , PreviewData
     , Progress
+    , ProgressDetail
     , QualityPreset(..)
+    , RenderStage(..)
     , ShaderPreset(..)
     , animDimensions
     , animFpsValue
@@ -42,6 +44,8 @@ module UI.SnapshotModal exposing
     , isFraming
     , isRendering
     , markSaved
+    , outputSize
+    , progressDetailDecoder
     , qualityDimensions
     , reframe
     , resetCrop
@@ -54,6 +58,7 @@ module UI.SnapshotModal exposing
     , setFailed
     , setMode
     , setProgress
+    , setProgressValue
     , setQuality
     , setReady
     , setShader
@@ -89,6 +94,42 @@ samples taken so far.
 type alias Progress =
     { fraction : Float
     , samples : Int
+    }
+
+
+{-| What the renderer is doing right now: building the scene, path tracing,
+denoising and encoding a frame, or (animations) assembling the WebP file.
+-}
+type RenderStage
+    = StagePreparing
+    | StageSampling
+    | StageFinishing
+    | StageAssembling
+
+
+{-| The rest of a progress report, beyond `Progress`: the stage, for
+animations the 1-based frame number, frame count and target samples per
+pixel, and the time elapsed and estimated left in ms (`etaMs` is `Nothing`
+until there is something to estimate from).
+-}
+type alias ProgressDetail =
+    { stage : RenderStage
+    , frame : Maybe Int
+    , totalFrames : Maybe Int
+    , targetSamples : Maybe Int
+    , elapsedMs : Maybe Int
+    , etaMs : Maybe Int
+    }
+
+
+initialProgressDetail : ProgressDetail
+initialProgressDetail =
+    { stage = StagePreparing
+    , frame = Nothing
+    , totalFrames = Nothing
+    , targetSamples = Nothing
+    , elapsedMs = Nothing
+    , etaMs = Nothing
     }
 
 
@@ -359,6 +400,7 @@ type alias Model =
     , animSpeed : AnimSpeed
     , phase : Phase
     , progress : Progress
+    , progressDetail : ProgressDetail
     , gesture : Maybe GestureState
     }
 
@@ -402,6 +444,7 @@ init config =
     , animSpeed = SpeedHalf
     , phase = Rendering
     , progress = { fraction = 0, samples = 0 }
+    , progressDetail = initialProgressDetail
     , gesture = Nothing
     }
 
@@ -428,6 +471,7 @@ initFraming config =
             , aspect = AspectFree
             }
     , progress = { fraction = 0, samples = 0 }
+    , progressDetail = initialProgressDetail
     , gesture = Nothing
     }
 
@@ -460,7 +504,12 @@ isRendering model =
 -}
 startRendering : Model -> Model
 startRendering model =
-    { model | phase = Rendering, progress = { fraction = 0, samples = 0 }, gesture = Nothing }
+    { model
+        | phase = Rendering
+        , progress = { fraction = 0, samples = 0 }
+        , progressDetail = initialProgressDetail
+        , gesture = Nothing
+    }
 
 
 {-| Return from preview back to the framing phase.
@@ -687,10 +736,21 @@ resetCrop model =
             { model | crop = defaultCrop, aspect = AspectFree }
 
 
-{-| Record the path tracer's progress.
+{-| Record the path tracer's progress from a host that sends only
+`{ fraction, samples }`: the stage reads as path tracing, with no frame or
+timing details. Prefer `setProgressValue`.
 -}
 setProgress : Progress -> Model -> Model
 setProgress progress model =
+    let
+        detail =
+            model.progressDetail
+    in
+    recordProgress progress { detail | stage = StageSampling } model
+
+
+recordProgress : Progress -> ProgressDetail -> Model -> Model
+recordProgress progress detail model =
     case model.phase of
         Preview _ ->
             model
@@ -701,7 +761,103 @@ setProgress progress model =
                     { fraction = clamp 0 1 progress.fraction
                     , samples = max 0 progress.samples
                     }
+                , progressDetail = detail
             }
+
+
+{-| Record a full progress report as the `snapshotProgress` port sends it:
+`{ fraction, samples }` plus the optional `stage`, `frame`, `totalFrames`,
+`targetSamples`, `elapsedMs` and `etaMs`. A report that does not decode
+leaves the model unchanged.
+-}
+setProgressValue : Decode.Value -> Model -> Model
+setProgressValue value model =
+    case Decode.decodeValue (Decode.map2 Tuple.pair progressDecoder progressDetailDecoder) value of
+        Ok ( progress, detail ) ->
+            recordProgress progress detail model
+
+        Err _ ->
+            model
+
+
+progressDecoder : Decode.Decoder Progress
+progressDecoder =
+    Decode.map2 Progress
+        (Decode.field "fraction" Decode.float)
+        (Decode.field "samples" Decode.int)
+
+
+{-| Decodes the detail fields of a progress report. Missing or null fields
+become `Nothing`, and a missing or unknown `stage` counts as sampling.
+-}
+progressDetailDecoder : Decode.Decoder ProgressDetail
+progressDetailDecoder =
+    let
+        optionalInt name =
+            Decode.maybe (Decode.field name (Decode.map round Decode.float))
+
+        stageDecoder =
+            Decode.maybe (Decode.field "stage" Decode.string)
+                |> Decode.map
+                    (\stage ->
+                        case stage of
+                            Just "preparing" ->
+                                StagePreparing
+
+                            Just "finishing" ->
+                                StageFinishing
+
+                            Just "assembling" ->
+                                StageAssembling
+
+                            _ ->
+                                StageSampling
+                    )
+    in
+    Decode.map6 ProgressDetail
+        stageDecoder
+        (optionalInt "frame")
+        (optionalInt "totalFrames")
+        (optionalInt "targetSamples")
+        (optionalInt "elapsedMs")
+        (optionalInt "etaMs")
+
+
+{-| Size in pixels of the image the renderer produces for the current
+settings. A crop keeps the longer side of the preset and follows the crop's
+own aspect ratio, as the path tracer does (never below 64 px).
+-}
+outputSize : Model -> { width : Int, height : Int }
+outputSize model =
+    let
+        dims =
+            effectiveDimensions model
+
+        cropW =
+            clamp 0.01 1 model.crop.width
+
+        cropH =
+            clamp 0.01 1 model.crop.height
+
+        rawW =
+            toFloat dims.width * cropW
+
+        rawH =
+            toFloat dims.height * cropH
+
+        scale =
+            toFloat (max dims.width dims.height) / max rawW rawH
+    in
+    { width = max 64 (round (rawW * scale))
+    , height = max 64 (round (rawH * scale))
+    }
+
+
+{-| Number of frames in the animation for the current settings.
+-}
+animationFrameCount : Model -> Int
+animationFrameCount model =
+    max 1 (round (animSecondsValue model.animDuration * toFloat (animFpsValue model.animFps)))
 
 
 {-| Show error message on render failure.
@@ -1972,7 +2128,16 @@ viewHeader lang model =
                             I18n.snapshotFramingDesc lang
 
                         _ ->
-                            I18n.snapshotSubtitle lang
+                            let
+                                size =
+                                    outputSize model
+                            in
+                            case model.mode of
+                                ModeAnimation ->
+                                    I18n.snapshotAnimationSubtitle lang size (animationFrameCount model)
+
+                                ModeStill ->
+                                    I18n.snapshotStillSubtitle lang size
                     )
                 ]
             ]
@@ -2261,7 +2426,7 @@ viewStage lang actions model =
             Rendering ->
                 [ viewRoughPreview model.previewUrl lang
                 , viewCropBox model.mode model.crop
-                , viewProgressOverlay lang model.progress
+                , viewProgressOverlay lang model
                 ]
 
             _ ->
@@ -2394,11 +2559,71 @@ viewCropBox mode crop =
                 ]
 
 
-viewProgressOverlay : Language -> Progress -> Html msg
-viewProgressOverlay lang progress =
+viewProgressOverlay : Language -> Model -> Html msg
+viewProgressOverlay lang model =
     let
+        progress =
+            model.progress
+
+        detail =
+            model.progressDetail
+
         percent =
             round (progress.fraction * 100)
+
+        headline =
+            case detail.stage of
+                StagePreparing ->
+                    I18n.snapshotStagePreparing lang
+
+                StageSampling ->
+                    I18n.snapshotStageSampling lang
+
+                StageFinishing ->
+                    I18n.snapshotStageFinishing lang
+
+                StageAssembling ->
+                    I18n.snapshotStageAssembling lang
+
+        counts =
+            case ( detail.frame, detail.totalFrames ) of
+                ( Just frame, Just total ) ->
+                    if detail.stage == StageAssembling then
+                        I18n.snapshotFrameCount lang total
+
+                    else
+                        I18n.snapshotFrameOf lang frame total
+                            ++ (case detail.targetSamples of
+                                    Just target ->
+                                        " · " ++ I18n.snapshotSamplesOf lang (min target progress.samples) target
+
+                                    Nothing ->
+                                        ""
+                               )
+
+                _ ->
+                    if detail.stage == StagePreparing then
+                        ""
+
+                    else
+                        I18n.snapshotSamplesPerPixel lang progress.samples
+
+        timing =
+            let
+                left =
+                    case detail.etaMs of
+                        Just ms ->
+                            I18n.snapshotTimeLeft lang ms
+
+                        Nothing ->
+                            I18n.snapshotEstimatingTime lang
+            in
+            case detail.elapsedMs of
+                Just ms ->
+                    left ++ " · " ++ I18n.snapshotElapsed lang ms
+
+                Nothing ->
+                    left
     in
     div
         [ Attr.style "position" "absolute"
@@ -2410,10 +2635,11 @@ viewProgressOverlay lang progress =
         , Attr.style "flex-direction" "column"
         , Attr.style "align-items" "center"
         , Attr.style "justify-content" "center"
-        , Attr.style "gap" "12px"
+        , Attr.style "gap" "10px"
         , Attr.style "padding" "20px"
         , Attr.style "z-index" "20"
         , Attr.style "pointer-events" "none"
+        , Attr.style "text-align" "center"
         ]
         [ div
             [ Attr.style "animation" "snapshotSpinAnim 1.2s linear infinite"
@@ -2426,36 +2652,73 @@ viewProgressOverlay lang progress =
             [ Attr.style "font-size" "15px"
             , Attr.style "font-weight" "600"
             , Attr.style "color" "#FFFFFF"
+            , Attr.attribute "aria-live" "polite"
+            , Attr.attribute "data-testid" "snapshot-stage"
             ]
-            [ text (I18n.snapshotPathTracing lang progress.samples) ]
+            [ text headline ]
+        , if String.isEmpty counts then
+            text ""
+
+          else
+            div
+                [ Attr.style "font-size" "13px"
+                , Attr.style "color" "rgba(255, 255, 255, 0.9)"
+                , Attr.style "font-variant-numeric" "tabular-nums"
+                , Attr.attribute "data-testid" "snapshot-counts"
+                ]
+                [ text counts ]
         , div
-            [ Attr.attribute "role" "progressbar"
-            , Attr.attribute "aria-label" "Path tracing progress"
-            , Attr.attribute "aria-valuemin" "0"
-            , Attr.attribute "aria-valuemax" "100"
-            , Attr.attribute "aria-valuenow" (String.fromInt percent)
+            [ Attr.style "display" "flex"
+            , Attr.style "align-items" "center"
+            , Attr.style "gap" "10px"
             , Attr.style "width" "100%"
             , Attr.style "max-width" "420px"
-            , Attr.style "height" "8px"
-            , Attr.style "background" "rgba(255, 255, 255, 0.25)"
-            , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
-            , Attr.style "border-radius" "9999px"
-            , Attr.style "overflow" "hidden"
             ]
             [ div
-                [ Attr.style "width" (String.fromInt percent ++ "%")
-                , Attr.style "height" "100%"
-                , Attr.style "background" Theme.brandYellow
-                , Attr.style "transition" "width 0.3s linear"
+                [ Attr.attribute "role" "progressbar"
+                , Attr.attribute "aria-label" (I18n.snapshotProgressLabel lang)
+                , Attr.attribute "aria-valuemin" "0"
+                , Attr.attribute "aria-valuemax" "100"
+                , Attr.attribute "aria-valuenow" (String.fromInt percent)
+                , Attr.attribute "aria-valuetext" (String.fromInt percent ++ " % · " ++ headline)
+                , Attr.style "flex" "1"
+                , Attr.style "height" "8px"
+                , Attr.style "background" "rgba(255, 255, 255, 0.25)"
+                , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+                , Attr.style "border-radius" "9999px"
+                , Attr.style "overflow" "hidden"
                 ]
-                []
+                [ div
+                    [ Attr.style "width" (String.fromInt percent ++ "%")
+                    , Attr.style "height" "100%"
+                    , Attr.style "background" Theme.brandYellow
+                    , Attr.style "transition" "width 0.3s linear"
+                    ]
+                    []
+                ]
+            , span
+                [ Attr.style "font-size" "13px"
+                , Attr.style "font-weight" "600"
+                , Attr.style "color" "#FFFFFF"
+                , Attr.style "font-variant-numeric" "tabular-nums"
+                , Attr.style "min-width" "3.2em"
+                , Attr.style "text-align" "right"
+                ]
+                [ text (String.fromInt percent ++ " %") ]
             ]
+        , div
+            [ Attr.style "font-size" "13px"
+            , Attr.style "color" "rgba(255, 255, 255, 0.9)"
+            , Attr.style "font-variant-numeric" "tabular-nums"
+            , Attr.attribute "data-testid" "snapshot-timing"
+            ]
+            [ text timing ]
         , p
             [ Attr.style "margin" "0"
             , Attr.style "font-size" "12px"
-            , Attr.style "color" "rgba(255, 255, 255, 0.85)"
+            , Attr.style "color" "rgba(255, 255, 255, 0.7)"
             ]
-            [ text (I18n.snapshotRenderNotice lang) ]
+            [ text (I18n.snapshotCloseCancels lang) ]
         ]
 
 

@@ -13,6 +13,7 @@ back exactly where they were.
 
 import Browser
 import Html exposing (Html, div)
+import Json.Encode
 import LDraw.Resolve exposing (PartCache)
 import Ports
 import Simulation
@@ -44,7 +45,7 @@ type Msg
     | PreviewMsg Preview.Msg
     | InstructionsMsg Instructions.Msg
     | SnapshotReady { dataUrl : String, filename : String }
-    | SnapshotProgress { fraction : Float, samples : Int }
+    | SnapshotProgress Json.Encode.Value
     | SnapshotFailed String
     | SnapshotSave { dataUrl : String, filename : String }
     | SnapshotClose
@@ -253,7 +254,7 @@ updateApp msg model =
             )
 
         ( SnapshotProgress progress, _, _ ) ->
-            ( { model | snapshotModal = Maybe.map (SnapshotModal.setProgress progress) model.snapshotModal }
+            ( { model | snapshotModal = Maybe.map (SnapshotModal.setProgressValue progress) model.snapshotModal }
             , Cmd.none
             )
 
