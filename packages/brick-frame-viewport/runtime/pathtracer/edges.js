@@ -264,6 +264,9 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
             sz - camera.origin[2],
           )
           const sceneDepth = depthBuffer[pixelIdx]
+          if (!Number.isFinite(sceneDepth)) {
+            continue
+          }
           if (strokeDist > sceneDepth * depthBiasFactor + depthBias) {
             continue
           }

@@ -104,6 +104,12 @@ export function denoise(color, alpha, albedo, normal, width, height, passes = PA
     } else {
       srcA[p] = srcA[p] * m + alpha[p] * (1 - m)
     }
+    if (srcA[p] <= 0.001) {
+      srcA[p] = 0
+      srcC[p * 3] = 0
+      srcC[p * 3 + 1] = 0
+      srcC[p * 3 + 2] = 0
+    }
   }
   return { color: srcC, alpha: srcA }
 }
@@ -174,12 +180,12 @@ function atrousPass(srcC, srcA, albedo, normal, dstC, dstA, width, height, step)
         dstC[pc] = sr / wsum
         dstC[pc + 1] = sg / wsum
         dstC[pc + 2] = sb / wsum
-        dstA[p] = pa >= 0.999 ? 1.0 : sa / wsum
+        dstA[p] = pa >= 0.999 ? 1.0 : (pa <= 0 ? 0 : sa / wsum)
       } else {
         dstC[pc] = pr
         dstC[pc + 1] = pg
         dstC[pc + 2] = pb
-        dstA[p] = pa >= 0.999 ? 1.0 : pa
+        dstA[p] = pa >= 0.999 ? 1.0 : (pa <= 0 ? 0 : pa)
       }
     }
   }

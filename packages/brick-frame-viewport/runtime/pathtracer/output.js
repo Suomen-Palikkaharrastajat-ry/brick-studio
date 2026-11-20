@@ -29,8 +29,16 @@ export function linearToSrgb(x) {
 export function toRgba8(color, alpha, width, height, exposure = DEFAULT_EXPOSURE) {
   const out = new Uint8ClampedArray(width * height * 4)
   for (let p = 0; p < width * height; p++) {
-    const c = p * 3
     const o = p * 4
+    const a = alpha[p]
+    if (a <= 0.001) {
+      out[o] = 0
+      out[o + 1] = 0
+      out[o + 2] = 0
+      out[o + 3] = 0
+      continue
+    }
+    const c = p * 3
     const r = Math.max(0, color[c] * exposure)
     const g = Math.max(0, color[c + 1] * exposure)
     const b = Math.max(0, color[c + 2] * exposure)
@@ -45,8 +53,7 @@ export function toRgba8(color, alpha, width, height, exposure = DEFAULT_EXPOSURE
     out[o] = Math.round(255 * linearToSrgb(rMap))
     out[o + 1] = Math.round(255 * linearToSrgb(gMap))
     out[o + 2] = Math.round(255 * linearToSrgb(bMap))
-    const a = alpha[p]
-    out[o + 3] = Math.round(255 * (a < 0 ? 0 : a > 1 ? 1 : a))
+    out[o + 3] = Math.round(255 * (a > 1 ? 1 : a))
   }
   return out
 }

@@ -402,7 +402,8 @@ export function tracePath(scene, rng, primary, out) {
       pos[2] = ray.oz + ray.dz * tHit
       if (bounce === 0 && scene.transparent) {
         out[0] = out[1] = out[2] = 0
-        out[3] = 1 - groundLitFraction(scene, rng, pos)
+        const shadow = 1 - groundLitFraction(scene, rng, pos)
+        out[3] = shadow > 0.04 ? (shadow - 0.04) / (1 - 0.04) : 0
         return out
       }
       const ny = ray.dy < 0 ? GROUND_NORMAL_Y : -GROUND_NORMAL_Y
@@ -560,7 +561,7 @@ export function captureGuide(scene, y, albedo, normal, depth) {
     const hitGround = groundDistance(scene, ray)
     const tModel = hit ? hit.t : Infinity
     if (depth) {
-      depth[x] = Math.min(tModel, hitGround)
+      depth[x] = scene.transparent ? tModel : Math.min(tModel, hitGround)
     }
     const o = x * 3
     if (tModel === Infinity && hitGround === Infinity) {
