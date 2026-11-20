@@ -353,7 +353,10 @@ resetCrop model =
 setProgress : Progress -> Model -> Model
 setProgress progress model =
     case model.phase of
-        Rendering ->
+        Preview _ ->
+            model
+
+        _ ->
             { model
                 | progress =
                     { fraction = clamp 0 1 progress.fraction
@@ -361,20 +364,17 @@ setProgress progress model =
                     }
             }
 
-        _ ->
-            model
-
 
 {-| Show error message on render failure.
 -}
 setFailed : String -> Model -> Model
 setFailed message model =
     case model.phase of
-        Rendering ->
-            { model | phase = Failed message }
+        Preview _ ->
+            model
 
         _ ->
-            model
+            { model | phase = Failed message }
 
 
 {-| Transition to the preview phase when the render is ready.
