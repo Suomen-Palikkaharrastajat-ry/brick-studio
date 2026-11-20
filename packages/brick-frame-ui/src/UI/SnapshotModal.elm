@@ -1,5 +1,8 @@
 module UI.SnapshotModal exposing
     ( Actions
+    , AnimDuration(..)
+    , AnimFps(..)
+    , AnimResolution(..)
     , AspectPreset(..)
     , CropRect
     , DragState(..)
@@ -9,14 +12,25 @@ module UI.SnapshotModal exposing
     , Handle(..)
     , InteractionMsg(..)
     , Model
+    , OutputMode(..)
     , Phase(..)
     , Point
     , PreviewData
     , Progress
     , QualityPreset(..)
     , ShaderPreset(..)
+    , animDimensions
+    , animFpsValue
+    , animSecondsValue
     , defaultCrop
+    , effectiveDimensions
+    , effectiveFilename
+    , getAnimDuration
+    , getAnimFps
+    , getAnimResolution
+    , getAnimation
     , getCrop
+    , getMode
     , getQuality
     , getShader
     , handleInteraction
@@ -28,9 +42,13 @@ module UI.SnapshotModal exposing
     , qualityDimensions
     , reframe
     , resetCrop
+    , setAnimDuration
+    , setAnimFps
+    , setAnimResolution
     , setAspect
     , setCrop
     , setFailed
+    , setMode
     , setProgress
     , setQuality
     , setReady
@@ -151,6 +169,106 @@ qualityDimensions quality =
             { width = 2560, height = 1440, timeBudgetMs = 60000 }
 
 
+{-| Snapshot output format: Still PNG image or Animated WebP turntable.
+-}
+type OutputMode
+    = ModeStill
+    | ModeAnimation
+
+
+{-| Fixed resolution presets for animations.
+-}
+type AnimResolution
+    = Res720p
+    | Res480p
+    | Res360p
+
+
+{-| Frame rate presets for animations.
+-}
+type AnimFps
+    = Fps10
+    | Fps15
+    | Fps30
+
+
+{-| Animation duration presets.
+-}
+type AnimDuration
+    = Dur2s
+    | Dur4s
+    | Dur6s
+
+
+{-| Convert FPS preset to integer value.
+-}
+animFpsValue : AnimFps -> Int
+animFpsValue fps =
+    case fps of
+        Fps10 ->
+            10
+
+        Fps15 ->
+            15
+
+        Fps30 ->
+            30
+
+
+{-| Convert duration preset to float seconds.
+-}
+animSecondsValue : AnimDuration -> Float
+animSecondsValue dur =
+    case dur of
+        Dur2s ->
+            2.0
+
+        Dur4s ->
+            4.0
+
+        Dur6s ->
+            6.0
+
+
+{-| Calculate pixel dimensions for an animation based on resolution and aspect ratio preset.
+-}
+animDimensions : AnimResolution -> AspectPreset -> { width : Int, height : Int }
+animDimensions res aspect =
+    case res of
+        Res720p ->
+            case aspect of
+                Aspect1_1 ->
+                    { width = 720, height = 720 }
+
+                Aspect4_3 ->
+                    { width = 960, height = 720 }
+
+                _ ->
+                    { width = 1280, height = 720 }
+
+        Res480p ->
+            case aspect of
+                Aspect1_1 ->
+                    { width = 480, height = 480 }
+
+                Aspect4_3 ->
+                    { width = 640, height = 480 }
+
+                _ ->
+                    { width = 854, height = 480 }
+
+        Res360p ->
+            case aspect of
+                Aspect1_1 ->
+                    { width = 360, height = 360 }
+
+                Aspect4_3 ->
+                    { width = 480, height = 360 }
+
+                _ ->
+                    { width = 640, height = 360 }
+
+
 {-| State for the interactive pre-render framing phase.
 -}
 type alias FramingData =
@@ -223,6 +341,10 @@ type InteractionMsg
     | Wheel Float Point
     | SelectShader ShaderPreset
     | SelectQuality QualityPreset
+    | SelectOutputMode OutputMode
+    | SelectAnimResolution AnimResolution
+    | SelectAnimFps AnimFps
+    | SelectAnimDuration AnimDuration
 
 
 {-| Snapshot modal state.
@@ -234,6 +356,10 @@ type alias Model =
     , aspect : AspectPreset
     , shader : ShaderPreset
     , quality : QualityPreset
+    , mode : OutputMode
+    , animRes : AnimResolution
+    , animFps : AnimFps
+    , animDuration : AnimDuration
     , phase : Phase
     , progress : Progress
     , gesture : Maybe GestureState
@@ -272,6 +398,10 @@ init config =
     , aspect = AspectFree
     , shader = ShaderGlossy
     , quality = QualityStandard
+    , mode = ModeStill
+    , animRes = Res480p
+    , animFps = Fps15
+    , animDuration = Dur4s
     , phase = Rendering
     , progress = { fraction = 0, samples = 0 }
     , gesture = Nothing
@@ -288,6 +418,10 @@ initFraming config =
     , aspect = AspectFree
     , shader = ShaderGlossy
     , quality = QualityStandard
+    , mode = ModeStill
+    , animRes = Res480p
+    , animFps = Fps15
+    , animDuration = Dur4s
     , phase =
         Framing
             { previewUrl = config.previewUrl
@@ -707,6 +841,197 @@ getQuality model =
     model.quality
 
 
+{-| Get the current output mode (still vs animation).
+-}
+getMode : Model -> OutputMode
+getMode model =
+    model.mode
+
+
+{-| Set the output mode (Still vs Animation).
+If in preview phase, switches back to framing so the user can re-render.
+-}
+setMode : OutputMode -> Model -> Model
+setMode mode model =
+    let
+        updated =
+            { model | mode = mode }
+    in
+    case model.phase of
+        Preview _ ->
+            { updated
+                | phase =
+                    Framing
+                        { previewUrl = model.previewUrl
+                        , crop = model.crop
+                        , aspect = model.aspect
+                        }
+                , gesture = Nothing
+            }
+
+        _ ->
+            updated
+
+
+{-| Get the active animation resolution preset.
+-}
+getAnimResolution : Model -> AnimResolution
+getAnimResolution model =
+    model.animRes
+
+
+{-| Set the active animation resolution preset.
+-}
+setAnimResolution : AnimResolution -> Model -> Model
+setAnimResolution res model =
+    let
+        updated =
+            { model | animRes = res }
+    in
+    case model.phase of
+        Preview _ ->
+            { updated
+                | phase =
+                    Framing
+                        { previewUrl = model.previewUrl
+                        , crop = model.crop
+                        , aspect = model.aspect
+                        }
+                , gesture = Nothing
+            }
+
+        _ ->
+            updated
+
+
+{-| Get the active animation FPS preset.
+-}
+getAnimFps : Model -> AnimFps
+getAnimFps model =
+    model.animFps
+
+
+{-| Set the active animation FPS preset.
+-}
+setAnimFps : AnimFps -> Model -> Model
+setAnimFps fps model =
+    let
+        updated =
+            { model | animFps = fps }
+    in
+    case model.phase of
+        Preview _ ->
+            { updated
+                | phase =
+                    Framing
+                        { previewUrl = model.previewUrl
+                        , crop = model.crop
+                        , aspect = model.aspect
+                        }
+                , gesture = Nothing
+            }
+
+        _ ->
+            updated
+
+
+{-| Get the active animation duration preset.
+-}
+getAnimDuration : Model -> AnimDuration
+getAnimDuration model =
+    model.animDuration
+
+
+{-| Set the active animation duration preset.
+-}
+setAnimDuration : AnimDuration -> Model -> Model
+setAnimDuration dur model =
+    let
+        updated =
+            { model | animDuration = dur }
+    in
+    case model.phase of
+        Preview _ ->
+            { updated
+                | phase =
+                    Framing
+                        { previewUrl = model.previewUrl
+                        , crop = model.crop
+                        , aspect = model.aspect
+                        }
+                , gesture = Nothing
+            }
+
+        _ ->
+            updated
+
+
+{-| Effective rendering dimensions and time budget based on current mode and settings.
+-}
+effectiveDimensions : Model -> { width : Int, height : Int, timeBudgetMs : Int }
+effectiveDimensions model =
+    case model.mode of
+        ModeStill ->
+            qualityDimensions model.quality
+
+        ModeAnimation ->
+            let
+                dims =
+                    animDimensions model.animRes model.aspect
+
+                totalFrames =
+                    round (animSecondsValue model.animDuration * toFloat (animFpsValue model.animFps))
+
+                budget =
+                    clamp 6000 35000 (totalFrames * 250)
+            in
+            { width = dims.width
+            , height = dims.height
+            , timeBudgetMs = budget
+            }
+
+
+{-| Get optional animation parameters for the render request.
+-}
+getAnimation : Model -> Maybe { fps : Int, durationSeconds : Float }
+getAnimation model =
+    case model.mode of
+        ModeStill ->
+            Nothing
+
+        ModeAnimation ->
+            Just
+                { fps = animFpsValue model.animFps
+                , durationSeconds = animSecondsValue model.animDuration
+                }
+
+
+{-| Ensure the filename has the correct extension (.png for still, .webp for animation).
+-}
+effectiveFilename : Model -> String
+effectiveFilename model =
+    case model.mode of
+        ModeStill ->
+            if String.endsWith ".webp" model.filename then
+                String.dropRight 5 model.filename ++ ".png"
+
+            else if String.endsWith ".png" model.filename then
+                model.filename
+
+            else
+                model.filename ++ ".png"
+
+        ModeAnimation ->
+            if String.endsWith ".png" model.filename then
+                String.dropRight 4 model.filename ++ ".webp"
+
+            else if String.endsWith ".webp" model.filename then
+                model.filename
+
+            else
+                model.filename ++ ".webp"
+
+
 {-| Handle interactive gesture, drag, resize, pinch, and wheel zoom on the framing canvas.
 -}
 handleInteraction : InteractionMsg -> Model -> Model
@@ -719,6 +1044,18 @@ handleInteraction msg model =
 
                 SelectQuality preset ->
                     setQuality preset model
+
+                SelectOutputMode mode ->
+                    setMode mode model
+
+                SelectAnimResolution res ->
+                    setAnimResolution res model
+
+                SelectAnimFps fps ->
+                    setAnimFps fps model
+
+                SelectAnimDuration dur ->
+                    setAnimDuration dur model
 
                 PointerDown _ _ ->
                     let
@@ -760,6 +1097,18 @@ handleInteraction msg model =
 
                 SelectQuality preset ->
                     setQuality preset model
+
+                SelectOutputMode mode ->
+                    setMode mode model
+
+                SelectAnimResolution res ->
+                    setAnimResolution res model
+
+                SelectAnimFps fps ->
+                    setAnimFps fps model
+
+                SelectAnimDuration dur ->
+                    setAnimDuration dur model
 
                 Wheel deltaY pointer ->
                     let
@@ -1070,6 +1419,18 @@ handleInteraction msg model =
 
                 SelectQuality preset ->
                     setQuality preset model
+
+                SelectOutputMode mode ->
+                    setMode mode model
+
+                SelectAnimResolution res ->
+                    setAnimResolution res model
+
+                SelectAnimFps fps ->
+                    setAnimFps fps model
+
+                SelectAnimDuration dur ->
+                    setAnimDuration dur model
 
                 _ ->
                     model
@@ -1596,7 +1957,7 @@ viewBody lang actions model =
         , -- Details row for Preview
           case model.phase of
               Preview data ->
-                  viewPreviewDetails lang data
+                  viewPreviewDetails lang model data
 
               _ ->
                   text ""
@@ -1621,6 +1982,18 @@ viewToolbar lang actions model =
 
         activeQuality =
             model.quality
+
+        activeMode =
+            model.mode
+
+        activeRes =
+            model.animRes
+
+        activeFps =
+            model.animFps
+
+        activeDur =
+            model.animDuration
     in
     div
         [ Attr.style "display" "flex"
@@ -1635,23 +2008,51 @@ viewToolbar lang actions model =
             , Attr.style "flex-wrap" "wrap"
             , Attr.style "gap" "6px"
             ]
-            [ -- 1. Aspect Ratio presets
-              aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectFree lang) (activeAspect == AspectFree)
-            , aspectPill (actions.onSetAspect Aspect16_9) (I18n.snapshotAspect16_9 lang) (activeAspect == Aspect16_9)
-            , aspectPill (actions.onSetAspect Aspect4_3) (I18n.snapshotAspect4_3 lang) (activeAspect == Aspect4_3)
-            , aspectPill (actions.onSetAspect Aspect1_1) (I18n.snapshotAspect1_1 lang) (activeAspect == Aspect1_1)
-            , -- Subtle divider
-              toolbarDivider
-              -- 2. Shader / surface presets
-            , optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
-            , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
-            , -- Subtle divider
-              toolbarDivider
-              -- 3. Quality / resolution presets
-            , optionPill "quality-preset-fast" (actions.onInteraction (SelectQuality QualityFast)) (I18n.snapshotQualityFast lang) (activeQuality == QualityFast)
-            , optionPill "quality-preset-standard" (actions.onInteraction (SelectQuality QualityStandard)) (I18n.snapshotQualityStandard lang) (activeQuality == QualityStandard)
-            , optionPill "quality-preset-high" (actions.onInteraction (SelectQuality QualityHigh)) (I18n.snapshotQualityHigh lang) (activeQuality == QualityHigh)
-            ]
+            ([ -- 1. Output mode: Still vs Animation
+               optionPill "mode-still" (actions.onInteraction (SelectOutputMode ModeStill)) (I18n.snapshotModeStill lang) (activeMode == ModeStill)
+             , optionPill "mode-anim" (actions.onInteraction (SelectOutputMode ModeAnimation)) (I18n.snapshotModeAnimation lang) (activeMode == ModeAnimation)
+             , toolbarDivider
+               -- 2. Aspect Ratio presets (shared by both modes)
+             , aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectFree lang) (activeAspect == AspectFree)
+             , aspectPill (actions.onSetAspect Aspect16_9) (I18n.snapshotAspect16_9 lang) (activeAspect == Aspect16_9)
+             , aspectPill (actions.onSetAspect Aspect4_3) (I18n.snapshotAspect4_3 lang) (activeAspect == Aspect4_3)
+             , aspectPill (actions.onSetAspect Aspect1_1) (I18n.snapshotAspect1_1 lang) (activeAspect == Aspect1_1)
+             , toolbarDivider
+             ]
+                ++ (case activeMode of
+                        ModeStill ->
+                            [ -- 3. Shader presets
+                              optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
+                            , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
+                            , toolbarDivider
+                              -- 4. Quality presets
+                            , optionPill "quality-preset-fast" (actions.onInteraction (SelectQuality QualityFast)) (I18n.snapshotQualityFast lang) (activeQuality == QualityFast)
+                            , optionPill "quality-preset-standard" (actions.onInteraction (SelectQuality QualityStandard)) (I18n.snapshotQualityStandard lang) (activeQuality == QualityStandard)
+                            , optionPill "quality-preset-high" (actions.onInteraction (SelectQuality QualityHigh)) (I18n.snapshotQualityHigh lang) (activeQuality == QualityHigh)
+                            ]
+
+                        ModeAnimation ->
+                            [ -- 3. Fixed resolutions
+                              optionPill "anim-res-720p" (actions.onInteraction (SelectAnimResolution Res720p)) (I18n.snapshotAnimRes720p lang) (activeRes == Res720p)
+                            , optionPill "anim-res-480p" (actions.onInteraction (SelectAnimResolution Res480p)) (I18n.snapshotAnimRes480p lang) (activeRes == Res480p)
+                            , optionPill "anim-res-360p" (actions.onInteraction (SelectAnimResolution Res360p)) (I18n.snapshotAnimRes360p lang) (activeRes == Res360p)
+                            , toolbarDivider
+                              -- 4. FPS
+                            , optionPill "anim-fps-10" (actions.onInteraction (SelectAnimFps Fps10)) (I18n.snapshotAnimFps10 lang) (activeFps == Fps10)
+                            , optionPill "anim-fps-15" (actions.onInteraction (SelectAnimFps Fps15)) (I18n.snapshotAnimFps15 lang) (activeFps == Fps15)
+                            , optionPill "anim-fps-30" (actions.onInteraction (SelectAnimFps Fps30)) (I18n.snapshotAnimFps30 lang) (activeFps == Fps30)
+                            , toolbarDivider
+                              -- 5. Duration
+                            , optionPill "anim-dur-2s" (actions.onInteraction (SelectAnimDuration Dur2s)) (I18n.snapshotAnimDur2s lang) (activeDur == Dur2s)
+                            , optionPill "anim-dur-4s" (actions.onInteraction (SelectAnimDuration Dur4s)) (I18n.snapshotAnimDur4s lang) (activeDur == Dur4s)
+                            , optionPill "anim-dur-6s" (actions.onInteraction (SelectAnimDuration Dur6s)) (I18n.snapshotAnimDur6s lang) (activeDur == Dur6s)
+                            , toolbarDivider
+                              -- 6. Shader presets
+                            , optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
+                            , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
+                            ]
+                   )
+            )
         , div
             [ Attr.style "display" "flex"
             , Attr.style "align-items" "center"
@@ -1954,8 +2355,16 @@ viewProgressOverlay lang progress =
         ]
 
 
-viewPreviewDetails : Language -> PreviewData -> Html msg
-viewPreviewDetails lang data =
+viewPreviewDetails : Language -> Model -> PreviewData -> Html msg
+viewPreviewDetails lang model data =
+    let
+        fmt =
+            if String.endsWith ".webp" data.filename || model.mode == ModeAnimation then
+                "WebP"
+
+            else
+                "PNG"
+    in
     div
         [ Attr.style "display" "flex"
         , Attr.style "align-items" "center"
@@ -1964,7 +2373,7 @@ viewPreviewDetails lang data =
         , Attr.style "color" Theme.textMuted
         ]
         [ div []
-            [ text (data.filename ++ " • PNG") ]
+            [ text (data.filename ++ " • " ++ fmt) ]
         , if data.hasSaved then
             div
                 [ Attr.style "display" "inline-flex"
@@ -2140,12 +2549,17 @@ viewFooter lang actions model =
                         ]
                         [ Icon.featherSized 16 "loader" ]
                     , text
-                        (case lang of
-                            Fi ->
-                                "Renderöidään tilannekuvaa…"
+                        (case model.mode of
+                            ModeAnimation ->
+                                I18n.snapshotRenderingAnimation lang
 
-                            En ->
-                                "Rendering snapshot…"
+                            ModeStill ->
+                                case lang of
+                                    Fi ->
+                                        "Renderöidään tilannekuvaa…"
+
+                                    En ->
+                                        "Rendering snapshot…"
                         )
                     ]
                 , Button.secondary actions.onClose (I18n.snapshotClose lang)

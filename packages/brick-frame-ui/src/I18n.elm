@@ -217,15 +217,28 @@ module I18n exposing
     , shortcutsFootnote
       -- Inspector & BOM
     , shortcutsHelpRows
+    , snapshotAnimDur2s
+    , snapshotAnimDur4s
+    , snapshotAnimDur6s
+    , snapshotAnimFps10
+    , snapshotAnimFps15
+    , snapshotAnimFps30
+    , snapshotAnimRes360p
+    , snapshotAnimRes480p
+    , snapshotAnimRes720p
     , snapshotAspect16_9
     , snapshotAspect1_1
     , snapshotAspect4_3
     , snapshotAspectFree
     , snapshotClose
       -- Language Switcher
+    , snapshotFormatPng
+    , snapshotFormatWebp
     , snapshotFramingDesc
     , snapshotFramingLoading
     , snapshotFramingTitle
+    , snapshotModeAnimation
+    , snapshotModeStill
     , snapshotPathTracing
     , snapshotQualityFast
     , snapshotQualityHigh
@@ -234,6 +247,7 @@ module I18n exposing
     , snapshotReframe
     , snapshotRenderAction
     , snapshotRenderNotice
+    , snapshotRenderingAnimation
     , snapshotResetCrop
     , snapshotSaveImage
     , snapshotShaderGlossy
@@ -3470,6 +3484,91 @@ snapshotClose lang =
 
         En ->
             "Close"
+
+
+snapshotModeStill : Language -> String
+snapshotModeStill lang =
+    case lang of
+        Fi ->
+            "Kuva"
+
+        En ->
+            "Still"
+
+
+snapshotModeAnimation : Language -> String
+snapshotModeAnimation lang =
+    case lang of
+        Fi ->
+            "Animaatio"
+
+        En ->
+            "Animation"
+
+
+snapshotAnimRes720p : Language -> String
+snapshotAnimRes720p _ =
+    "720p"
+
+
+snapshotAnimRes480p : Language -> String
+snapshotAnimRes480p _ =
+    "480p"
+
+
+snapshotAnimRes360p : Language -> String
+snapshotAnimRes360p _ =
+    "360p"
+
+
+snapshotAnimFps10 : Language -> String
+snapshotAnimFps10 _ =
+    "10 fps"
+
+
+snapshotAnimFps15 : Language -> String
+snapshotAnimFps15 _ =
+    "15 fps"
+
+
+snapshotAnimFps30 : Language -> String
+snapshotAnimFps30 _ =
+    "30 fps"
+
+
+snapshotAnimDur2s : Language -> String
+snapshotAnimDur2s _ =
+    "2 s"
+
+
+snapshotAnimDur4s : Language -> String
+snapshotAnimDur4s _ =
+    "4 s"
+
+
+snapshotAnimDur6s : Language -> String
+snapshotAnimDur6s _ =
+    "6 s"
+
+
+snapshotFormatWebp : Language -> String
+snapshotFormatWebp _ =
+    "WebP"
+
+
+snapshotFormatPng : Language -> String
+snapshotFormatPng _ =
+    "PNG"
+
+
+snapshotRenderingAnimation : Language -> String
+snapshotRenderingAnimation lang =
+    case lang of
+        Fi ->
+            "Renderöidään animaatiota…"
+
+        En ->
+            "Rendering animation…"
 
 
 shareModalTitle : Language -> String

@@ -237,7 +237,7 @@ export async function renderSnapshot(request, options = {}) {
       const dataUrl = await encode(rgba, width, height)
       if (settled) return
       cleanup()
-      resolve({ dataUrl })
+      resolve({ dataUrl, width, height })
     }
 
     signal?.addEventListener('abort', onAbort, { once: true })

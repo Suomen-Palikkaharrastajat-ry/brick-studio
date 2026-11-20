@@ -257,6 +257,36 @@ suite =
                                 |> Expect.equal (Ok 0.5)
                         ]
                         ()
+            , test "encodeRequestWithOptions encodes animation parameters in JSON" <|
+                \_ ->
+                    let
+                        request =
+                            Snapshot.encodeRequestWithOptions
+                                { filename = "anim.webp"
+                                , camera = Camera.init
+                                , lightDirection = Nothing
+                                , triangles = []
+                                , crop = Nothing
+                                , outlineEdges = Nothing
+                                , shader = Just "glossy"
+                                , width = Just 854
+                                , height = Just 480
+                                , timeBudgetMs = Just 15000
+                                , animation = Just { fps = 15, durationSeconds = 4.0 }
+                                }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            Decode.decodeValue (Decode.at [ "animation", "fps" ] Decode.int) request
+                                |> Expect.equal (Ok 15)
+                        , \_ ->
+                            Decode.decodeValue (Decode.at [ "animation", "durationSeconds" ] Decode.float) request
+                                |> Expect.equal (Ok 4.0)
+                        , \_ ->
+                            Decode.decodeValue (Decode.field "shader" Decode.string) request
+                                |> Expect.equal (Ok "glossy")
+                        ]
+                        ()
             ]
         ]
 

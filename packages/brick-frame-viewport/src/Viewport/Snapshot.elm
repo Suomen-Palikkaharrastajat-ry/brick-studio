@@ -212,11 +212,12 @@ encodeRequestWithCrop config =
         , width = Nothing
         , height = Nothing
         , timeBudgetMs = Nothing
+        , animation = Nothing
         }
 
 
 {-| Full configuration for `captureRender`, including optional outline edge rasterization,
-shader preset, and custom width/height/budget.
+shader preset, animation turntable options, and custom width/height/budget.
 -}
 encodeRequestWithOptions :
     { filename : String
@@ -229,6 +230,7 @@ encodeRequestWithOptions :
     , width : Maybe Int
     , height : Maybe Int
     , timeBudgetMs : Maybe Int
+    , animation : Maybe { fps : Int, durationSeconds : Float }
     }
     -> Encode.Value
 encodeRequestWithOptions config =
@@ -281,6 +283,20 @@ encodeRequestWithOptions config =
 
                 Nothing ->
                     []
+
+        animFields =
+            case config.animation of
+                Just anim ->
+                    [ ( "animation"
+                      , Encode.object
+                            [ ( "fps", Encode.int anim.fps )
+                            , ( "durationSeconds", Encode.float anim.durationSeconds )
+                            ]
+                      )
+                    ]
+
+                Nothing ->
+                    []
     in
     Encode.object
         ([ ( "width", Encode.int targetWidth )
@@ -303,6 +319,7 @@ encodeRequestWithOptions config =
             ++ cropFields
             ++ outlineFields
             ++ shaderFields
+            ++ animFields
             ++ [ ( "triangles", Encode.list Encode.float config.triangles ) ]
         )
 

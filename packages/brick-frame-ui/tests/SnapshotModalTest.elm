@@ -397,5 +397,52 @@ suite =
                         , \_ -> Expect.equal 60000 dims.timeBudgetMs
                         ]
                         modal
+            , test "selecting animation mode switches mode, exposes animation parameters, and sets webp filename" <|
+                \_ ->
+                    let
+                        modal =
+                            readyModel
+                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectOutputMode SnapshotModal.ModeAnimation)
+                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectAnimResolution SnapshotModal.Res720p)
+                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectAnimFps SnapshotModal.Fps30)
+                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectAnimDuration SnapshotModal.Dur6s)
+
+                        dims =
+                            SnapshotModal.effectiveDimensions modal
+
+                        anim =
+                            SnapshotModal.getAnimation modal
+                    in
+                    Expect.all
+                        [ \m -> SnapshotModal.getMode m |> Expect.equal SnapshotModal.ModeAnimation
+                        , \m -> SnapshotModal.getAnimResolution m |> Expect.equal SnapshotModal.Res720p
+                        , \m -> SnapshotModal.getAnimFps m |> Expect.equal SnapshotModal.Fps30
+                        , \m -> SnapshotModal.getAnimDuration m |> Expect.equal SnapshotModal.Dur6s
+                        , \m -> SnapshotModal.effectiveFilename m |> Expect.equal "test.webp"
+                        , \_ -> Expect.equal 1280 dims.width
+                        , \_ -> Expect.equal 720 dims.height
+                        , \_ -> Expect.equal (Just { fps = 30, durationSeconds = 6.0 }) anim
+                        , \m -> SnapshotModal.isFraming m |> Expect.equal True
+                        ]
+                        modal
+            , test "viewFramingWithLanguage in animation mode displays animation resolution, fps, and duration pills" <|
+                \_ ->
+                    SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                        |> SnapshotModal.setMode SnapshotModal.ModeAnimation
+                        |> SnapshotModal.viewFramingWithLanguage En testFramingActions
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "mode-still") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "mode-anim") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-res-720p") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-res-480p") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-res-360p") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-10") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-15") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-30") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-2s") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-4s") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-6s") ] q
+                            ]
             ]
         ]

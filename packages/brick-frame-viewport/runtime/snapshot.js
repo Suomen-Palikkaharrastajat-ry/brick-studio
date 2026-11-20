@@ -24,6 +24,7 @@
  * - `saveSnapshot` (Elm → JS): `{ dataUrl, filename }`, downloaded as a file.
  */
 import { renderSnapshot } from './pathtracer/index.js'
+import { muxWebpAnimation } from './webp-anim.js'
 
 if (typeof HTMLCanvasElement !== 'undefined' && HTMLCanvasElement.prototype?.getContext && !HTMLCanvasElement.prototype.__preservePatched) {
   const origGetContext = HTMLCanvasElement.prototype.getContext
@@ -207,9 +208,121 @@ function startPathTrace(ports, request) {
     })
 }
 
+export async function encodeWebp(rgba, width, height) {
+  if (typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Canvas 2D context unavailable')
+    ctx.putImageData(new ImageData(rgba, width, height), 0, 0)
+    return canvas.toDataURL('image/webp')
+  }
+  const canvas = new OffscreenCanvas(width, height)
+  const ctx = canvas.getContext('2d')
+  ctx.putImageData(new ImageData(rgba, width, height), 0, 0)
+  const blob = await canvas.convertToBlob({ type: 'image/webp' })
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+}
+
+/** Multi-frame turntable animation render encoded to an animated WebP file. */
+async function startAnimationPathTrace(ports, request) {
+  cancelRender()
+  const controller = new AbortController()
+  activeRender = controller
+
+  const anim = request.animation || {}
+  const fps = Math.max(1, Math.min(60, Math.round(anim.fps || 15)))
+  const durationSeconds = Math.max(0.5, Math.min(30, Number(anim.durationSeconds) || 4.0))
+  const totalFrames = Math.max(1, Math.round(fps * durationSeconds))
+  const frameDurationMs = Math.max(10, Math.round(1000 / fps))
+
+  const totalBudgetMs = request.timeBudgetMs || 20000
+  const frameBudgetMs = Math.max(50, Math.floor(totalBudgetMs / totalFrames))
+
+  const baseFilename = request.filename || 'palikkakehys-render.webp'
+  const filename = baseFilename.replace(/\.png$/i, '.webp')
+
+  const camPos = request.camera?.position || [0, 100, 300]
+  const camTarget = request.camera?.target || [0, 0, 0]
+  const dx = camPos[0] - camTarget[0]
+  const dy = camPos[1] - camTarget[1]
+  const dz = camPos[2] - camTarget[2]
+
+  const frames = []
+  let renderWidth = request.width || 854
+  let renderHeight = request.height || 480
+
+  try {
+    for (let f = 0; f < totalFrames; f++) {
+      if (controller.signal.aborted || activeRender !== controller) return
+
+      const angle = (2 * Math.PI * f) / totalFrames
+      const rx = dx * Math.cos(angle) + dz * Math.sin(angle)
+      const rz = -dx * Math.sin(angle) + dz * Math.cos(angle)
+      const frameCamera = {
+        ...request.camera,
+        position: [camTarget[0] + rx, camTarget[1] + dy, camTarget[2] + rz],
+      }
+
+      const frameReq = {
+        ...request,
+        camera: frameCamera,
+        timeBudgetMs: frameBudgetMs,
+      }
+
+      const { dataUrl, width, height } = await renderSnapshot(frameReq, {
+        signal: controller.signal,
+        encodePng: encodeWebp,
+        minBudgetMs: 30,
+        onProgress: (prog) => {
+          if (controller.signal.aborted || activeRender !== controller) return
+          const fraction = Math.min(1, (f + prog.fraction) / totalFrames)
+          ports.snapshotProgress?.send({ fraction, samples: f + 1 })
+        },
+      })
+
+      if (width && height) {
+        renderWidth = width
+        renderHeight = height
+      }
+
+      frames.push({ dataUrl, durationMs: frameDurationMs })
+
+      if (controller.signal.aborted || activeRender !== controller) return
+      ports.snapshotProgress?.send({ fraction: (f + 1) / totalFrames, samples: f + 1 })
+    }
+
+    if (activeRender !== controller) return
+    activeRender = null
+
+    const { dataUrl: animatedWebpUrl } = muxWebpAnimation(frames, {
+      width: renderWidth,
+      height: renderHeight,
+      fps,
+      loopCount: 0,
+    })
+
+    ports.snapshotReady?.send({ dataUrl: animatedWebpUrl, filename })
+  } catch (err) {
+    if (controller.signal.aborted || activeRender !== controller) return
+    activeRender = null
+    ports.snapshotFailed?.send(String(err?.message ?? err))
+  }
+}
+
 function captureSnapshot(ports, request) {
   if (request.triangles !== undefined && request.triangles !== null) {
-    startPathTrace(ports, request)
+    if (request.animation) {
+      startAnimationPathTrace(ports, request)
+    } else {
+      startPathTrace(ports, request)
+    }
   } else {
     captureCanvasCopy(ports, request)
   }

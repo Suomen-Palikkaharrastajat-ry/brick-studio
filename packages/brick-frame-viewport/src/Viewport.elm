@@ -3416,11 +3416,12 @@ snapshotRequestWithCrop config model =
         , width = Nothing
         , height = Nothing
         , timeBudgetMs = Nothing
+        , animation = Nothing
         }
         model
 
 
-{-| Build a `captureRender` request with crop, shader preset, and quality options.
+{-| Build a `captureRender` request with crop, shader preset, quality options, and optional animation.
 -}
 snapshotRequestWithOptions :
     { filename : String
@@ -3430,6 +3431,7 @@ snapshotRequestWithOptions :
     , width : Maybe Int
     , height : Maybe Int
     , timeBudgetMs : Maybe Int
+    , animation : Maybe { fps : Int, durationSeconds : Float }
     }
     -> Model
     -> Encode.Value
@@ -3452,6 +3454,7 @@ snapshotRequestWithOptions config model =
         , width = config.width
         , height = config.height
         , timeBudgetMs = config.timeBudgetMs
+        , animation = config.animation
         }
 
 
