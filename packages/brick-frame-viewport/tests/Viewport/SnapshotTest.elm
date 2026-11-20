@@ -293,10 +293,49 @@ suite =
                         , \_ ->
                             Decode.decodeValue (Decode.field "shader" Decode.string) request
                                 |> Expect.equal (Ok "glossy")
+                        , \_ ->
+                            Decode.decodeValue (Decode.at [ "animation", "motion" ] Decode.string) request
+                                |> Expect.equal (Ok "motor")
                         ]
                         ()
+            , test "encodeRequestWithOptions marks an animation with empty motor frames as motor" <|
+                \_ ->
+                    animationRequest (Just [ [], [] ])
+                        |> Decode.decodeValue
+                            (Decode.map2 Tuple.pair
+                                (Decode.at [ "animation", "motion" ] Decode.string)
+                                (Decode.at [ "animation", "framesExtraTriangles" ] (Decode.list (Decode.list Decode.float)))
+                            )
+                        |> Expect.equal (Ok ( "motor", [ [], [] ] ))
+            , test "encodeRequestWithOptions marks an animation without frames as a turntable" <|
+                \_ ->
+                    animationRequest Nothing
+                        |> Expect.all
+                            [ Decode.decodeValue (Decode.at [ "animation", "motion" ] Decode.string)
+                                >> Expect.equal (Ok "turntable")
+                            , Decode.decodeValue (Decode.at [ "animation", "framesExtraTriangles" ] Decode.value)
+                                >> Result.toMaybe
+                                >> Expect.equal Nothing
+                            ]
             ]
         ]
+
+
+animationRequest : Maybe (List (List Float)) -> Decode.Value
+animationRequest frames =
+    Snapshot.encodeRequestWithOptions
+        { filename = "anim.webp"
+        , camera = Camera.init
+        , lightDirection = Nothing
+        , triangles = []
+        , crop = Nothing
+        , outlineEdges = Nothing
+        , shader = Nothing
+        , width = Nothing
+        , height = Nothing
+        , timeBudgetMs = Nothing
+        , animation = Just { fps = 10, durationSeconds = 2.0, framesExtraTriangles = frames }
+        }
 
 
 vecList : Vec3.Vec3 -> List Float

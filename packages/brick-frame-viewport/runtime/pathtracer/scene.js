@@ -23,10 +23,15 @@
  *   visible to the camera directly.
  * Ground: a Lambert plane of linear albedo ~0.6 (a slightly warm light grey),
  * placed at min-Y − 0.01 so the model sits on it.
+ *
+ * Geometry and view are separate: `prepareGeometry(triangles)` builds a layer
+ * (BVH, colours, materials, normals) once, and `prepareView(request, layers)`
+ * adds a camera and lights to one or more layers. A persistent worker keeps
+ * the static layer across animation frames and rebuilds only the view and a
+ * small per-frame layer. `prepareScene(request)` does both for one layer.
  */
 import { buildBVH } from './bvh.js'
 import { MATERIAL } from './materials.js'
-import { extractSharpEdges } from './edges.js'
 
 /** Key light cone half-angle (degrees): a soft-edged studio softbox. */
 const KEY_CONE_DEG = 6
@@ -406,26 +411,30 @@ function computeVertexNormals(triangles, bvh) {
   return vertexNormals
 }
 
-/**
- * Turns a contract request into everything the integrator reads. Throws if
- * there are no triangles. Triangle colours are converted to linear here. Per-triangle data is indexed by BVH slot, so a
- * hit's `slot` addresses `albedo` (3 floats) and `material` directly.
- */
-export function prepareScene(request) {
-  const triangles = request.triangles
-  if (!triangles || triangles.length < STRIDE) throw new Error('No model triangles to render')
-  if (triangles.length % STRIDE !== 0) throw new Error('Triangle data is not 14 numbers per triangle')
-  const width = Math.round(request.width)
-  const height = Math.round(request.height)
-  if (!(width > 0 && height > 0)) throw new Error('Render size must be positive')
+/** Lowest Y of any vertex in a flat triangle array (Infinity when empty). */
+export function triangleMinY(triangles) {
+  let minY = Infinity
+  if (!triangles) return minY
+  for (let i = 0; i + STRIDE <= triangles.length; i += STRIDE) {
+    minY = Math.min(minY, triangles[i + 1], triangles[i + 4], triangles[i + 7])
+  }
+  return minY
+}
 
+/**
+ * Builds one geometry layer: the BVH plus per-slot linear albedo (3 floats),
+ * material codes and smoothed vertex normals, all indexed by BVH slot, so a
+ * hit's `slot` addresses them directly. Returns `{ bvh, albedo, material,
+ * vertexNormals, minY }`, or null for a missing or empty array.
+ * Contract colours are sRGB and are converted to linear here. Throws when the
+ * array is not 14 numbers per triangle.
+ */
+export function prepareGeometry(triangles) {
+  if (!triangles || triangles.length === 0) return null
+  if (triangles.length % STRIDE !== 0) throw new Error('Triangle data is not 14 numbers per triangle')
   const bvh = buildBVH(triangles)
   const albedo = new Float32Array(bvh.count * 3)
   const material = new Uint8Array(bvh.count)
-  let minY = Infinity
-  for (let i = 0; i < triangles.length; i += STRIDE) {
-    minY = Math.min(minY, triangles[i + 1], triangles[i + 4], triangles[i + 7])
-  }
   for (let slot = 0; slot < bvh.count; slot++) {
     const base = bvh.prims[slot] * STRIDE
     // Contract colours are sRGB; shading works in linear RGB.
@@ -435,11 +444,33 @@ export function prepareScene(request) {
     const code = Math.round(triangles[base + 13])
     material[slot] = Number.isFinite(code) && code >= 0 && code <= MATERIAL.PEARL ? code : MATERIAL.PLASTIC
   }
+  const vertexNormals = computeVertexNormals(triangles, bvh)
+  return { bvh, albedo, material, vertexNormals, minY: triangleMinY(triangles) }
+}
 
+/**
+ * Combines geometry layers (static first, see `prepareGeometry`) with the
+ * view in `request` (width, height, camera, baseAspect, transparent, crop,
+ * shader, lightDirection) into the scene the integrator reads. A hit records
+ * its layer, so slot lookups go through `hit.layer`. The ground sits just
+ * below the lowest vertex of all layers, or below `request.groundMinY` when
+ * that is finite (an animation passes the lowest Y over all its frames, so the
+ * ground does not move between frames). Lights follow the camera, so a new
+ * camera needs a new view. For single-layer callers, `bvh`, `albedo`,
+ * `material` and `vertexNormals` alias the first layer.
+ */
+export function prepareView(request, layers) {
+  const width = Math.round(request.width)
+  const height = Math.round(request.height)
+  if (!(width > 0 && height > 0)) throw new Error('Render size must be positive')
+  const present = layers.filter(Boolean)
+  if (present.length === 0) throw new Error('No model triangles to render')
+  let minY = Infinity
+  for (const layer of present) minY = Math.min(minY, layer.minY)
+  if (Number.isFinite(request.groundMinY)) minY = request.groundMinY
   const camera = makeCamera(request.camera, width, height, request.baseAspect)
   const customLightDir = request.lightDirection ?? request.camera?.lightDirection
-  const edges = extractSharpEdges(triangles)
-  const vertexNormals = computeVertexNormals(triangles, bvh)
+  const first = present[0]
   return {
     width,
     height,
@@ -449,13 +480,28 @@ export function prepareScene(request) {
     outlineEdges: Boolean(request.outlineEdges),
     shader: request.shader || 'glossy',
     lights: studioLights(camera, customLightDir),
-    bvh,
-    albedo,
-    material,
-    vertexNormals,
-    edges,
+    layers: present,
+    bvh: first.bvh,
+    albedo: first.albedo,
+    material: first.material,
+    vertexNormals: first.vertexNormals,
     groundY: minY - GROUND_OFFSET,
     skyIrradiance: ENV_IRRADIANCE,
     groundAlbedo: GROUND_ALBEDO,
   }
+}
+
+/**
+ * Turns a contract request into everything the integrator reads: one
+ * geometry layer from `request.triangles` plus the view. Throws if there are
+ * no triangles.
+ */
+export function prepareScene(request) {
+  const triangles = request.triangles
+  if (!triangles || triangles.length < STRIDE) throw new Error('No model triangles to render')
+  if (triangles.length % STRIDE !== 0) throw new Error('Triangle data is not 14 numbers per triangle')
+  const width = Math.round(request.width)
+  const height = Math.round(request.height)
+  if (!(width > 0 && height > 0)) throw new Error('Render size must be positive')
+  return prepareView(request, [prepareGeometry(triangles)])
 }

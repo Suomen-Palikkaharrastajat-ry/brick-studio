@@ -31,10 +31,11 @@ const T_EPS = 1e-12
 /**
  * Scratch record returned by `intersect`. Pass one in to avoid allocation.
  * `t` is the ray parameter, `slot` the BVH slot, `index` the input triangle
- * index, and `u`, `v` the barycentric coordinates (w = 1 - u - v).
+ * index, and `u`, `v` the barycentric coordinates (w = 1 - u - v). `layer`
+ * is left for the path tracer, which records the geometry layer that was hit.
  */
 export function createHit() {
-  return { t: Infinity, slot: 0, index: 0, u: 0, v: 0 }
+  return { t: Infinity, slot: 0, index: 0, u: 0, v: 0, layer: null }
 }
 
 /** Triangle count of a flat contract array. */

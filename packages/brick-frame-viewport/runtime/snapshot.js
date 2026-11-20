@@ -13,17 +13,51 @@
  *   `width` × `height` with its aspect ratio kept (the fallback). Unless
  *   `transparent`, the page's `--color-surface-canvas` token fills the
  *   background first.
+ * - `captureRender` with `animation: { fps, durationSeconds, motion?,
+ *   framesExtraTriangles?, samplesPerPixel? }` renders an animated WebP
+ *   instead (see "Animations" below).
  * - `cancelSnapshot` (Elm → JS): stops the render in flight and terminates
  *   its workers. Nothing is sent for a cancelled render.
  * - `snapshotProgress` (JS → Elm): `{ fraction, samples }`, at most about
- *   four times a second while the path tracer runs.
+ *   four times a second while a still renders. Animations add `frame`
+ *   (1-based), `totalFrames` and `targetSamples`, and report after every
+ *   worker pass.
  * - `snapshotReady` (JS → Elm): `{ dataUrl, filename }`, sent as soon as the
- *   PNG is encoded.
+ *   PNG (or animated WebP) is encoded.
  * - `snapshotFailed` (JS → Elm): a string error message, e.g. no triangles or
  *   a worker error.
  * - `saveSnapshot` (Elm → JS): `{ dataUrl, filename }`, downloaded as a file.
+ *
+ * Animations: one persistent render session (`createRenderSession` in
+ * pathtracer/index.js) renders every frame, so the static model is sent to
+ * the workers and its BVH built once. `animation.motion` picks the kind
+ * (`animationMotion`):
+ * - `"turntable"`: the camera makes one full turn around its target, over
+ *   `fps × durationSeconds` frames. `framesExtraTriangles` is ignored.
+ * - `"motor"`: the camera stays put and frame f adds `framesExtraTriangles[f]`
+ *   (the turning gears at frame f) as a small per-frame layer, with the
+ *   ground pinned at the lowest point over all frames. There is one frame per
+ *   entry (or `fps × durationSeconds` frames when there are none), and an
+ *   entry may be empty: that frame shows only the static model.
+ * Without `motion` (older hosts), a non-empty `framesExtraTriangles` array
+ * means motor and anything else turntable.
+ *
+ * Every frame gets the same number of samples per pixel N, so frames look
+ * alike and do not flicker: `animation.samplesPerPixel` when given (rounded,
+ * 1 to 256), otherwise `samplesPerPixelFor` of the final frame size (6 at
+ * 720p, 10 at 480p, 17 at 360p). Render time therefore follows the frame
+ * count and size; `timeBudgetMs` is not used for animations. Progress
+ * `fraction` counts sampling and the main-thread denoise and encode of each
+ * frame (their split is measured on the frames done so far); `samples` is
+ * the current frame's samples per pixel, as for a still. Frames are encoded
+ * as WebP at WEBP_QUALITY and muxed into one animated WebP.
+ *
+ * `initSnapshots(ports, deps)` takes optional test injection points:
+ * `deps.createRenderSession` replaces the session factory for animations, and
+ * `deps.sessionOptions` is passed to it (e.g. `createWorker`, `workerCount`).
  */
-import { renderSnapshot } from './pathtracer/index.js'
+import { createRenderSession, renderSnapshot, samplesPerPixelFor } from './pathtracer/index.js'
+import { triangleMinY } from './pathtracer/scene.js'
 import { muxWebpAnimation } from './webp-anim.js'
 
 if (typeof HTMLCanvasElement !== 'undefined' && HTMLCanvasElement.prototype?.getContext && !HTMLCanvasElement.prototype.__preservePatched) {
@@ -39,6 +73,12 @@ if (typeof HTMLCanvasElement !== 'undefined' && HTMLCanvasElement.prototype?.get
 
 const DEFAULT_FILENAME = 'palikkakehys-render.png'
 const REVOKE_DELAY_MS = 60000
+/** Lossy WebP quality for animation frames (0..1). */
+export const WEBP_QUALITY = 0.92
+/** Share of a frame's progress that is sampling, until a frame has been timed. */
+const DEFAULT_SAMPLING_SHARE = 0.75
+/** Most samples per pixel an explicit `animation.samplesPerPixel` may ask for. */
+const MAX_OVERRIDE_SAMPLES = 256
 
 /** The render currently in flight, or null. */
 let activeRender = null
@@ -208,7 +248,8 @@ function startPathTrace(ports, request) {
     })
 }
 
-export async function encodeWebp(rgba, width, height) {
+/** Encodes RGBA pixels as a WebP data URL at `quality` (0..1). */
+export async function encodeWebp(rgba, width, height, quality = WEBP_QUALITY) {
   if (typeof document !== 'undefined') {
     const canvas = document.createElement('canvas')
     canvas.width = width
@@ -216,12 +257,12 @@ export async function encodeWebp(rgba, width, height) {
     const ctx = canvas.getContext('2d')
     if (!ctx) throw new Error('Canvas 2D context unavailable')
     ctx.putImageData(new ImageData(rgba, width, height), 0, 0)
-    return canvas.toDataURL('image/webp')
+    return canvas.toDataURL('image/webp', quality)
   }
   const canvas = new OffscreenCanvas(width, height)
   const ctx = canvas.getContext('2d')
   ctx.putImageData(new ImageData(rgba, width, height), 0, 0)
-  const blob = await canvas.convertToBlob({ type: 'image/webp' })
+  const blob = await canvas.convertToBlob({ type: 'image/webp', quality })
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result)
@@ -230,26 +271,58 @@ export async function encodeWebp(rgba, width, height) {
   })
 }
 
-/** Multi-frame turntable animation render encoded to an animated WebP file. */
-async function startAnimationPathTrace(ports, request) {
+/**
+ * Samples per pixel from an explicit `animation.samplesPerPixel`, rounded and
+ * clamped to [1, MAX_OVERRIDE_SAMPLES], or null when it is missing or not
+ * positive.
+ */
+export function animationSamplesOverride(value) {
+  const n = Number(value)
+  if (!(Number.isFinite(n) && n > 0)) return null
+  return Math.min(MAX_OVERRIDE_SAMPLES, Math.max(1, Math.round(n)))
+}
+
+/**
+ * The kind of animation a request asks for, `'motor'` or `'turntable'`: the
+ * explicit `animation.motion` when it is one of those, otherwise motor
+ * exactly when `framesExtraTriangles` is a non-empty array.
+ */
+export function animationMotion(anim = {}) {
+  if (anim.motion === 'motor' || anim.motion === 'turntable') return anim.motion
+  return Array.isArray(anim.framesExtraTriangles) && anim.framesExtraTriangles.length > 0 ? 'motor' : 'turntable'
+}
+
+/** Lowest model Y over the base and every frame's extra triangles, or undefined when there are none. */
+function animationMinY(baseTriangles, framesExtraTriangles) {
+  let minY = triangleMinY(baseTriangles)
+  for (const extra of framesExtraTriangles ?? []) minY = Math.min(minY, triangleMinY(extra))
+  return Number.isFinite(minY) ? minY : undefined
+}
+
+/**
+ * Multi-frame animation render (turntable or motor animation, see the module
+ * header) encoded to an animated WebP file. `deps.createRenderSession` and
+ * `deps.sessionOptions` are injection points for tests.
+ */
+async function startAnimationPathTrace(ports, request, deps = {}) {
   cancelRender()
   const controller = new AbortController()
   activeRender = controller
+  const isCurrent = () => !controller.signal.aborted && activeRender === controller
 
   const anim = request.animation || {}
   const fps = Math.max(1, Math.min(60, Math.round(anim.fps || 15)))
   const durationSeconds = Math.max(0.5, Math.min(30, Number(anim.durationSeconds) || 4.0))
+  const motor = animationMotion(anim) === 'motor'
   const framesExtraTriangles =
-    Array.isArray(anim.framesExtraTriangles) && anim.framesExtraTriangles.length > 0
+    motor && Array.isArray(anim.framesExtraTriangles) && anim.framesExtraTriangles.length > 0
       ? anim.framesExtraTriangles
       : null
   const totalFrames = framesExtraTriangles
     ? framesExtraTriangles.length
     : Math.max(1, Math.round(fps * durationSeconds))
   const frameDurationMs = Math.max(10, Math.round(1000 / fps))
-
-  const totalBudgetMs = request.timeBudgetMs || 20000
-  const frameBudgetMs = Math.max(100, Math.floor(totalBudgetMs / totalFrames))
+  const override = animationSamplesOverride(anim.samplesPerPixel)
 
   const baseFilename = request.filename || 'palikkakehys-render.webp'
   const filename = baseFilename.replace(/\.png$/i, '.webp')
@@ -262,15 +335,38 @@ async function startAnimationPathTrace(ports, request) {
 
   const baseTriangles = request.triangles || []
   const frames = []
-  let renderWidth = request.width || 854
-  let renderHeight = request.height || 480
+  const createSession = deps.createRenderSession ?? createRenderSession
+  let session = null
 
   try {
+    session = createSession(
+      {
+        ...request,
+        triangles: baseTriangles,
+        groundMinY: framesExtraTriangles ? animationMinY(baseTriangles, framesExtraTriangles) : undefined,
+      },
+      { encodePng: encodeWebp, ...deps.sessionOptions, signal: controller.signal },
+    )
+    /** Samples per pixel, the same for every frame. */
+    const spp = override ?? samplesPerPixelFor(session.width, session.height)
+    /** Sampling and finishing (denoise, encode) time of the frames done so far. */
+    let samplingMs = 0
+    let finishingMs = 0
+    const sendProgress = (f, frameFraction, frameSamples) => {
+      ports.snapshotProgress?.send({
+        fraction: Math.min(1, (f + frameFraction) / totalFrames),
+        samples: frameSamples,
+        frame: f + 1,
+        totalFrames,
+        targetSamples: spp,
+      })
+    }
+
     for (let f = 0; f < totalFrames; f++) {
-      if (controller.signal.aborted || activeRender !== controller) return
+      if (!isCurrent()) return
 
       let frameCamera = request.camera
-      if (!framesExtraTriangles) {
+      if (!motor) {
         const angle = (2 * Math.PI * f) / totalFrames
         const rx = dx * Math.cos(angle) + dz * Math.sin(angle)
         const rz = -dx * Math.sin(angle) + dz * Math.cos(angle)
@@ -280,54 +376,37 @@ async function startAnimationPathTrace(ports, request) {
         }
       }
 
-      let frameTriangles = baseTriangles
-      if (framesExtraTriangles && framesExtraTriangles[f]?.length > 0) {
-        const extra = framesExtraTriangles[f]
-        if (baseTriangles instanceof Float32Array) {
-          const combined = new Float32Array(baseTriangles.length + extra.length)
-          combined.set(baseTriangles, 0)
-          combined.set(extra, baseTriangles.length)
-          frameTriangles = combined
-        } else {
-          frameTriangles = baseTriangles.concat(extra)
-        }
-      }
-
-      const frameReq = {
-        ...request,
+      // Fixed for the frame, so its progress never goes back.
+      const samplingShare = samplingMs > 0 ? samplingMs / (samplingMs + finishingMs) : DEFAULT_SAMPLING_SHARE
+      const startedAt = Date.now()
+      let sampledAt = null
+      const { dataUrl } = await session.renderFrame({
         camera: frameCamera,
-        triangles: frameTriangles,
-        timeBudgetMs: frameBudgetMs,
-      }
-
-      const { dataUrl, width, height } = await renderSnapshot(frameReq, {
-        signal: controller.signal,
-        encodePng: encodeWebp,
-        minBudgetMs: 30,
-        onProgress: (prog) => {
-          if (controller.signal.aborted || activeRender !== controller) return
-          const fraction = Math.min(1, (f + prog.fraction) / totalFrames)
-          ports.snapshotProgress?.send({ fraction, samples: f + 1 })
+        extraTriangles: framesExtraTriangles?.[f],
+        samplesPerPixel: spp,
+        onProgress: (p) => {
+          if (p.fraction >= 1 && sampledAt === null) sampledAt = Date.now()
+          if (!isCurrent()) return
+          sendProgress(f, samplingShare * p.fraction, p.samples)
         },
       })
-
-      if (width && height) {
-        renderWidth = width
-        renderHeight = height
-      }
+      const endedAt = Date.now()
+      samplingMs += (sampledAt ?? endedAt) - startedAt
+      finishingMs += endedAt - (sampledAt ?? endedAt)
 
       frames.push({ dataUrl, durationMs: frameDurationMs })
 
-      if (controller.signal.aborted || activeRender !== controller) return
-      ports.snapshotProgress?.send({ fraction: (f + 1) / totalFrames, samples: f + 1 })
+      if (!isCurrent()) return
+      sendProgress(f, 1, spp)
     }
 
     if (activeRender !== controller) return
     activeRender = null
+    session.close()
 
     const { dataUrl: animatedWebpUrl } = muxWebpAnimation(frames, {
-      width: renderWidth,
-      height: renderHeight,
+      width: session.width,
+      height: session.height,
       fps,
       loopCount: 0,
     })
@@ -337,13 +416,15 @@ async function startAnimationPathTrace(ports, request) {
     if (controller.signal.aborted || activeRender !== controller) return
     activeRender = null
     ports.snapshotFailed?.send(String(err?.message ?? err))
+  } finally {
+    session?.close()
   }
 }
 
-function captureSnapshot(ports, request) {
+function captureSnapshot(ports, request, deps) {
   if (request.triangles !== undefined && request.triangles !== null) {
     if (request.animation) {
-      startAnimationPathTrace(ports, request)
+      startAnimationPathTrace(ports, request, deps)
     } else {
       startPathTrace(ports, request)
     }
@@ -402,10 +483,13 @@ function downloadSnapshot({ dataUrl, filename }) {
   timer?.unref?.()
 }
 
-/** Wire the snapshot ports of a host app. Ports the host does not declare are skipped. */
-export function initSnapshots(ports) {
+/**
+ * Wire the snapshot ports of a host app. Ports the host does not declare are
+ * skipped. `deps` holds the test injection points (see the module header).
+ */
+export function initSnapshots(ports, deps = {}) {
   if (ports?.captureRender) {
-    ports.captureRender.subscribe((request) => captureSnapshot(ports, request))
+    ports.captureRender.subscribe((request) => captureSnapshot(ports, request, deps))
   }
   if (ports?.cancelSnapshot) {
     ports.cancelSnapshot.subscribe(cancelRender)

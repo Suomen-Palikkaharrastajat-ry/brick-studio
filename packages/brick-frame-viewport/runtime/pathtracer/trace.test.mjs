@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { GROUND_ALBEDO, prepareScene } from './scene.js'
+import { GROUND_ALBEDO, prepareGeometry, prepareScene, prepareView } from './scene.js'
 import { createRay, captureGuide, primaryRay, renderRowSample, tracePath, applySurfaceTexture } from './trace.js'
 import { createRng } from './rng.js'
 import { createHit, intersect } from './bvh.js'
@@ -432,4 +432,102 @@ test('shader presets (glossy, matte) produce distinct surface characteristics an
 
   assert.ok(outGlossy[3] > 0)
   assert.ok(outMatte[3] > 0)
+})
+
+/** Two triangles forming a coloured `2h` × `2h` square at height y. */
+function colouredSquareAt(y, h, [r, g, b]) {
+  const a = [-h, y, -h]
+  const p = [h, y, -h]
+  const c = [h, y, h]
+  const d = [-h, y, h]
+  return [...a, ...p, ...c, r, g, b, 1, 0, ...a, ...c, ...d, r, g, b, 1, 0]
+}
+
+// Looking straight down, so the centre pixel sees the middle of every square.
+const VIEW = {
+  width: 16,
+  height: 12,
+  camera: { position: [0, 300, 1], target: [0, 0, 0], up: [0, 0, -1], fovYDegrees: 45 },
+}
+
+function centreAlbedo(scene) {
+  const albedo = new Float32Array(scene.width * 3)
+  const normal = new Float32Array(scene.width * 3)
+  const y = Math.floor(scene.height / 2)
+  captureGuide(scene, y, albedo, normal)
+  const x = Math.floor(scene.width / 2)
+  return Array.from(albedo.subarray(x * 3, x * 3 + 3))
+}
+
+test('two layers: the nearer hit wins whichever layer it is in', () => {
+  const base = prepareGeometry(Float32Array.from(colouredSquareAt(40, 60, [1, 1, 1])))
+  const above = prepareGeometry(Float32Array.from(colouredSquareAt(50, 30, [1, 0, 0])))
+  const below = prepareGeometry(Float32Array.from(colouredSquareAt(20, 30, [1, 0, 0])))
+  assert.deepEqual(centreAlbedo(prepareView(VIEW, [base, above])), [1, 0, 0])
+  assert.deepEqual(centreAlbedo(prepareView(VIEW, [above, base])), [1, 0, 0])
+  assert.deepEqual(centreAlbedo(prepareView(VIEW, [base, below])), [1, 1, 1])
+})
+
+test('two layers: the ground sits below the lowest of them, unless groundMinY pins it', () => {
+  const base = prepareGeometry(Float32Array.from(colouredSquareAt(40, 60, [1, 1, 1])))
+  const below = prepareGeometry(Float32Array.from(colouredSquareAt(20, 30, [1, 0, 0])))
+  assert.ok(Math.abs(prepareView(VIEW, [base, below]).groundY - (20 - 0.01)) < 1e-6)
+  assert.ok(Math.abs(prepareView({ ...VIEW, groundMinY: 5 }, [base, below]).groundY - (5 - 0.01)) < 1e-6)
+  assert.equal(prepareGeometry(new Float32Array(0)), null)
+  assert.throws(() => prepareView(VIEW, [null, null]), /No model triangles/)
+})
+
+test('prepareScene aliases its single layer for older callers', () => {
+  const scene = sceneFor(8, 8, {})
+  assert.equal(scene.layers.length, 1)
+  assert.equal(scene.bvh, scene.layers[0].bvh)
+  assert.equal(scene.albedo, scene.layers[0].albedo)
+  assert.equal(scene.material, scene.layers[0].material)
+  assert.equal(scene.vertexNormals, scene.layers[0].vertexNormals)
+})
+
+test('a second layer shades and casts shadows like the same triangles in one layer', () => {
+  // A dummy far above everything, so the square is only in the second layer.
+  const dummy = [1e5, 1e4, 1e5, 1e5 + 1, 1e4, 1e5, 1e5, 1e4, 1e5 + 1, 1, 1, 1, 1, 0]
+  const square = Float32Array.from(colouredSquareAt(40, 30, [0.8, 0.2, 0.2]))
+  const view = { ...VIEW, transparent: true }
+  const single = prepareView(view, [prepareGeometry(square)])
+  const layered = prepareView(view, [prepareGeometry(Float32Array.from(dummy)), prepareGeometry(square)])
+  assert.equal(single.groundY, layered.groundY)
+  for (const scene of [single, layered]) scene.sums = new Float32Array(scene.width * scene.height * 4)
+  for (const scene of [single, layered]) {
+    const rng = createRng(1)
+    for (let s = 0; s < 4; s++) {
+      for (let y = 0; y < scene.height; y++) {
+        renderRowSample(scene, rng, y, scene.sums.subarray(y * scene.width * 4, (y + 1) * scene.width * 4), undefined, s)
+      }
+    }
+  }
+  assert.deepEqual(Array.from(layered.sums), Array.from(single.sums))
+  let shadowed = 0
+  for (let p = 0; p < single.width * single.height; p++) {
+    const a = single.sums[p * 4 + 3] / 4
+    if (a > 0.05 && a < 0.99) shadowed++
+  }
+  assert.ok(shadowed > 0, 'the square casts a shadow on the ground')
+})
+
+test('renderRowSample with a sample index is reproducible per pixel, and new indices give new samples', () => {
+  const scene = sceneFor(16, 8, {})
+  const row = () => new Float32Array(scene.width * 4)
+  const a = row()
+  const b = row()
+  const c = row()
+  renderRowSample(scene, createRng(1), 4, a, undefined, 3)
+  renderRowSample(scene, createRng(99), 4, b, undefined, 3)
+  renderRowSample(scene, createRng(1), 4, c, undefined, 4)
+  assert.deepEqual(Array.from(a), Array.from(b))
+  assert.notDeepEqual(Array.from(a), Array.from(c))
+  // Without an index the stream runs on, so repeated calls add new samples.
+  const rng = createRng(1)
+  const d = row()
+  const e = row()
+  renderRowSample(scene, rng, 4, d)
+  renderRowSample(scene, rng, 4, e)
+  assert.notDeepEqual(Array.from(d), Array.from(e))
 })

@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Worker } from 'node:worker_threads'
-import { renderSnapshot } from './index.js'
+import { createRenderSession, renderSnapshot, samplesPerPixelFor } from './index.js'
 
 const WORKER_HREF = new URL('./worker.js', import.meta.url).href
 
@@ -146,4 +146,153 @@ test('an already-aborted signal rejects with AbortError without starting workers
     (err) => err.name === 'AbortError',
   )
   assert.equal(workers.length, 0)
+})
+
+const SIDE_CAMERA = { position: [300, 80, 0], target: [0, 30, 0], up: [0, 1, 0], fovYDegrees: 45 }
+
+/** Test encoder that keeps a copy of every RGBA buffer it is given. */
+function capturingEncode(frames) {
+  return async (rgba) => {
+    frames.push(Uint8ClampedArray.from(rgba))
+    return 'data:image/webp;base64,FAKE'
+  }
+}
+
+test('a still render with a budget shorter than one pass still gives every row a sample', async () => {
+  const { createWorker } = recordingFactory()
+  const encoded = []
+  const { dataUrl } = await renderSnapshot(baseRequest({ timeBudgetMs: 1 }), {
+    workerCount: 2,
+    createWorker,
+    encodePng: fakeEncode(encoded),
+    minBudgetMs: 0,
+  })
+  assert.equal(dataUrl, 'data:image/png;base64,FAKE')
+  assert.equal(encoded.length, 1)
+})
+
+test('a session renders several frames on the same workers, each with its own camera', async () => {
+  const { workers, createWorker } = recordingFactory()
+  const frames = []
+  const session = createRenderSession(baseRequest(), { workerCount: 3, createWorker, encodePng: capturingEncode(frames) })
+  try {
+    const first = await session.renderFrame({ camera: CAMERA, samplesPerPixel: 2 })
+    const second = await session.renderFrame({ camera: SIDE_CAMERA, samplesPerPixel: 2 })
+    assert.equal(first.samples, 2)
+    assert.equal(second.samples, 2)
+    assert.equal(workers.length, 3, 'no new workers for the second frame')
+    assert.ok(workers.every((w) => !w.terminated), 'workers stay alive between frames')
+    assert.equal(frames.length, 2)
+    assert.notDeepEqual(Array.from(frames[0]), Array.from(frames[1]), 'frame 2 is not frame 1 again')
+  } finally {
+    session.close()
+  }
+  assert.ok(workers.every((w) => w.terminated), 'close terminates every worker')
+})
+
+test('a fixed-sample frame reports progress up to fraction 1 and N samples, never going back', async () => {
+  const { createWorker } = recordingFactory()
+  const session = createRenderSession(baseRequest(), { workerCount: 2, createWorker, encodePng: fakeEncode([]) })
+  const progress = []
+  try {
+    const result = await session.renderFrame({ camera: CAMERA, samplesPerPixel: 5, onProgress: (p) => progress.push(p) })
+    assert.equal(result.samples, 5)
+  } finally {
+    session.close()
+  }
+  const last = progress[progress.length - 1]
+  assert.equal(last.fraction, 1)
+  assert.equal(last.samples, 5)
+  for (let i = 1; i < progress.length; i++) {
+    assert.ok(progress[i].fraction >= progress[i - 1].fraction, 'fraction never decreases')
+  }
+})
+
+test('a sample count that is not a positive integer rejects the frame instead of hanging', async () => {
+  const { createWorker } = recordingFactory()
+  const session = createRenderSession(baseRequest(), { workerCount: 2, createWorker, encodePng: fakeEncode([]) })
+  try {
+    for (const bad of [NaN, Infinity, 0, -3, 2.5, '4', () => 4]) {
+      await assert.rejects(session.renderFrame({ camera: CAMERA, samplesPerPixel: bad }), /positive integer/, String(bad))
+    }
+    const result = await session.renderFrame({ camera: CAMERA, samplesPerPixel: 2 })
+    assert.equal(result.samples, 2, 'the session still renders after a rejected frame')
+  } finally {
+    session.close()
+  }
+})
+
+test('a fixed-sample frame is the same image for any worker count, denoised or not', async () => {
+  for (const skipDenoise of [true, false]) {
+    const images = []
+    for (const workerCount of [2, 3]) {
+      const { createWorker } = recordingFactory()
+      const frames = []
+      const session = createRenderSession(baseRequest(), { workerCount, createWorker, skipDenoise, encodePng: capturingEncode(frames) })
+      try {
+        await session.renderFrame({ camera: CAMERA, samplesPerPixel: 2 })
+      } finally {
+        session.close()
+      }
+      images.push(frames[0])
+    }
+    assert.deepEqual(Array.from(images[0]), Array.from(images[1]), `skipDenoise ${skipDenoise}`)
+  }
+})
+
+test('aborting during a later frame rejects it, terminates every worker, and closes the session', async () => {
+  const { workers, createWorker } = recordingFactory()
+  const controller = new AbortController()
+  const session = createRenderSession(baseRequest(), {
+    workerCount: 2,
+    createWorker,
+    encodePng: fakeEncode([]),
+    signal: controller.signal,
+  })
+  await session.renderFrame({ camera: CAMERA, samplesPerPixel: 1 })
+  const pending = session.renderFrame({ camera: SIDE_CAMERA, samplesPerPixel: 100000 })
+  setTimeout(() => controller.abort(), 30)
+  await assert.rejects(pending, (err) => err.name === 'AbortError')
+  assert.ok(workers.every((w) => w.terminated), 'abort terminates every worker')
+  await assert.rejects(session.renderFrame({ camera: CAMERA, samplesPerPixel: 1 }), (err) => err.name === 'AbortError')
+})
+
+test('a frame after close rejects with AbortError', async () => {
+  const { createWorker } = recordingFactory()
+  const session = createRenderSession(baseRequest(), { workerCount: 1, createWorker, encodePng: fakeEncode([]) })
+  session.close()
+  await assert.rejects(session.renderFrame({ camera: CAMERA, samplesPerPixel: 1 }), (err) => err.name === 'AbortError')
+})
+
+test('more workers than rows: one worker per row', async () => {
+  const { workers, createWorker } = recordingFactory()
+  const session = createRenderSession(baseRequest(), { workerCount: 32, createWorker, encodePng: fakeEncode([]) })
+  try {
+    assert.equal(session.workerCount, HEIGHT)
+    const result = await session.renderFrame({ camera: CAMERA, samplesPerPixel: 1 })
+    assert.equal(result.samples, 1)
+  } finally {
+    session.close()
+  }
+  assert.equal(workers.length, HEIGHT)
+})
+
+test('a motor-style session with no static triangles renders frames that bring their own', async () => {
+  const { createWorker } = recordingFactory()
+  const session = createRenderSession(baseRequest({ triangles: [] }), { workerCount: 2, createWorker, encodePng: fakeEncode([]) })
+  try {
+    const result = await session.renderFrame({ camera: CAMERA, extraTriangles: SQUARE, samplesPerPixel: 1 })
+    assert.equal(result.samples, 1)
+    await assert.rejects(session.renderFrame({ camera: CAMERA, samplesPerPixel: 1 }), /No model triangles/)
+  } finally {
+    session.close()
+  }
+})
+
+test('samplesPerPixelFor spends about 4M samples a frame, within [6, 32]', () => {
+  assert.equal(samplesPerPixelFor(1280, 720), 6)
+  assert.equal(samplesPerPixelFor(854, 480), 10)
+  assert.equal(samplesPerPixelFor(640, 360), 17)
+  assert.equal(samplesPerPixelFor(3840, 2160), 6)
+  assert.equal(samplesPerPixelFor(64, 48), 32)
 })

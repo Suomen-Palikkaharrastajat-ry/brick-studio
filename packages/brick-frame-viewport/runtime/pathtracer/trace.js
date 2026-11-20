@@ -16,10 +16,18 @@
  *
  * Colour is accumulated premultiplied: `out` holds (r·a, g·a, b·a, a).
  * Pixel rows are rendered through `renderRowSample`, which takes one jittered
- * sample per pixel. `captureGuide` writes first-hit albedo and normal for the
- * denoiser. No allocation happens per sample.
+ * sample per pixel. Given a `sampleIndex`, it reseeds the generator for each
+ * pixel from (x, y, sampleIndex), so a sample does not depend on which worker
+ * renders the row or on earlier pixels. `captureGuide` writes first-hit albedo
+ * and normal for the denoiser. No allocation happens per sample.
+ *
+ * Geometry: `scene.layers` holds one or more BVH layers (`prepareView` in
+ * scene.js), e.g. a static model plus per-frame gear meshes. Rays test every
+ * layer and keep the nearest hit, whose `layer` holds the per-slot albedo,
+ * material and vertex normals.
  */
 import { intersect, occluded, createHit } from './bvh.js'
+import { pixelSeed } from './rng.js'
 import {
   MATERIAL,
   createFrame,
@@ -171,6 +179,41 @@ function addClamped(out, r, g, b, indirect) {
 }
 
 /**
+ * Nearest hit of `r` over every geometry layer, written to `out` with
+ * `out.layer` set, or null. `r.tMax` is narrowed per layer, then restored.
+ */
+function sceneIntersect(scene, r, out) {
+  const layers = scene.layers
+  if (layers.length === 1) {
+    const hit = intersect(layers[0].bvh, r, out)
+    if (hit) hit.layer = layers[0]
+    return hit
+  }
+  const tMax = r.tMax
+  let found = null
+  for (let i = 0; i < layers.length; i++) {
+    const hit = intersect(layers[i].bvh, r, out)
+    if (hit) {
+      hit.layer = layers[i]
+      r.tMax = hit.t
+      found = hit
+    }
+  }
+  r.tMax = tMax
+  return found
+}
+
+/** True when any geometry layer blocks shadow ray `r`. */
+function sceneOccluded(scene, r) {
+  const layers = scene.layers
+  if (layers.length === 1) return occluded(layers[0].bvh, r)
+  for (let i = 0; i < layers.length; i++) {
+    if (occluded(layers[i].bvh, r)) return true
+  }
+  return false
+}
+
+/**
  * Lit fraction of the ground point `p` (normal up), in [0, 1]. Estimated from
  * one sample per light cone plus one cosine-weighted sky direction, each
  * weighted by its unshadowed irradiance.
@@ -186,7 +229,7 @@ function groundLitFraction(scene, rng, p) {
     // Estimate of the light's irradiance from one sample: L·cos / pdf, with L = E / solid angle.
     const e = ((light.irradiance / light.solidAngle) * cosL) / pl
     den += e
-    if (!occluded(scene.bvh, setShadowRay(origin, lightDir))) num += e
+    if (!sceneOccluded(scene, setShadowRay(origin, lightDir))) num += e
   }
   const u1 = rng.next()
   const u2 = rng.next()
@@ -196,7 +239,7 @@ function groundLitFraction(scene, rng, p) {
   lightDir[1] = Math.sqrt(Math.max(0, 1 - u1))
   lightDir[2] = r * Math.sin(phi)
   den += scene.skyIrradiance
-  if (!occluded(scene.bvh, setShadowRay(origin, lightDir))) num += scene.skyIrradiance
+  if (!sceneOccluded(scene, setShadowRay(origin, lightDir))) num += scene.skyIrradiance
   return den > 0 ? num / den : 1
 }
 
@@ -204,9 +247,10 @@ function groundLitFraction(scene, rng, p) {
  * Interpolates the smoothed vertex normal at `hit`, aligned to face incoming ray `r`.
  */
 function shadingNormal(scene, hit, r, out) {
+  const layer = hit.layer
   const slot = hit.slot
   const o = slot * 9
-  const tris = scene.bvh.tris
+  const tris = layer.bvh.tris
   const ax = tris[o]
   const ay = tris[o + 1]
   const az = tris[o + 2]
@@ -232,7 +276,7 @@ function shadingNormal(scene, hit, r, out) {
   let ny = gny
   let nz = gnz
 
-  const vn = scene.vertexNormals
+  const vn = layer.vertexNormals
   if (vn) {
     const u = hit.u
     const v = hit.v
@@ -359,11 +403,10 @@ export function tracePath(scene, rng, primary, out) {
   let lastMat = MATERIAL.MATTE
   let inside = false
   let insideDist = 0
-  const bvh = scene.bvh
 
   for (let bounce = 0; bounce <= MAX_BOUNCES; bounce++) {
     const indirect = bounce > 0
-    const hit = intersect(bvh, ray, hitScratch)
+    const hit = sceneIntersect(scene, ray, hitScratch)
     const tModel = hit ? hit.t : Infinity
     const tGround = groundDistance(scene, ray)
 
@@ -417,14 +460,15 @@ export function tracePath(scene, rng, primary, out) {
     } else {
       tHit = tModel
       const slot = hit.slot
+      const layer = hit.layer
       pos[0] = ray.ox + ray.dx * tHit
       pos[1] = ray.oy + ray.dy * tHit
       pos[2] = ray.oz + ray.dz * tHit
       shadingNormal(scene, hit, ray, surfNormal)
-      mat = scene.material[slot]
-      albedoRow[0] = scene.albedo[slot * 3]
-      albedoRow[1] = scene.albedo[slot * 3 + 1]
-      albedoRow[2] = scene.albedo[slot * 3 + 2]
+      mat = layer.material[slot]
+      albedoRow[0] = layer.albedo[slot * 3]
+      albedoRow[1] = layer.albedo[slot * 3 + 1]
+      albedoRow[2] = layer.albedo[slot * 3 + 2]
       alb = albedoRow
 
       if (mat === MATERIAL.PLASTIC && scene.shader && scene.shader !== 'glossy') {
@@ -474,7 +518,7 @@ export function tracePath(scene, rng, primary, out) {
       const pl = sampleLightDir(light, rng, lightDir)
       const cosL = frame.n[0] * lightDir[0] + frame.n[1] * lightDir[1] + frame.n[2] * lightDir[2]
       if (cosL <= 0) continue
-      if (occluded(bvh, setShadowRay(offsetAlong(pos, surfNormal), lightDir))) continue
+      if (sceneOccluded(scene, setShadowRay(offsetAlong(pos, surfNormal), lightDir))) continue
       evalSurface(mat, alb, frame, wo, lightDir, evalOut, scene.shader)
       if (!(evalOut.pdf > 0)) continue
       const w = (pl * pl) / (pl * pl + evalOut.pdf * evalOut.pdf)
@@ -533,10 +577,16 @@ function applyRoulette(bounce, rng) {
 
 /**
  * Adds one jittered sample of every pixel in row `y` into `sums`, which holds
- * `width * 4` floats (premultiplied RGBA) for that row.
+ * `width * 4` floats (premultiplied RGBA) for that row. With `sampleIndex`
+ * (an integer), `rng` is reset to `pixelSeed(x, y, sampleIndex)` before each
+ * pixel, so the same sample of the same pixel always traces the same path.
+ * Without it, `rng` runs on as one stream (pass a growing index, or none, to
+ * get new samples on each call).
  */
-export function renderRowSample(scene, rng, y, sums, pixel = new Float64Array(4)) {
+export function renderRowSample(scene, rng, y, sums, pixel = new Float64Array(4), sampleIndex) {
+  const reseed = sampleIndex !== undefined
   for (let x = 0; x < scene.width; x++) {
+    if (reseed) rng.reset(pixelSeed(x, y, sampleIndex))
     primaryRay(scene, x, y, rng.next(), rng.next(), ray, rng)
     const v = tracePath(scene, rng, ray, pixel)
     const o = x * 4
@@ -554,10 +604,9 @@ export function renderRowSample(scene, rng, y, sums, pixel = new Float64Array(4)
  * `depth[x]` receives the Euclidean hit distance or Infinity.
  */
 export function captureGuide(scene, y, albedo, normal, depth) {
-  const bvh = scene.bvh
   for (let x = 0; x < scene.width; x++) {
     primaryRay(scene, x, y, 0.5, 0.5, ray)
-    const hit = intersect(bvh, ray, hitScratch)
+    const hit = sceneIntersect(scene, ray, hitScratch)
     const hitGround = groundDistance(scene, ray)
     const tModel = hit ? hit.t : Infinity
     if (depth) {
@@ -580,11 +629,12 @@ export function captureGuide(scene, y, albedo, normal, depth) {
       normal[o + 1] = ray.dy < 0 ? 1 : -1
       normal[o + 2] = 0
     } else {
-      albedoRow[0] = scene.albedo[hit.slot * 3]
-      albedoRow[1] = scene.albedo[hit.slot * 3 + 1]
-      albedoRow[2] = scene.albedo[hit.slot * 3 + 2]
+      const layer = hit.layer
+      albedoRow[0] = layer.albedo[hit.slot * 3]
+      albedoRow[1] = layer.albedo[hit.slot * 3 + 1]
+      albedoRow[2] = layer.albedo[hit.slot * 3 + 2]
       shadingNormal(scene, hit, ray, surfNormal)
-      if (scene.shader && scene.shader !== 'glossy' && scene.material[hit.slot] === MATERIAL.PLASTIC) {
+      if (scene.shader && scene.shader !== 'glossy' && layer.material[hit.slot] === MATERIAL.PLASTIC) {
         const hPos = [ray.ox + ray.dx * tModel, ray.oy + ray.dy * tModel, ray.oz + ray.dz * tModel]
         applySurfaceTexture(scene.shader, hPos, surfNormal, albedoRow)
       }

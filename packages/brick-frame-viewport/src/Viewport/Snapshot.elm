@@ -217,7 +217,13 @@ encodeRequestWithCrop config =
 
 
 {-| Full configuration for `captureRender`, including optional outline edge rasterization,
-shader preset, animation turntable options, and custom width/height/budget.
+shader preset, animation options, and custom width/height/budget.
+
+An animation is encoded with an explicit `"motion"`: `"motor"` when
+`framesExtraTriangles` is `Just` (a static camera, with each frame's turning
+gears as that frame's extra triangles; a frame may be empty), otherwise
+`"turntable"` (the camera makes one full turn around its target).
+
 -}
 encodeRequestWithOptions :
     { filename : String
@@ -291,13 +297,14 @@ encodeRequestWithOptions config =
                         framesField =
                             case anim.framesExtraTriangles of
                                 Just frames ->
-                                    [ ( "framesExtraTriangles"
+                                    [ ( "motion", Encode.string "motor" )
+                                    , ( "framesExtraTriangles"
                                       , Encode.list (Encode.list Encode.float) frames
                                       )
                                     ]
 
                                 Nothing ->
-                                    []
+                                    [ ( "motion", Encode.string "turntable" ) ]
                     in
                     [ ( "animation"
                       , Encode.object

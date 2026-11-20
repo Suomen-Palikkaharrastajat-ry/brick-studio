@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { copyWebglCanvasTo2d, dataUrlToBlob, fittedSize, initSnapshots } from './snapshot.js'
+import {
+  WEBP_QUALITY,
+  animationMotion,
+  animationSamplesOverride,
+  copyWebglCanvasTo2d,
+  dataUrlToBlob,
+  encodeWebp,
+  fittedSize,
+  initSnapshots,
+} from './snapshot.js'
+import { samplesPerPixelFor } from './pathtracer/index.js'
 
 test('fittedSize preserves aspect ratio within maxWidth and maxHeight', () => {
   assert.deepEqual(fittedSize(1920, 1080, 960, 960), { width: 960, height: 540 })
@@ -272,4 +282,291 @@ test('3D projection (u, v) in perspective-aligned cropping preview matches patht
       )
     }
   }
+})
+
+test('encodeWebp asks the canvas for WebP at WEBP_QUALITY', async () => {
+  const prevDoc = globalThis.document
+  const prevImageData = globalThis.ImageData
+  const calls = []
+  globalThis.ImageData = class MockImageData {
+    constructor(data, width, height) {
+      this.data = data
+      this.width = width
+      this.height = height
+    }
+  }
+  globalThis.document = {
+    createElement(tag) {
+      assert.equal(tag, 'canvas')
+      return {
+        width: 0,
+        height: 0,
+        getContext: () => ({ putImageData() {} }),
+        toDataURL(type, quality) {
+          calls.push({ type, quality })
+          return 'data:image/webp;base64,AAAA'
+        },
+      }
+    },
+  }
+  try {
+    assert.equal(WEBP_QUALITY, 0.92)
+    assert.equal(await encodeWebp(new Uint8ClampedArray(4), 1, 1), 'data:image/webp;base64,AAAA')
+    assert.deepEqual(calls, [{ type: 'image/webp', quality: 0.92 }])
+  } finally {
+    globalThis.document = prevDoc
+    globalThis.ImageData = prevImageData
+  }
+})
+
+test('animationSamplesOverride rounds and clamps an explicit sample count, and ignores bad values', () => {
+  assert.equal(animationSamplesOverride(64), 64)
+  assert.equal(animationSamplesOverride(6.6), 7)
+  assert.equal(animationSamplesOverride(1000), 256)
+  assert.equal(animationSamplesOverride(0), null)
+  assert.equal(animationSamplesOverride(undefined), null)
+  assert.equal(animationSamplesOverride('x'), null)
+})
+
+/** A minimal single-frame RIFF WEBP (VP8) as a data URL, enough for the muxer. */
+function mockWebpDataUrl(width, height) {
+  const vp8 = [0x9d, 0x01, 0x2a, width & 0xff, (width >> 8) & 0xff, height & 0xff, (height >> 8) & 0xff, 0x00]
+  const chunk = [0x56, 0x50, 0x38, 0x20, vp8.length, 0, 0, 0, ...vp8]
+  const size = 4 + chunk.length
+  const file = [0x52, 0x49, 0x46, 0x46, size & 0xff, size >> 8, 0, 0, 0x57, 0x45, 0x42, 0x50, ...chunk]
+  return `data:image/webp;base64,${Buffer.from(file).toString('base64')}`
+}
+
+const ANIM_CAMERA = { position: [0, 100, 300], target: [0, 0, 0], up: [0, 1, 0], fovYDegrees: 45 }
+const TRI = [0, 0, 0, 10, 0, 0, 0, 0, 10, 1, 1, 1, 1, 0]
+
+/**
+ * A fake render session factory. Each frame reports two progress steps and
+ * resolves, unless `hang` is set: then it waits for the abort signal.
+ */
+function fakeSessions({ hang = false, width = 64, height = 48 } = {}) {
+  const sessions = []
+  const create = (request, options) => {
+    const session = {
+      request,
+      options,
+      width,
+      height,
+      frames: [],
+      closed: 0,
+      close() {
+        session.closed++
+      },
+      async renderFrame(frame) {
+        session.frames.push(frame)
+        if (hang) {
+          return new Promise((_, reject) => {
+            options.signal.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { name: 'AbortError' })))
+          })
+        }
+        const n = frame.samplesPerPixel
+        frame.onProgress?.({ fraction: 0.5, samples: Math.floor(n / 2) })
+        frame.onProgress?.({ fraction: 1, samples: n })
+        return { dataUrl: mockWebpDataUrl(64, 48), width: 64, height: 48, samples: n }
+      },
+    }
+    sessions.push(session)
+    return session
+  }
+  return { sessions, create }
+}
+
+/** Ports recording what JS sends to Elm, plus the captureRender and cancelSnapshot handlers. */
+function animationPorts() {
+  const sent = { progress: [], ready: [], failed: [] }
+  const handlers = {}
+  const ports = {
+    captureRender: { subscribe: (fn) => (handlers.capture = fn) },
+    cancelSnapshot: { subscribe: (fn) => (handlers.cancel = fn) },
+    snapshotProgress: { send: (p) => sent.progress.push(p) },
+    snapshotReady: { send: (r) => sent.ready.push(r) },
+    snapshotFailed: { send: (m) => sent.failed.push(m) },
+  }
+  return { ports, sent, handlers }
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 10))
+
+test('a turntable animation renders every frame at the size-based N and reports per-frame progress', async () => {
+  const { sessions, create } = fakeSessions()
+  const { ports, sent, handlers } = animationPorts()
+  initSnapshots(ports, { createRenderSession: create })
+  handlers.capture({
+    width: 64,
+    height: 48,
+    camera: ANIM_CAMERA,
+    triangles: TRI,
+    timeBudgetMs: 6000,
+    filename: 'model.png',
+    animation: { fps: 10, durationSeconds: 0.5 },
+  })
+  await settle()
+  assert.equal(sessions.length, 1, 'one session for the whole animation')
+  const [session] = sessions
+  const n = samplesPerPixelFor(64, 48)
+  assert.equal(session.frames.length, 5)
+  assert.ok(session.frames.every((f) => f.samplesPerPixel === n), 'every frame gets the same N')
+  const positions = session.frames.map((f) => f.camera.position.join(','))
+  assert.equal(new Set(positions).size, 5, 'the camera turns')
+  assert.ok(session.frames.every((f) => f.extraTriangles === undefined))
+  assert.equal(session.request.groundMinY, undefined)
+  assert.ok(session.closed >= 1)
+  assert.equal(sent.failed.length, 0)
+  assert.equal(sent.ready.length, 1)
+  assert.equal(sent.ready[0].filename, 'model.webp')
+  assert.match(sent.ready[0].dataUrl, /^data:image\/webp;base64,/)
+  const fractions = sent.progress.map((p) => p.fraction)
+  for (let i = 1; i < fractions.length; i++) assert.ok(fractions[i] >= fractions[i - 1], `fractions ${fractions}`)
+  const last = sent.progress[sent.progress.length - 1]
+  assert.deepEqual(last, { fraction: 1, samples: n, frame: 5, totalFrames: 5, targetSamples: n })
+  assert.ok(sent.progress.every((p) => p.samples <= n), 'samples is the current frame\'s samples per pixel')
+  // A frame's sampling fills only part of its slot; denoise and encode take the rest.
+  const midFrame = sent.progress.find((p) => p.frame === 1 && p.samples === n)
+  assert.ok(midFrame.fraction < 1 / 5, `frame 0 sampled is ${midFrame.fraction}`)
+})
+
+test('the animation sample count follows the final frame size and ignores the time budget', async () => {
+  const counts = []
+  for (const timeBudgetMs of [6000, 60000, undefined]) {
+    // The session reports the size after the crop; N follows that size.
+    const { sessions, create } = fakeSessions({ width: 854, height: 480 })
+    const { ports, handlers } = animationPorts()
+    initSnapshots(ports, { createRenderSession: create })
+    handlers.capture({ width: 1280, height: 720, camera: ANIM_CAMERA, triangles: TRI, timeBudgetMs, animation: { fps: 10, durationSeconds: 0.5 } })
+    await settle()
+    counts.push(sessions[0].frames[0].samplesPerPixel)
+  }
+  assert.deepEqual(counts, [10, 10, 10])
+})
+
+test('a motor animation passes each frame its gear triangles, keeps the camera, and pins the ground', async () => {
+  const { sessions, create } = fakeSessions()
+  const { ports, sent, handlers } = animationPorts()
+  initSnapshots(ports, { createRenderSession: create })
+  const gear = (y) => [0, y, 0, 5, y, 0, 0, y, 5, 1, 0, 0, 1, 0]
+  const extras = [gear(3), gear(-2), []]
+  handlers.capture({
+    width: 64,
+    height: 48,
+    camera: ANIM_CAMERA,
+    triangles: TRI,
+    timeBudgetMs: 6000,
+    animation: { fps: 10, durationSeconds: 2, framesExtraTriangles: extras, samplesPerPixel: 6 },
+  })
+  await settle()
+  const [session] = sessions
+  assert.equal(session.frames.length, 3)
+  assert.deepEqual(session.frames.map((f) => f.extraTriangles), extras)
+  assert.ok(session.frames.every((f) => f.camera === ANIM_CAMERA))
+  assert.equal(session.request.groundMinY, -2)
+  assert.ok(session.frames.every((f) => f.samplesPerPixel === 6), 'the explicit override wins')
+  assert.equal(sent.ready.length, 1)
+})
+
+test('cancelling an animation closes its session and sends nothing more', async () => {
+  const { sessions, create } = fakeSessions({ hang: true })
+  const { ports, sent, handlers } = animationPorts()
+  initSnapshots(ports, { createRenderSession: create })
+  handlers.capture({ width: 64, height: 48, camera: ANIM_CAMERA, triangles: TRI, animation: { fps: 10, durationSeconds: 1 } })
+  await settle()
+  assert.ok(sessions[0].options.signal instanceof AbortSignal)
+  handlers.cancel()
+  await settle()
+  assert.ok(sessions[0].options.signal.aborted)
+  assert.ok(sessions[0].closed >= 1)
+  assert.equal(sent.ready.length, 0)
+  assert.equal(sent.failed.length, 0)
+})
+
+test('a new render supersedes an animation in flight and closes its session', async () => {
+  const hanging = fakeSessions({ hang: true })
+  const { ports, sent, handlers } = animationPorts()
+  initSnapshots(ports, { createRenderSession: hanging.create })
+  const request = { width: 64, height: 48, camera: ANIM_CAMERA, triangles: TRI, animation: { fps: 10, durationSeconds: 1 } }
+  handlers.capture(request)
+  await settle()
+  handlers.capture(request)
+  await settle()
+  assert.equal(hanging.sessions.length, 2)
+  assert.ok(hanging.sessions[0].options.signal.aborted)
+  assert.ok(hanging.sessions[0].closed >= 1)
+  assert.equal(hanging.sessions[1].closed, 0, 'the new render is still running')
+  handlers.cancel()
+  await settle()
+  assert.equal(sent.failed.length, 0)
+})
+
+test('animationMotion takes an explicit motion, and otherwise infers it from the frames', () => {
+  assert.equal(animationMotion({ motion: 'motor' }), 'motor')
+  assert.equal(animationMotion({ motion: 'motor', framesExtraTriangles: [] }), 'motor')
+  assert.equal(animationMotion({ motion: 'turntable', framesExtraTriangles: [[1]] }), 'turntable')
+  assert.equal(animationMotion({ framesExtraTriangles: [[], []] }), 'motor')
+  assert.equal(animationMotion({ framesExtraTriangles: [] }), 'turntable')
+  assert.equal(animationMotion({}), 'turntable')
+  assert.equal(animationMotion({ motion: 'spin', framesExtraTriangles: [[1]] }), 'motor')
+  assert.equal(animationMotion(undefined), 'turntable')
+})
+
+/** Renders one animation request through a fake session and returns the session and what was sent. */
+async function renderAnimation(animation) {
+  const { sessions, create } = fakeSessions()
+  const { ports, sent, handlers } = animationPorts()
+  initSnapshots(ports, { createRenderSession: create })
+  handlers.capture({ width: 64, height: 48, camera: ANIM_CAMERA, triangles: TRI, animation })
+  await settle()
+  return { session: sessions[0], sent }
+}
+
+test('explicit motor motion keeps the camera still and gives each frame its own triangles', async () => {
+  const gear = [0, -4, 0, 5, -4, 0, 0, -4, 5, 1, 0, 0, 1, 0]
+  const { session, sent } = await renderAnimation({ fps: 10, durationSeconds: 2, motion: 'motor', framesExtraTriangles: [gear, [], gear] })
+  assert.equal(session.frames.length, 3, 'one frame per entry')
+  assert.ok(session.frames.every((f) => f.camera === ANIM_CAMERA))
+  assert.deepEqual(session.frames.map((f) => f.extraTriangles), [gear, [], gear])
+  assert.equal(session.request.groundMinY, -4)
+  assert.equal(sent.ready.length, 1)
+  assert.equal(sent.failed.length, 0)
+})
+
+test('explicit motor motion with only empty frames renders the static model with a still camera', async () => {
+  const { session, sent } = await renderAnimation({ fps: 10, durationSeconds: 2, motion: 'motor', framesExtraTriangles: [[], [], [], []] })
+  assert.equal(session.frames.length, 4)
+  assert.ok(session.frames.every((f) => f.camera === ANIM_CAMERA))
+  assert.ok(session.frames.every((f) => Array.isArray(f.extraTriangles) && f.extraTriangles.length === 0))
+  assert.equal(sent.ready.length, 1)
+  assert.equal(sent.failed.length, 0)
+})
+
+test('explicit motor motion without any frame list still keeps the camera still', async () => {
+  const { session } = await renderAnimation({ fps: 10, durationSeconds: 0.5, motion: 'motor' })
+  assert.equal(session.frames.length, 5)
+  assert.ok(session.frames.every((f) => f.camera === ANIM_CAMERA && f.extraTriangles === undefined))
+})
+
+test('explicit turntable motion turns the camera a full circle and ignores any frame triangles', async () => {
+  const { session } = await renderAnimation({ fps: 10, durationSeconds: 0.5, motion: 'turntable', framesExtraTriangles: [TRI, TRI] })
+  assert.equal(session.frames.length, 5, 'fps × duration frames, not one per entry')
+  assert.ok(session.frames.every((f) => f.extraTriangles === undefined))
+  assert.equal(session.request.groundMinY, undefined)
+  const positions = session.frames.map((f) => f.camera.position)
+  assert.equal(new Set(positions.map((p) => p.join(','))).size, 5)
+  // Frame 0 is the original view; the steps are equal parts of 360°.
+  assert.deepEqual(positions[0].map((v) => Math.round(v * 1e6) / 1e6), ANIM_CAMERA.position)
+  const angle = (p) => Math.atan2(p[0], p[2])
+  const step = (2 * Math.PI) / 5
+  for (let f = 1; f < 5; f++) {
+    const turned = (angle(positions[f]) - angle(positions[0]) + 4 * Math.PI) % (2 * Math.PI)
+    assert.ok(Math.abs(turned - f * step) < 1e-9, `frame ${f} turned ${turned}`)
+  }
+})
+
+test('without motion, an empty frame list falls back to a turntable', async () => {
+  const { session } = await renderAnimation({ fps: 10, durationSeconds: 0.5, framesExtraTriangles: [] })
+  assert.equal(session.frames.length, 5)
+  assert.equal(new Set(session.frames.map((f) => f.camera.position.join(','))).size, 5)
 })
