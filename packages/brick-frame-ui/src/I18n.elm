@@ -224,6 +224,7 @@ module I18n exposing
     , snapshotClose
       -- Language Switcher
     , snapshotFramingDesc
+    , snapshotFramingLoading
     , snapshotFramingTitle
     , snapshotPathTracing
     , snapshotReadyToSave
@@ -3268,6 +3269,16 @@ snapshotFramingDesc lang =
 
         En ->
             "Crop the region or pick an aspect ratio before rendering"
+
+
+snapshotFramingLoading : Language -> String
+snapshotFramingLoading lang =
+    case lang of
+        Fi ->
+            "Valmistellaan esikatselua…"
+
+        En ->
+            "Preparing preview…"
 
 
 snapshotRenderAction : Language -> String

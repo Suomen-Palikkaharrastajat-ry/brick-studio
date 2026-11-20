@@ -35,6 +35,7 @@ module Viewport exposing
     , setShiftPressGrabs
     , setSpacePan
     , setTwoFingerOrbits
+    , snapshotPreviewRequest
     , snapshotRequest
     , snapshotRequestWithCrop
     , subscriptions
@@ -3419,6 +3420,30 @@ snapshotRequestWithCrop config model =
                 }
                 ++ config.extraTriangles
         , crop = config.crop
+        }
+
+
+{-| Build a fast, low-resolution rough render request for initial scene framing.
+-}
+snapshotPreviewRequest :
+    { filename : String
+    , extraTriangles : List Float
+    }
+    -> Model
+    -> Encode.Value
+snapshotPreviewRequest config model =
+    Snapshot.encodePreviewRequest
+        { filename = config.filename
+        , camera = model.camera
+        , lightDirection = lightDirection model
+        , triangles =
+            Snapshot.sceneTriangles
+                { scene = model.scene
+                , instanced = model.instancedScene
+                , hidden = model.hiddenSources
+                , activeSources = model.activeSources
+                }
+                ++ config.extraTriangles
         }
 
 

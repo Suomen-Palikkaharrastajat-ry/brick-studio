@@ -1,11 +1,15 @@
 module Viewport.Snapshot exposing
     ( CropRect
+    , encodePreviewRequest
     , encodeRequest
     , encodeRequestWithCrop
     , encodeRequestWithLight
     , encodeRequestWithOptions
     , imageHeight
     , imageWidth
+    , previewBudgetMs
+    , previewHeight
+    , previewWidth
     , sceneTriangles
     , timeBudgetMs
     )
@@ -56,6 +60,27 @@ imageHeight =
 timeBudgetMs : Int
 timeBudgetMs =
     30000
+
+
+{-| Rough preview output width in pixels.
+-}
+previewWidth : Int
+previewWidth =
+    640
+
+
+{-| Rough preview output height in pixels.
+-}
+previewHeight : Int
+previewHeight =
+    360
+
+
+{-| How long the quick preview path tracer may run, in milliseconds.
+-}
+previewBudgetMs : Int
+previewBudgetMs =
+    350
 
 
 {-| Every visible triangle of the viewport's scene, flattened for the path tracer.
@@ -251,6 +276,45 @@ encodeRequestWithOptions config =
             ++ lightFields
             ++ cropFields
             ++ outlineFields
+            ++ [ ( "triangles", Encode.list Encode.float config.triangles ) ]
+        )
+
+
+{-| Encode a fast low-res render request for framing preview.
+-}
+encodePreviewRequest :
+    { filename : String
+    , camera : Camera
+    , lightDirection : Maybe Vec3
+    , triangles : List Float
+    }
+    -> Encode.Value
+encodePreviewRequest config =
+    let
+        lightFields =
+            case config.lightDirection of
+                Just dir ->
+                    [ ( "lightDirection", encodeVec3 dir ) ]
+
+                Nothing ->
+                    []
+    in
+    Encode.object
+        ([ ( "width", Encode.int previewWidth )
+         , ( "height", Encode.int previewHeight )
+         , ( "transparent", Encode.bool True )
+         , ( "filename", Encode.string config.filename )
+         , ( "timeBudgetMs", Encode.int previewBudgetMs )
+         , ( "camera"
+           , Encode.object
+                [ ( "position", encodeVec3 (Camera.position config.camera) )
+                , ( "target", encodeVec3 (Camera.lookTarget config.camera) )
+                , ( "up", encodeVec3 (Vec3.vec3 0 1 0) )
+                , ( "fovYDegrees", Encode.float Camera.fovYDegrees )
+                ]
+           )
+         ]
+            ++ lightFields
             ++ [ ( "triangles", Encode.list Encode.float config.triangles ) ]
         )
 

@@ -20,6 +20,7 @@ type TestMsg
     | SetCrop SnapshotModal.CropRect
     | SetAspect SnapshotModal.AspectPreset
     | ResetCrop
+    | Interaction SnapshotModal.InteractionMsg
 
 
 testActions : SnapshotModal.Actions TestMsg
@@ -38,6 +39,7 @@ testFramingActions =
     , onSetCrop = SetCrop
     , onSetAspect = SetAspect
     , onResetCrop = ResetCrop
+    , onInteraction = Interaction
     }
 
 
@@ -265,7 +267,62 @@ suite =
                     in
                     SnapshotModal.isFraming modal
                         |> Expect.equal True
-            , test "viewFramingWithLanguage renders framing aspect pills and Render button" <|
+            , test "setReady in Framing updates previewUrl without transitioning to Preview" <|
+                \_ ->
+                    let
+                        modal =
+                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                                |> SnapshotModal.setReady { dataUrl = "data:image/png;base64,rough", filename = "frame.png" }
+                    in
+                    Expect.all
+                        [ \m -> SnapshotModal.isFraming m |> Expect.equal True
+                        , \m -> SnapshotModal.isRendering m |> Expect.equal False
+                        , \m -> m.previewUrl |> Expect.equal (Just "data:image/png;base64,rough")
+                        ]
+                        modal
+            , test "handleInteraction pan moves crop rectangle" <|
+                \_ ->
+                    let
+                        initial =
+                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                                |> SnapshotModal.setCrop { x = 0.2, y = 0.2, width = 0.5, height = 0.5 }
+
+                        panned =
+                            initial
+                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerDown 1 { x = 0.4, y = 0.4 })
+                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerMove 1 { x = 0.45, y = 0.48 })
+                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerUp 1)
+
+                        crop =
+                            SnapshotModal.getCrop panned
+                    in
+                    Expect.all
+                        [ \c -> Expect.within (Expect.Absolute 0.001) 0.25 c.x
+                        , \c -> Expect.within (Expect.Absolute 0.001) 0.28 c.y
+                        , \c -> Expect.within (Expect.Absolute 0.001) 0.5 c.width
+                        , \c -> Expect.within (Expect.Absolute 0.001) 0.5 c.height
+                        ]
+                        crop
+            , test "handleInteraction wheel zooms crop rectangle" <|
+                \_ ->
+                    let
+                        initial =
+                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                                |> SnapshotModal.setCrop { x = 0.2, y = 0.2, width = 0.6, height = 0.6 }
+
+                        zoomedIn =
+                            initial
+                                |> SnapshotModal.handleInteraction (SnapshotModal.Wheel -50.0 { x = 0.5, y = 0.5 })
+
+                        crop =
+                            SnapshotModal.getCrop zoomedIn
+                    in
+                    Expect.all
+                        [ \c -> Expect.lessThan 0.6 c.width
+                        , \c -> Expect.lessThan 0.6 c.height
+                        ]
+                        crop
+            , test "viewFramingWithLanguage renders framing aspect pills and Render button without 80% or arrows" <|
                 \_ ->
                     SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
                         |> SnapshotModal.viewFramingWithLanguage En testFramingActions
@@ -276,6 +333,9 @@ suite =
                             , \q -> Query.has [ Selector.tag "button", Selector.text "4:3" ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "1:1" ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "Render" ] q
+                            , \q -> Query.hasNot [ Selector.text "80%" ] q
+                            , \q -> Query.hasNot [ Selector.text "60%" ] q
+                            , \q -> Query.hasNot [ Selector.text "←" ] q
                             ]
             ]
         ]

@@ -22,6 +22,7 @@ module Simulation exposing
     , setRequestedMotorIndex
     , setTime
     , snapshotTriangles
+    , snapshotTrianglesFor
     , subscriptions
     , update
     )
@@ -1365,17 +1366,38 @@ so a host adds this list to the viewport's own triangles.
 -}
 snapshotTriangles : Model -> List Float
 snapshotTriangles model =
-    gearSnapshotFloats model ++ componentSnapshotFloats model
+    gearSnapshotFloatsWhere (\_ -> True) model
+        ++ componentSnapshotFloatsWhere (\_ -> True) model
 
 
-gearSnapshotFloats : Model -> List Float
-gearSnapshotFloats model =
+{-| Only the gears and driven components in `ids`, each turned to its current angle.
+A host that keeps the rest of the model (static gears) in its own viewport scene
+adds just the animated turning ones to the snapshot triangles.
+-}
+snapshotTrianglesFor : Set GearId -> Model -> List Float
+snapshotTrianglesFor ids model =
+    gearSnapshotFloatsWhere (\gid -> Set.member gid ids) model
+        ++ componentSnapshotFloatsWhere
+            (\component ->
+                case component.drivingGearId of
+                    Just gid ->
+                        Set.member gid ids
+
+                    Nothing ->
+                        False
+            )
+            model
+
+
+gearSnapshotFloatsWhere : (GearId -> Bool) -> Model -> List Float
+gearSnapshotFloatsWhere include model =
     case model.gearGraph of
         Nothing ->
             []
 
         Just _ ->
             Dict.toList model.gearMeshes
+                |> List.filter (\( gid, _ ) -> include gid)
                 |> List.concatMap
                     (\( gid, rendered ) ->
                         let
@@ -1393,9 +1415,10 @@ gearSnapshotFloats model =
                     )
 
 
-componentSnapshotFloats : Model -> List Float
-componentSnapshotFloats model =
+componentSnapshotFloatsWhere : (ComponentMeshRender -> Bool) -> Model -> List Float
+componentSnapshotFloatsWhere include model =
     model.componentMeshes
+        |> List.filter include
         |> List.concatMap
             (\component ->
                 let
