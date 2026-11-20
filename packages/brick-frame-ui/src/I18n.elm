@@ -236,6 +236,7 @@ module I18n exposing
     , snapshotAspectView
     , snapshotCameraHint
     , snapshotCameraTitle
+    , snapshotCameraTouchHint
     , snapshotClose
     , snapshotCloseCancels
     , snapshotElapsed
@@ -258,7 +259,6 @@ module I18n exposing
     , snapshotReframe
     , snapshotRenderAction
     , snapshotRenderingAnimation
-    , snapshotResetCrop
     , snapshotSamplesOf
     , snapshotSamplesPerPixel
     , snapshotSaveImage
@@ -3325,17 +3325,7 @@ snapshotReframe lang =
             "Rajaa uudelleen"
 
         En ->
-            "Trim again"
-
-
-snapshotResetCrop : Language -> String
-snapshotResetCrop lang =
-    case lang of
-        Fi ->
-            "Koko kuva"
-
-        En ->
-            "Reset crop"
+            "Reframe"
 
 
 snapshotAspect16_9 : Language -> String
@@ -3930,10 +3920,22 @@ snapshotCameraHint : Language -> String
 snapshotCameraHint lang =
     case lang of
         Fi ->
-            "Vedä kiertääksesi · rulla zoomaa · oikea painike tai kaksi sormea siirtää"
+            "Vedä kiertääksesi · rulla zoomaa · oikealla painikkeella siirrät"
 
         En ->
-            "Drag to orbit · scroll to zoom · right-drag or two fingers to pan"
+            "Drag to orbit · scroll to zoom · right-drag to pan"
+
+
+{-| How to move the camera on a touch screen.
+-}
+snapshotCameraTouchHint : Language -> String
+snapshotCameraTouchHint lang =
+    case lang of
+        Fi ->
+            "Yksi sormi kiertää · nipistys zoomaa · kaksi sormea siirtää"
+
+        En ->
+            "One finger orbits · pinch to zoom · two fingers pan"
 
 
 {-| The frame shape that follows the view itself, with no bars.

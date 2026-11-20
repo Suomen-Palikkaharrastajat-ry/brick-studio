@@ -7,16 +7,11 @@ module UI.SnapshotModal exposing
     , AspectPreset(..)
     , CameraActions
     , CropRect
-    , DragState(..)
     , FramingActions
-    , FramingData
-    , GestureState(..)
-    , Handle(..)
     , InteractionMsg(..)
     , Model
     , OutputMode(..)
     , Phase(..)
-    , Point
     , PreviewData
     , Progress
     , ProgressDetail
@@ -37,7 +32,6 @@ module UI.SnapshotModal exposing
     , getAnimResolution
     , getAnimSpeed
     , getAnimation
-    , getCrop
     , getMode
     , getQuality
     , getShader
@@ -51,13 +45,11 @@ module UI.SnapshotModal exposing
     , progressDetailDecoder
     , qualityDimensions
     , reframe
-    , resetCrop
     , setAnimDuration
     , setAnimFps
     , setAnimResolution
     , setAnimSpeed
     , setAspect
-    , setCrop
     , setFailed
     , setMode
     , setProgress
@@ -74,12 +66,13 @@ module UI.SnapshotModal exposing
     , viewWithLanguage
     )
 
-{-| Full-screen modal for framing, capturing, previewing, and saving a snapshot of
-the canvas as a PNG.
+{-| Framing, rendering, previewing and saving a path-traced snapshot (PNG) or
+animation (WebP) of the 3D view.
 
-The modal provides a single unified dialog where the aspect ratio toolbar, the 16:9
-interactive stage, and action controls stay permanently in place across framing,
-rendering, and preview phases.
+Framing is a camera overlay over the live view (`viewCameraOverlay`): the host
+keeps moving the camera as in the design view, and the chosen aspect
+letterboxes the view (`frameRect`). The finished image is shown in a modal
+dialog (`viewFramingWithLanguage`) with Save and Reframe.
 
 -}
 
@@ -310,77 +303,19 @@ animDimensions res =
             { width = 640, height = 360 }
 
 
-{-| State for the interactive pre-render framing phase.
--}
-type alias FramingData =
-    { previewUrl : Maybe String
-    , crop : CropRect
-    , aspect : AspectPreset
-    }
-
-
 {-| The phases of snapshot capture: framing, rendering, preview, or error.
 -}
 type Phase
-    = Framing FramingData
+    = Framing
     | Rendering
     | Preview PreviewData
     | Failed String
 
 
-{-| A 2D point normalized in `[0, 1]`.
--}
-type alias Point =
-    { x : Float
-    , y : Float
-    }
-
-
-{-| Resize handles on the crop box border.
--}
-type Handle
-    = CornerNW
-    | CornerNE
-    | CornerSW
-    | CornerSE
-    | EdgeN
-    | EdgeS
-    | EdgeW
-    | EdgeE
-
-
-{-| Single pointer active drag state.
--}
-type DragState
-    = HandleDrag Handle Point CropRect
-    | PanDrag Point CropRect
-    | DrawDrag Point
-
-
-{-| Active touch / pointer gesture state.
--}
-type GestureState
-    = SinglePointer Int DragState
-    | TwoPointer
-        { id1 : Int
-        , p1 : Point
-        , id2 : Int
-        , p2 : Point
-        , initDist : Float
-        , initCenter : Point
-        , initCrop : CropRect
-        }
-
-
-{-| Interactive pointer, gesture, and wheel messages on the framing canvas.
+{-| A setting chosen in the toolbar.
 -}
 type InteractionMsg
-    = PointerDown Int Point
-    | PointerMove Int Point
-    | PointerUp Int
-    | PointerCancel Int
-    | Wheel Float Point
-    | SelectShader ShaderPreset
+    = SelectShader ShaderPreset
     | SelectQuality QualityPreset
     | SelectOutputMode OutputMode
     | SelectAnimResolution AnimResolution
@@ -406,7 +341,6 @@ type alias Model =
     , phase : Phase
     , progress : Progress
     , progressDetail : ProgressDetail
-    , gesture : Maybe GestureState
     , cameraView : Maybe { width : Int, height : Int }
     }
 
@@ -419,16 +353,14 @@ type alias Actions msg =
     }
 
 
-{-| Comprehensive actions for framing and rendering.
+{-| Actions of the modal dialog (`viewFramingWithLanguage`).
 -}
 type alias FramingActions msg =
     { onSave : { dataUrl : String, filename : String } -> msg
     , onClose : msg
-    , onStartRender : CropRect -> msg
+    , onStartRender : msg
     , onReframe : msg
-    , onSetCrop : CropRect -> msg
     , onSetAspect : AspectPreset -> msg
-    , onResetCrop : msg
     , onInteraction : InteractionMsg -> msg
     }
 
@@ -451,17 +383,16 @@ init config =
     , phase = Rendering
     , progress = { fraction = 0, samples = 0 }
     , progressDetail = initialProgressDetail
-    , gesture = Nothing
     , cameraView = Nothing
     }
 
 
 {-| Initialize modal in the pre-render framing phase.
 -}
-initFraming : { filename : String, previewUrl : Maybe String } -> Model
+initFraming : { filename : String } -> Model
 initFraming config =
     { filename = config.filename
-    , previewUrl = config.previewUrl
+    , previewUrl = Nothing
     , crop = defaultCrop
     , aspect = AspectFree
     , shader = ShaderGlossy
@@ -471,15 +402,9 @@ initFraming config =
     , animFps = Fps10
     , animDuration = Dur2s
     , animSpeed = SpeedHalf
-    , phase =
-        Framing
-            { previewUrl = config.previewUrl
-            , crop = defaultCrop
-            , aspect = AspectFree
-            }
+    , phase = Framing
     , progress = { fraction = 0, samples = 0 }
     , progressDetail = initialProgressDetail
-    , gesture = Nothing
     , cameraView = Nothing
     }
 
@@ -489,7 +414,7 @@ initFraming config =
 isFraming : Model -> Bool
 isFraming model =
     case model.phase of
-        Framing _ ->
+        Framing ->
             True
 
         _ ->
@@ -516,232 +441,27 @@ startRendering model =
         | phase = Rendering
         , progress = { fraction = 0, samples = 0 }
         , progressDetail = initialProgressDetail
-        , gesture = Nothing
     }
 
 
-{-| Return from preview back to the framing phase.
+{-| Return from a finished or failed render to framing, keeping the settings.
 -}
 reframe : Model -> Model
 reframe model =
-    let
-        pUrl =
-            case model.previewUrl of
-                Just u ->
-                    Just u
-
-                Nothing ->
-                    case model.phase of
-                        Preview data ->
-                            Just data.dataUrl
-
-                        _ ->
-                            Nothing
-    in
-    { model
-        | previewUrl = pUrl
-        , phase =
-            Framing
-                { previewUrl = pUrl
-                , crop = defaultCrop
-                , aspect = AspectFree
-                }
-        , crop = defaultCrop
-        , aspect = AspectFree
-        , gesture = Nothing
-    }
+    { model | phase = Framing, crop = defaultCrop }
 
 
-{-| Get the current crop bounds.
--}
-getCrop : Model -> CropRect
-getCrop model =
-    case model.phase of
-        Framing data ->
-            data.crop
-
-        _ ->
-            model.crop
-
-
-{-| Set the crop bounds, clamping within [0, 1].
--}
-setCrop : CropRect -> Model -> Model
-setCrop crop model =
-    let
-        clampedX =
-            clamp 0.0 0.92 crop.x
-
-        clampedY =
-            clamp 0.0 0.92 crop.y
-
-        clampedW =
-            clamp 0.08 (1.0 - clampedX) crop.width
-
-        clampedH =
-            clamp 0.08 (1.0 - clampedY) crop.height
-
-        clamped =
-            { x = clampedX
-            , y = clampedY
-            , width = clampedW
-            , height = clampedH
-            }
-    in
-    case model.phase of
-        Framing data ->
-            { model
-                | crop = clamped
-                , phase = Framing { data | crop = clamped }
-            }
-
-        Preview _ ->
-            { model
-                | crop = clamped
-                , aspect = AspectFree
-                , phase =
-                    Framing
-                        { previewUrl = model.previewUrl
-                        , crop = clamped
-                        , aspect = AspectFree
-                        }
-                , gesture = Nothing
-            }
-
-        _ ->
-            { model | crop = clamped }
-
-
-{-| Aspect ratio width-to-height ratio in normalized coordinates on a 16:9 canvas.
--}
-aspectRatioRatio : AspectPreset -> Maybe Float
-aspectRatioRatio aspect =
-    case aspect of
-        AspectFree ->
-            Nothing
-
-        Aspect16_9 ->
-            Just 1.0
-
-        Aspect4_3 ->
-            Just 0.75
-
-        Aspect1_1 ->
-            Just (9.0 / 16.0)
-
-
-{-| Calculate normalized crop for a specific aspect ratio on a 16:9 canvas.
--}
-cropForAspect : AspectPreset -> CropRect -> CropRect
-cropForAspect aspect current =
-    case aspect of
-        AspectFree ->
-            current
-
-        Aspect16_9 ->
-            defaultCrop
-
-        Aspect4_3 ->
-            let
-                w =
-                    0.75
-
-                h =
-                    1.0
-
-                x =
-                    (1.0 - w) / 2.0
-            in
-            { x = x, y = 0.0, width = w, height = h }
-
-        Aspect1_1 ->
-            let
-                w =
-                    9.0 / 16.0
-
-                h =
-                    1.0
-
-                x =
-                    (1.0 - w) / 2.0
-            in
-            { x = x, y = 0.0, width = w, height = h }
-
-
-{-| Set an aspect ratio preset and update the crop box accordingly.
+{-| Set the aspect of the camera frame (see `frameRect`). On a finished image
+this goes back to framing so it can be rendered again.
 -}
 setAspect : AspectPreset -> Model -> Model
 setAspect aspect model =
     case model.phase of
-        Framing data ->
-            let
-                newCrop =
-                    cropForAspect aspect data.crop
-            in
-            { model
-                | crop = newCrop
-                , aspect = aspect
-                , phase =
-                    Framing
-                        { data
-                            | aspect = aspect
-                            , crop = newCrop
-                        }
-            }
-
         Preview _ ->
-            let
-                newCrop =
-                    cropForAspect aspect defaultCrop
-            in
-            { model
-                | crop = newCrop
-                , aspect = aspect
-                , phase =
-                    Framing
-                        { previewUrl = model.previewUrl
-                        , aspect = aspect
-                        , crop = newCrop
-                        }
-                , gesture = Nothing
-            }
+            { model | aspect = aspect, phase = Framing }
 
         _ ->
             { model | aspect = aspect }
-
-
-{-| Reset crop to the full viewport frame.
--}
-resetCrop : Model -> Model
-resetCrop model =
-    case model.phase of
-        Framing data ->
-            { model
-                | crop = defaultCrop
-                , aspect = AspectFree
-                , phase =
-                    Framing
-                        { data
-                            | crop = defaultCrop
-                            , aspect = AspectFree
-                        }
-            }
-
-        Preview _ ->
-            { model
-                | crop = defaultCrop
-                , aspect = AspectFree
-                , phase =
-                    Framing
-                        { previewUrl = model.previewUrl
-                        , crop = defaultCrop
-                        , aspect = AspectFree
-                        }
-                , gesture = Nothing
-            }
-
-        _ ->
-            { model | crop = defaultCrop, aspect = AspectFree }
 
 
 {-| Record the path tracer's progress from a host that sends only
@@ -890,18 +610,16 @@ setFailed message model =
             { model | phase = Failed message }
 
 
-{-| Transition to the preview phase when the render is ready.
-If the modal is in the Framing phase, the fast rough preview has arrived, so
-we retain the Framing phase and save the preview image.
+{-| Transition to the preview phase when the render is ready. While framing,
+the image is kept as the rough preview and the modal stays in framing.
 -}
 setReady : { dataUrl : String, filename : String } -> Model -> Model
 setReady { dataUrl, filename } model =
     case model.phase of
-        Framing data ->
+        Framing ->
             { model
                 | filename = filename
                 , previewUrl = Just dataUrl
-                , phase = Framing { data | previewUrl = Just dataUrl }
             }
 
         Rendering ->
@@ -965,13 +683,7 @@ setShader preset model =
         Preview _ ->
             { model
                 | shader = preset
-                , phase =
-                    Framing
-                        { previewUrl = model.previewUrl
-                        , crop = model.crop
-                        , aspect = model.aspect
-                        }
-                , gesture = Nothing
+                , phase = Framing
             }
 
         _ ->
@@ -994,13 +706,7 @@ setQuality preset model =
         Preview _ ->
             { model
                 | quality = preset
-                , phase =
-                    Framing
-                        { previewUrl = model.previewUrl
-                        , crop = model.crop
-                        , aspect = model.aspect
-                        }
-                , gesture = Nothing
+                , phase = Framing
             }
 
         _ ->
@@ -1030,22 +736,14 @@ setMode mode model =
         updated =
             case mode of
                 ModeAnimation ->
-                    { model | mode = ModeAnimation, crop = defaultCrop, aspect = Aspect16_9 }
+                    { model | mode = ModeAnimation }
 
                 ModeStill ->
                     { model | mode = ModeStill }
     in
     case model.phase of
         Preview _ ->
-            { updated
-                | phase =
-                    Framing
-                        { previewUrl = model.previewUrl
-                        , crop = updated.crop
-                        , aspect = updated.aspect
-                        }
-                , gesture = Nothing
-            }
+            { updated | phase = Framing }
 
         _ ->
             updated
@@ -1068,15 +766,7 @@ setAnimResolution res model =
     in
     case model.phase of
         Preview _ ->
-            { updated
-                | phase =
-                    Framing
-                        { previewUrl = model.previewUrl
-                        , crop = model.crop
-                        , aspect = model.aspect
-                        }
-                , gesture = Nothing
-            }
+            { updated | phase = Framing }
 
         _ ->
             updated
@@ -1099,15 +789,7 @@ setAnimFps fps model =
     in
     case model.phase of
         Preview _ ->
-            { updated
-                | phase =
-                    Framing
-                        { previewUrl = model.previewUrl
-                        , crop = model.crop
-                        , aspect = model.aspect
-                        }
-                , gesture = Nothing
-            }
+            { updated | phase = Framing }
 
         _ ->
             updated
@@ -1130,15 +812,7 @@ setAnimDuration dur model =
     in
     case model.phase of
         Preview _ ->
-            { updated
-                | phase =
-                    Framing
-                        { previewUrl = model.previewUrl
-                        , crop = model.crop
-                        , aspect = model.aspect
-                        }
-                , gesture = Nothing
-            }
+            { updated | phase = Framing }
 
         _ ->
             updated
@@ -1161,15 +835,7 @@ setAnimSpeed speed model =
     in
     case model.phase of
         Preview _ ->
-            { updated
-                | phase =
-                    Framing
-                        { previewUrl = model.previewUrl
-                        , crop = model.crop
-                        , aspect = model.aspect
-                        }
-                , gesture = Nothing
-            }
+            { updated | phase = Framing }
 
         _ ->
             updated
@@ -1242,779 +908,32 @@ effectiveFilename model =
                 model.filename ++ ".webp"
 
 
-{-| Handle interactive gesture, drag, resize, pinch, and wheel zoom on the framing canvas.
+{-| Apply a setting chosen in the toolbar. On a finished image this goes back
+to framing so it can be rendered again.
 -}
 handleInteraction : InteractionMsg -> Model -> Model
 handleInteraction msg model =
-    case model.phase of
-        Preview _ ->
-            case msg of
-                SelectShader preset ->
-                    setShader preset model
+    case msg of
+        SelectShader preset ->
+            setShader preset model
 
-                SelectQuality preset ->
-                    setQuality preset model
+        SelectQuality preset ->
+            setQuality preset model
 
-                SelectOutputMode mode ->
-                    setMode mode model
+        SelectOutputMode mode ->
+            setMode mode model
 
-                SelectAnimResolution res ->
-                    setAnimResolution res model
+        SelectAnimResolution res ->
+            setAnimResolution res model
 
-                SelectAnimFps fps ->
-                    setAnimFps fps model
+        SelectAnimFps fps ->
+            setAnimFps fps model
 
-                SelectAnimDuration dur ->
-                    setAnimDuration dur model
+        SelectAnimDuration dur ->
+            setAnimDuration dur model
 
-                SelectAnimSpeed speed ->
-                    setAnimSpeed speed model
-
-                _ ->
-                    model
-
-        Framing data ->
-            case msg of
-                SelectShader preset ->
-                    setShader preset model
-
-                SelectQuality preset ->
-                    setQuality preset model
-
-                SelectOutputMode mode ->
-                    setMode mode model
-
-                SelectAnimResolution res ->
-                    setAnimResolution res model
-
-                SelectAnimFps fps ->
-                    setAnimFps fps model
-
-                SelectAnimDuration dur ->
-                    setAnimDuration dur model
-
-                SelectAnimSpeed speed ->
-                    setAnimSpeed speed model
-
-                Wheel deltaY pointer ->
-                    if model.mode == ModeAnimation then
-                        let
-                            scale =
-                                clamp 0.85 1.18 (1.0 + deltaY * 0.0015)
-
-                            newDim =
-                                clamp 0.2 1.0 (data.crop.width * scale)
-
-                            oldCenterX =
-                                data.crop.x + data.crop.width / 2.0
-
-                            oldCenterY =
-                                data.crop.y + data.crop.height / 2.0
-
-                            newX =
-                                clamp 0.0 (1.0 - newDim) (oldCenterX - newDim / 2.0)
-
-                            newY =
-                                clamp 0.0 (1.0 - newDim) (oldCenterY - newDim / 2.0)
-
-                            newCrop =
-                                { x = newX, y = newY, width = newDim, height = newDim }
-                        in
-                        { model
-                            | crop = newCrop
-                            , phase = Framing { data | crop = newCrop }
-                        }
-
-                    else
-                        let
-                            scale =
-                                clamp 0.85 1.18 (1.0 + deltaY * 0.0015)
-
-                            maybeRatio =
-                                aspectRatioRatio data.aspect
-
-                            ( targetW, targetH ) =
-                                case maybeRatio of
-                                    Nothing ->
-                                        ( clamp 0.08 1.0 (data.crop.width * scale)
-                                        , clamp 0.08 1.0 (data.crop.height * scale)
-                                        )
-
-                                    Just ratio ->
-                                        let
-                                            rawW =
-                                                clamp 0.08 (min 1.0 ratio) (data.crop.width * scale)
-
-                                            rawH =
-                                                rawW / ratio
-                                        in
-                                        if rawH > 1.0 then
-                                            ( 1.0 * ratio, 1.0 )
-
-                                        else
-                                            ( rawW, rawH )
-
-                            relX =
-                                clamp 0.0 1.0 ((pointer.x - data.crop.x) / max 0.001 data.crop.width)
-
-                            relY =
-                                clamp 0.0 1.0 ((pointer.y - data.crop.y) / max 0.001 data.crop.height)
-
-                            newX =
-                                clamp 0.0 (1.0 - targetW) (pointer.x - relX * targetW)
-
-                            newY =
-                                clamp 0.0 (1.0 - targetH) (pointer.y - relY * targetH)
-
-                            newCrop =
-                                { x = newX, y = newY, width = targetW, height = targetH }
-                        in
-                        { model
-                            | crop = newCrop
-                            , phase = Framing { data | crop = newCrop }
-                        }
-
-                PointerDown pointerId point ->
-                    case model.gesture of
-                        Just (SinglePointer id1 _) ->
-                            if pointerId /= id1 then
-                                let
-                                    p1 =
-                                        pointFromCrop data.crop point
-
-                                    dist0 =
-                                        max 0.02 (pointDistance p1 point)
-
-                                    center0 =
-                                        Point ((p1.x + point.x) / 2.0) ((p1.y + point.y) / 2.0)
-
-                                    two =
-                                        TwoPointer
-                                            { id1 = id1
-                                            , p1 = p1
-                                            , id2 = pointerId
-                                            , p2 = point
-                                            , initDist = dist0
-                                            , initCenter = center0
-                                            , initCrop = data.crop
-                                            }
-                                in
-                                { model | gesture = Just two }
-
-                            else
-                                model
-
-                        _ ->
-                            if model.mode == ModeAnimation then
-                                { model | gesture = Just (SinglePointer pointerId (PanDrag point data.crop)) }
-
-                            else
-                                case hitHandle data.crop point of
-                                    Just handle ->
-                                        { model | gesture = Just (SinglePointer pointerId (HandleDrag handle point data.crop)) }
-
-                                    Nothing ->
-                                        if insideCrop data.crop point then
-                                            { model | gesture = Just (SinglePointer pointerId (PanDrag point data.crop)) }
-
-                                        else
-                                            { model | gesture = Just (SinglePointer pointerId (DrawDrag point)) }
-
-                PointerMove pointerId point ->
-                    case model.gesture of
-                        Just (SinglePointer id drag) ->
-                            if pointerId == id then
-                                case drag of
-                                    PanDrag startPoint initCrop ->
-                                        let
-                                            dx =
-                                                point.x - startPoint.x
-
-                                            dy =
-                                                point.y - startPoint.y
-
-                                            newX =
-                                                clamp 0.0 (1.0 - initCrop.width) (initCrop.x + dx)
-
-                                            newY =
-                                                clamp 0.0 (1.0 - initCrop.height) (initCrop.y + dy)
-
-                                            newCrop =
-                                                { initCrop | x = newX, y = newY }
-                                        in
-                                        { model
-                                            | crop = newCrop
-                                            , phase = Framing { data | crop = newCrop }
-                                        }
-
-                                    HandleDrag handle _ initCrop ->
-                                        let
-                                            newCrop =
-                                                resizeCrop handle data.aspect initCrop point
-                                        in
-                                        { model
-                                            | crop = newCrop
-                                            , phase = Framing { data | crop = newCrop }
-                                        }
-
-                                    DrawDrag startPoint ->
-                                        let
-                                            minX =
-                                                min startPoint.x point.x
-
-                                            maxX =
-                                                max startPoint.x point.x
-
-                                            minY =
-                                                min startPoint.y point.y
-
-                                            maxY =
-                                                max startPoint.y point.y
-
-                                            rawW =
-                                                maxX - minX
-
-                                            rawH =
-                                                maxY - minY
-                                        in
-                                        if rawW >= 0.04 && rawH >= 0.04 then
-                                            let
-                                                maybeRatio =
-                                                    aspectRatioRatio data.aspect
-
-                                                newCrop =
-                                                    case maybeRatio of
-                                                        Nothing ->
-                                                            { x = clamp 0.0 0.92 minX
-                                                            , y = clamp 0.0 0.92 minY
-                                                            , width = clamp 0.08 (1.0 - minX) rawW
-                                                            , height = clamp 0.08 (1.0 - minY) rawH
-                                                            }
-
-                                                        Just ratio ->
-                                                            let
-                                                                adjH =
-                                                                    rawW / ratio
-
-                                                                finalW =
-                                                                    if minY + adjH > 1.0 then
-                                                                        (1.0 - minY) * ratio
-
-                                                                    else
-                                                                        rawW
-
-                                                                finalH =
-                                                                    finalW / ratio
-                                                            in
-                                                            { x = clamp 0.0 (1.0 - finalW) minX
-                                                            , y = clamp 0.0 (1.0 - finalH) minY
-                                                            , width = clamp 0.08 (1.0 - minX) finalW
-                                                            , height = clamp 0.08 (1.0 - minY) finalH
-                                                            }
-                                            in
-                                            { model
-                                                | crop = newCrop
-                                                , phase = Framing { data | crop = newCrop }
-                                            }
-
-                                        else
-                                            model
-
-                            else
-                                model
-
-                        Just (TwoPointer two) ->
-                            if pointerId == two.id1 || pointerId == two.id2 then
-                                let
-                                    updatedP1 =
-                                        if pointerId == two.id1 then
-                                            point
-
-                                        else
-                                            two.p1
-
-                                    updatedP2 =
-                                        if pointerId == two.id2 then
-                                            point
-
-                                        else
-                                            two.p2
-
-                                    currDist =
-                                        max 0.02 (pointDistance updatedP1 updatedP2)
-
-                                    scale =
-                                        two.initDist / currDist
-
-                                    maybeRatio =
-                                        aspectRatioRatio data.aspect
-
-                                    ( targetW, targetH ) =
-                                        case maybeRatio of
-                                            Nothing ->
-                                                ( clamp 0.08 1.0 (two.initCrop.width * scale)
-                                                , clamp 0.08 1.0 (two.initCrop.height * scale)
-                                                )
-
-                                            Just ratio ->
-                                                let
-                                                    w =
-                                                        clamp 0.08 (min 1.0 ratio) (two.initCrop.width * scale)
-
-                                                    h =
-                                                        w / ratio
-                                                in
-                                                if h > 1.0 then
-                                                    ( 1.0 * ratio, 1.0 )
-
-                                                else
-                                                    ( w, h )
-
-                                    currCenter =
-                                        Point ((updatedP1.x + updatedP2.x) / 2.0) ((updatedP1.y + updatedP2.y) / 2.0)
-
-                                    dCenter =
-                                        Point (currCenter.x - two.initCenter.x) (currCenter.y - two.initCenter.y)
-
-                                    initCropCenter =
-                                        Point (two.initCrop.x + two.initCrop.width / 2.0) (two.initCrop.y + two.initCrop.height / 2.0)
-
-                                    newCropCenter =
-                                        Point (initCropCenter.x + dCenter.x) (initCropCenter.y + dCenter.y)
-
-                                    newX =
-                                        clamp 0.0 (1.0 - targetW) (newCropCenter.x - targetW / 2.0)
-
-                                    newY =
-                                        clamp 0.0 (1.0 - targetH) (newCropCenter.y - targetH / 2.0)
-
-                                    newCrop =
-                                        { x = newX, y = newY, width = targetW, height = targetH }
-
-                                    updatedTwo =
-                                        TwoPointer { two | p1 = updatedP1, p2 = updatedP2 }
-                                in
-                                { model
-                                    | crop = newCrop
-                                    , phase = Framing { data | crop = newCrop }
-                                    , gesture = Just updatedTwo
-                                }
-
-                            else
-                                model
-
-                        Nothing ->
-                            model
-
-                PointerUp pointerId ->
-                    case model.gesture of
-                        Just (SinglePointer id _) ->
-                            if pointerId == id then
-                                { model | gesture = Nothing }
-
-                            else
-                                model
-
-                        Just (TwoPointer two) ->
-                            if pointerId == two.id1 then
-                                { model | gesture = Just (SinglePointer two.id2 (PanDrag two.p2 data.crop)) }
-
-                            else if pointerId == two.id2 then
-                                { model | gesture = Just (SinglePointer two.id1 (PanDrag two.p1 data.crop)) }
-
-                            else
-                                model
-
-                        Nothing ->
-                            model
-
-                PointerCancel pointerId ->
-                    handleInteraction (PointerUp pointerId) model
-
-        _ ->
-            case msg of
-                SelectShader preset ->
-                    setShader preset model
-
-                SelectQuality preset ->
-                    setQuality preset model
-
-                SelectOutputMode mode ->
-                    setMode mode model
-
-                SelectAnimResolution res ->
-                    setAnimResolution res model
-
-                SelectAnimFps fps ->
-                    setAnimFps fps model
-
-                SelectAnimDuration dur ->
-                    setAnimDuration dur model
-
-                SelectAnimSpeed speed ->
-                    setAnimSpeed speed model
-
-                _ ->
-                    model
-
-
-pointDistance : Point -> Point -> Float
-pointDistance p1 p2 =
-    sqrt ((p1.x - p2.x) ^ 2 + (p1.y - p2.y) ^ 2)
-
-
-pointFromCrop : CropRect -> Point -> Point
-pointFromCrop crop p =
-    Point (crop.x + crop.width - (p.x - crop.x)) (crop.y + crop.height - (p.y - crop.y))
-
-
-hitThreshold : Float
-hitThreshold =
-    0.045
-
-
-hitHandle : CropRect -> Point -> Maybe Handle
-hitHandle crop p =
-    let
-        r =
-            crop.x + crop.width
-
-        b =
-            crop.y + crop.height
-    in
-    if pointDistance p (Point crop.x crop.y) <= hitThreshold then
-        Just CornerNW
-
-    else if pointDistance p (Point r crop.y) <= hitThreshold then
-        Just CornerNE
-
-    else if pointDistance p (Point crop.x b) <= hitThreshold then
-        Just CornerSW
-
-    else if pointDistance p (Point r b) <= hitThreshold then
-        Just CornerSE
-
-    else if abs (p.y - crop.y) <= hitThreshold && p.x >= crop.x - hitThreshold && p.x <= r + hitThreshold then
-        Just EdgeN
-
-    else if abs (p.y - b) <= hitThreshold && p.x >= crop.x - hitThreshold && p.x <= r + hitThreshold then
-        Just EdgeS
-
-    else if abs (p.x - crop.x) <= hitThreshold && p.y >= crop.y - hitThreshold && p.y <= b + hitThreshold then
-        Just EdgeW
-
-    else if abs (p.x - r) <= hitThreshold && p.y >= crop.y - hitThreshold && p.y <= b + hitThreshold then
-        Just EdgeE
-
-    else
-        Nothing
-
-
-insideCrop : CropRect -> Point -> Bool
-insideCrop crop p =
-    p.x >= crop.x && p.x <= (crop.x + crop.width) && p.y >= crop.y && p.y <= (crop.y + crop.height)
-
-
-resizeCrop : Handle -> AspectPreset -> CropRect -> Point -> CropRect
-resizeCrop handle aspect initCrop point =
-    let
-        initL =
-            initCrop.x
-
-        initT =
-            initCrop.y
-
-        initR =
-            initCrop.x + initCrop.width
-
-        initB =
-            initCrop.y + initCrop.height
-
-        clampedPx =
-            clamp 0.0 1.0 point.x
-
-        clampedPy =
-            clamp 0.0 1.0 point.y
-
-        maybeRatio =
-            aspectRatioRatio aspect
-    in
-    case maybeRatio of
-        Nothing ->
-            case handle of
-                CornerNW ->
-                    let
-                        newL =
-                            clamp 0.0 (initR - 0.08) clampedPx
-
-                        newT =
-                            clamp 0.0 (initB - 0.08) clampedPy
-                    in
-                    { x = newL, y = newT, width = initR - newL, height = initB - newT }
-
-                CornerNE ->
-                    let
-                        newR =
-                            clamp (initL + 0.08) 1.0 clampedPx
-
-                        newT =
-                            clamp 0.0 (initB - 0.08) clampedPy
-                    in
-                    { x = initL, y = newT, width = newR - initL, height = initB - newT }
-
-                CornerSW ->
-                    let
-                        newL =
-                            clamp 0.0 (initR - 0.08) clampedPx
-
-                        newB =
-                            clamp (initT + 0.08) 1.0 clampedPy
-                    in
-                    { x = newL, y = initT, width = initR - newL, height = newB - initT }
-
-                CornerSE ->
-                    let
-                        newR =
-                            clamp (initL + 0.08) 1.0 clampedPx
-
-                        newB =
-                            clamp (initT + 0.08) 1.0 clampedPy
-                    in
-                    { x = initL, y = initT, width = newR - initL, height = newB - initT }
-
-                EdgeN ->
-                    let
-                        newT =
-                            clamp 0.0 (initB - 0.08) clampedPy
-                    in
-                    { initCrop | y = newT, height = initB - newT }
-
-                EdgeS ->
-                    let
-                        newB =
-                            clamp (initT + 0.08) 1.0 clampedPy
-                    in
-                    { initCrop | height = newB - initT }
-
-                EdgeW ->
-                    let
-                        newL =
-                            clamp 0.0 (initR - 0.08) clampedPx
-                    in
-                    { initCrop | x = newL, width = initR - newL }
-
-                EdgeE ->
-                    let
-                        newR =
-                            clamp (initL + 0.08) 1.0 clampedPx
-                    in
-                    { initCrop | width = newR - initL }
-
-        Just ratio ->
-            case handle of
-                CornerSE ->
-                    let
-                        w0 =
-                            max 0.08 (clampedPx - initL)
-
-                        h0 =
-                            w0 / ratio
-
-                        ( w, h ) =
-                            if initT + h0 > 1.0 then
-                                let
-                                    maxH =
-                                        1.0 - initT
-                                in
-                                ( maxH * ratio, maxH )
-
-                            else if initL + w0 > 1.0 then
-                                let
-                                    maxW =
-                                        1.0 - initL
-                                in
-                                ( maxW, maxW / ratio )
-
-                            else
-                                ( w0, h0 )
-                    in
-                    { x = initL, y = initT, width = max 0.08 w, height = max 0.08 h }
-
-                CornerNW ->
-                    let
-                        w0 =
-                            max 0.08 (initR - clampedPx)
-
-                        h0 =
-                            w0 / ratio
-
-                        ( w, h ) =
-                            if initB - h0 < 0.0 then
-                                let
-                                    maxH =
-                                        initB
-                                in
-                                ( maxH * ratio, maxH )
-
-                            else if initR - w0 < 0.0 then
-                                let
-                                    maxW =
-                                        initR
-                                in
-                                ( maxW, maxW / ratio )
-
-                            else
-                                ( w0, h0 )
-                    in
-                    { x = initR - max 0.08 w, y = initB - max 0.08 h, width = max 0.08 w, height = max 0.08 h }
-
-                CornerNE ->
-                    let
-                        w0 =
-                            max 0.08 (clampedPx - initL)
-
-                        h0 =
-                            w0 / ratio
-
-                        ( w, h ) =
-                            if initB - h0 < 0.0 then
-                                let
-                                    maxH =
-                                        initB
-                                in
-                                ( maxH * ratio, maxH )
-
-                            else if initL + w0 > 1.0 then
-                                let
-                                    maxW =
-                                        1.0 - initL
-                                in
-                                ( maxW, maxW / ratio )
-
-                            else
-                                ( w0, h0 )
-                    in
-                    { x = initL, y = initB - max 0.08 h, width = max 0.08 w, height = max 0.08 h }
-
-                CornerSW ->
-                    let
-                        w0 =
-                            max 0.08 (initR - clampedPx)
-
-                        h0 =
-                            w0 / ratio
-
-                        ( w, h ) =
-                            if initT + h0 > 1.0 then
-                                let
-                                    maxH =
-                                        1.0 - initT
-                                in
-                                ( maxH * ratio, maxH )
-
-                            else if initR - w0 < 0.0 then
-                                let
-                                    maxW =
-                                        initR
-                                in
-                                ( maxW, maxW / ratio )
-
-                            else
-                                ( w0, h0 )
-                    in
-                    { x = initR - max 0.08 w, y = initT, width = max 0.08 w, height = max 0.08 h }
-
-                EdgeN ->
-                    let
-                        h0 =
-                            max 0.08 (initB - clampedPy)
-
-                        w0 =
-                            h0 * ratio
-
-                        ( w, h ) =
-                            if w0 > 1.0 then
-                                ( 1.0, 1.0 / ratio )
-
-                            else
-                                ( w0, h0 )
-
-                        cx =
-                            initL + initCrop.width / 2.0
-
-                        x =
-                            clamp 0.0 (1.0 - w) (cx - w / 2.0)
-                    in
-                    { x = x, y = initB - h, width = w, height = h }
-
-                EdgeS ->
-                    let
-                        h0 =
-                            max 0.08 (clampedPy - initT)
-
-                        w0 =
-                            h0 * ratio
-
-                        ( w, h ) =
-                            if w0 > 1.0 then
-                                ( 1.0, 1.0 / ratio )
-
-                            else
-                                ( w0, h0 )
-
-                        cx =
-                            initL + initCrop.width / 2.0
-
-                        x =
-                            clamp 0.0 (1.0 - w) (cx - w / 2.0)
-                    in
-                    { x = x, y = initT, width = w, height = h }
-
-                EdgeW ->
-                    let
-                        w0 =
-                            max 0.08 (initR - clampedPx)
-
-                        h0 =
-                            w0 / ratio
-
-                        ( w, h ) =
-                            if h0 > 1.0 then
-                                ( 1.0 * ratio, 1.0 )
-
-                            else
-                                ( w0, h0 )
-
-                        cy =
-                            initT + initCrop.height / 2.0
-
-                        y =
-                            clamp 0.0 (1.0 - h) (cy - h / 2.0)
-                    in
-                    { x = initR - w, y = y, width = w, height = h }
-
-                EdgeE ->
-                    let
-                        w0 =
-                            max 0.08 (clampedPx - initL)
-
-                        h0 =
-                            w0 / ratio
-
-                        ( w, h ) =
-                            if h0 > 1.0 then
-                                ( 1.0 * ratio, 1.0 )
-
-                            else
-                                ( w0, h0 )
-
-                        cy =
-                            initT + initCrop.height / 2.0
-
-                        y =
-                            clamp 0.0 (1.0 - h) (cy - h / 2.0)
-                    in
-                    { x = initL, y = y, width = w, height = h }
+        SelectAnimSpeed speed ->
+            setAnimSpeed speed model
 
 
 {-| Render the modal overlay with English defaults.
@@ -2031,11 +950,9 @@ viewWithLanguage lang actions model =
     viewFramingWithLanguage lang
         { onSave = actions.onSave
         , onClose = actions.onClose
-        , onStartRender = \_ -> actions.onClose
+        , onStartRender = actions.onClose
         , onReframe = actions.onClose
-        , onSetCrop = \_ -> actions.onClose
         , onSetAspect = \_ -> actions.onClose
-        , onResetCrop = actions.onClose
         , onInteraction = \_ -> actions.onClose
         }
         model
@@ -2110,6 +1027,11 @@ viewStyles =
 .snapshot-camera-scroll button { white-space: nowrap; flex: none; }
 .snapshot-camera-scroll { scrollbar-width: none; }
 .snapshot-camera-scroll::-webkit-scrollbar { display: none; }
+.snapshot-hint-touch { display: none; }
+@media (hover: none) and (pointer: coarse) {
+    .snapshot-hint-touch { display: block; }
+    .snapshot-hint-mouse { display: none; }
+}
 """
         ]
 
@@ -2132,7 +1054,7 @@ viewHeader lang model =
                 ]
                 [ text
                     (case model.phase of
-                        Framing _ ->
+                        Framing ->
                             I18n.snapshotFramingTitle lang
 
                         _ ->
@@ -2146,7 +1068,7 @@ viewHeader lang model =
                 ]
                 [ text
                     (case model.phase of
-                        Framing _ ->
+                        Framing ->
                             I18n.snapshotFramingDesc lang
 
                         _ ->
@@ -2196,7 +1118,7 @@ viewBody lang actions model =
         [ -- 1. Top Aspect Ratio & Reset Toolbar: ALWAYS present across all phases!
           viewToolbar lang actions model
         , -- 2. Unified 16:9 Interactive Stage: ALWAYS stays at the center across all phases!
-          viewStage lang actions model
+          viewStage lang model
         , -- Details row for Preview
           case model.phase of
             Preview data ->
@@ -2357,82 +1279,26 @@ optionPill testId msg label active =
         [ text label ]
 
 
-viewStage : Language -> FramingActions msg -> Model -> Html msg
-viewStage lang actions model =
-    let
-        cursorStyle =
-            case model.phase of
-                Preview _ ->
-                    "default"
-
-                Rendering ->
-                    "wait"
-
-                _ ->
-                    case model.mode of
-                        ModeAnimation ->
-                            case model.gesture of
-                                Just _ ->
-                                    "grabbing"
-
-                                Nothing ->
-                                    "grab"
-
-                        ModeStill ->
-                            case model.gesture of
-                                Just (SinglePointer _ (PanDrag _ _)) ->
-                                    "move"
-
-                                Just (SinglePointer _ (HandleDrag _ _ _)) ->
-                                    "grabbing"
-
-                                _ ->
-                                    "crosshair"
-
-        eventListeners =
-            case model.phase of
-                Preview _ ->
-                    []
-
-                _ ->
-                    [ Html.Events.on "pointerdown" (Decode.map actions.onInteraction pointerDownDecoder)
-                    , Html.Events.on "pointermove" (Decode.map actions.onInteraction pointerMoveDecoder)
-                    , Html.Events.on "pointerup" (Decode.map actions.onInteraction (pointerIdDecoder PointerUp))
-                    , Html.Events.on "pointercancel" (Decode.map actions.onInteraction (pointerIdDecoder PointerCancel))
-                    , Html.Events.on "pointerleave" (Decode.map actions.onInteraction (pointerIdDecoder PointerUp))
-                    , Html.Events.preventDefaultOn "wheel" (Decode.map (\( msg, stop ) -> ( actions.onInteraction msg, stop )) wheelDecoder)
-                    ]
-    in
+viewStage : Language -> Model -> Html msg
+viewStage lang model =
     div
-        ([ Attr.style "position" "relative"
-         , Attr.style "width" "100%"
-         , Attr.style "aspect-ratio" "16 / 9"
-         , Attr.style "background" previewBackground
-         , Attr.style "background-image" "radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)"
-         , Attr.style "background-size" "16px 16px"
-         , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
-         , Attr.style "border-radius" "8px"
-         , Attr.style "overflow" "hidden"
-         , Attr.style "user-select"
-            (case model.phase of
-                Preview _ ->
-                    "auto"
+        [ Attr.style "position" "relative"
+        , Attr.style "width" "100%"
+        , Attr.style "aspect-ratio" "16 / 9"
+        , Attr.style "background" previewBackground
+        , Attr.style "background-image" "radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)"
+        , Attr.style "background-size" "16px 16px"
+        , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+        , Attr.style "border-radius" "8px"
+        , Attr.style "overflow" "hidden"
+        , Attr.style "cursor"
+            (if isRendering model then
+                "wait"
 
-                _ ->
-                    "none"
+             else
+                "default"
             )
-         , Attr.style "touch-action"
-            (case model.phase of
-                Preview _ ->
-                    "auto"
-
-                _ ->
-                    "none"
-            )
-         , Attr.style "cursor" cursorStyle
-         ]
-            ++ eventListeners
-        )
+        ]
         (case model.phase of
             Preview data ->
                 [ img
@@ -2443,7 +1309,6 @@ viewStage lang actions model =
                     , Attr.style "object-fit" "contain"
                     , Attr.style "display" "block"
                     , Attr.style "pointer-events" "auto"
-                    , Attr.style "user-select" "auto"
                     , Attr.attribute "draggable" "true"
                     ]
                     []
@@ -2451,13 +1316,13 @@ viewStage lang actions model =
 
             Rendering ->
                 [ viewRoughPreview model.previewUrl lang
-                , viewCropBox model.mode model.crop
+                , viewCropBox model.crop
                 , viewProgressOverlay lang model
                 ]
 
             _ ->
                 [ viewRoughPreview model.previewUrl lang
-                , viewCropBox model.mode model.crop
+                , viewCropBox model.crop
                 ]
         )
 
@@ -2500,89 +1365,27 @@ viewRoughPreview maybeUrl lang =
                 ]
 
 
-viewCropBox : OutputMode -> CropRect -> Html msg
-viewCropBox mode crop =
-    case mode of
-        ModeAnimation ->
-            if crop.width >= 0.999 && crop.height >= 0.999 then
-                text ""
+{-| The rendered part of the view over the rough preview; nothing when it is
+the whole view.
+-}
+viewCropBox : CropRect -> Html msg
+viewCropBox crop =
+    if crop.width >= 0.999 && crop.height >= 0.999 then
+        text ""
 
-            else
-                div
-                    [ Attr.style "position" "absolute"
-                    , Attr.style "left" (String.fromFloat (crop.x * 100.0) ++ "%")
-                    , Attr.style "top" (String.fromFloat (crop.y * 100.0) ++ "%")
-                    , Attr.style "width" (String.fromFloat (crop.width * 100.0) ++ "%")
-                    , Attr.style "height" (String.fromFloat (crop.height * 100.0) ++ "%")
-                    , Attr.style "box-sizing" "border-box"
-                    , Attr.style "border" ("2px solid " ++ Theme.brandYellow)
-                    , Attr.style "box-shadow" "0 0 0 9999px rgba(0, 0, 0, 0.55)"
-                    , Attr.style "pointer-events" "none"
-                    ]
-                    []
-
-        ModeStill ->
-            div
-                [ Attr.style "position" "absolute"
-                , Attr.style "left" (String.fromFloat (crop.x * 100.0) ++ "%")
-                , Attr.style "top" (String.fromFloat (crop.y * 100.0) ++ "%")
-                , Attr.style "width" (String.fromFloat (crop.width * 100.0) ++ "%")
-                , Attr.style "height" (String.fromFloat (crop.height * 100.0) ++ "%")
-                , Attr.style "box-sizing" "border-box"
-                , Attr.style "border" ("2px solid " ++ Theme.brandYellow)
-                , Attr.style "box-shadow" "0 0 0 9999px rgba(0, 0, 0, 0.55)"
-                , Attr.style "pointer-events" "none"
-                ]
-                [ -- Grid line 1/3 horizontal
-                  div
-                    [ Attr.style "position" "absolute"
-                    , Attr.style "left" "0"
-                    , Attr.style "right" "0"
-                    , Attr.style "top" "33.33%"
-                    , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
-                    , Attr.style "pointer-events" "none"
-                    ]
-                    []
-                , -- Grid line 2/3 horizontal
-                  div
-                    [ Attr.style "position" "absolute"
-                    , Attr.style "left" "0"
-                    , Attr.style "right" "0"
-                    , Attr.style "top" "66.66%"
-                    , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
-                    , Attr.style "pointer-events" "none"
-                    ]
-                    []
-                , -- Grid line 1/3 vertical
-                  div
-                    [ Attr.style "position" "absolute"
-                    , Attr.style "top" "0"
-                    , Attr.style "bottom" "0"
-                    , Attr.style "left" "33.33%"
-                    , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
-                    , Attr.style "pointer-events" "none"
-                    ]
-                    []
-                , -- Grid line 2/3 vertical
-                  div
-                    [ Attr.style "position" "absolute"
-                    , Attr.style "top" "0"
-                    , Attr.style "bottom" "0"
-                    , Attr.style "left" "66.66%"
-                    , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
-                    , Attr.style "pointer-events" "none"
-                    ]
-                    []
-                , -- 8 handles (4 corners + 4 edge centers)
-                  viewHandle "top: -5px; left: -5px;"
-                , viewHandle "top: -5px; right: -5px;"
-                , viewHandle "bottom: -5px; left: -5px;"
-                , viewHandle "bottom: -5px; right: -5px;"
-                , viewHandle "top: -5px; left: calc(50% - 5px);"
-                , viewHandle "bottom: -5px; left: calc(50% - 5px);"
-                , viewHandle "top: calc(50% - 5px); left: -5px;"
-                , viewHandle "top: calc(50% - 5px); right: -5px;"
-                ]
+    else
+        div
+            [ Attr.style "position" "absolute"
+            , Attr.style "left" (String.fromFloat (crop.x * 100.0) ++ "%")
+            , Attr.style "top" (String.fromFloat (crop.y * 100.0) ++ "%")
+            , Attr.style "width" (String.fromFloat (crop.width * 100.0) ++ "%")
+            , Attr.style "height" (String.fromFloat (crop.height * 100.0) ++ "%")
+            , Attr.style "box-sizing" "border-box"
+            , Attr.style "border" ("2px solid " ++ Theme.brandYellow)
+            , Attr.style "box-shadow" "0 0 0 9999px rgba(0, 0, 0, 0.55)"
+            , Attr.style "pointer-events" "none"
+            ]
+            []
 
 
 
@@ -2863,8 +1666,10 @@ viewCameraOverlay lang actions viewSize model =
                     text ""
 
                   else
-                    span (oneLine [ Attr.style "font-size" "12px", Attr.style "color" Theme.textMuted, Attr.title (I18n.snapshotCameraHint lang) ])
-                        [ text (I18n.snapshotCameraHint lang) ]
+                    span [ Attr.style "display" "flex", Attr.style "min-width" "0" ]
+                        [ cameraHint "snapshot-hint-mouse" (I18n.snapshotCameraHint lang)
+                        , cameraHint "snapshot-hint-touch" (I18n.snapshotCameraTouchHint lang)
+                        ]
                 ]
             , div [ Attr.style "display" "flex", Attr.style "gap" "8px", Attr.style "margin-left" "auto", Attr.style "flex" "none" ]
                 (Button.secondary actions.onClose (I18n.snapshotClose lang)
@@ -2908,6 +1713,23 @@ oneLine attrs =
     , Attr.style "text-overflow" "ellipsis"
     ]
         ++ attrs
+
+
+{-| One of the camera hints; the stylesheet shows the touch one on touch
+screens and the mouse one elsewhere.
+-}
+cameraHint : String -> String -> Html msg
+cameraHint class hint =
+    span
+        (oneLine
+            [ Attr.class class
+            , Attr.style "font-size" "12px"
+            , Attr.style "color" Theme.textMuted
+            , Attr.style "min-width" "0"
+            , Attr.title hint
+            ]
+        )
+        [ text hint ]
 
 
 {-| Dim over the view outside the camera frame.
@@ -3141,75 +1963,6 @@ viewPreviewDetails lang model data =
         ]
 
 
-viewHandle : String -> Html msg
-viewHandle customStyle =
-    div
-        [ Attr.attribute "style"
-            ("position: absolute; width: 10px; height: 10px; background: #ffffff; border: 2px solid "
-                ++ Theme.brandYellow
-                ++ "; border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.5); pointer-events: none; "
-                ++ customStyle
-            )
-        ]
-        []
-
-
-pointerDownDecoder : Decode.Decoder InteractionMsg
-pointerDownDecoder =
-    Decode.map2 PointerDown
-        (Decode.oneOf [ Decode.field "pointerId" Decode.int, Decode.succeed 0 ])
-        (Decode.map2 Point
-            (Decode.map2 (/) (Decode.field "offsetX" Decode.float) (Decode.at [ "currentTarget", "clientWidth" ] Decode.float))
-            (Decode.map2 (/) (Decode.field "offsetY" Decode.float) (Decode.at [ "currentTarget", "clientHeight" ] Decode.float))
-        )
-
-
-pointerMoveDecoder : Decode.Decoder InteractionMsg
-pointerMoveDecoder =
-    Decode.map2 PointerMove
-        (Decode.oneOf [ Decode.field "pointerId" Decode.int, Decode.succeed 0 ])
-        (Decode.map2 Point
-            (Decode.map2 (/) (Decode.field "offsetX" Decode.float) (Decode.at [ "currentTarget", "clientWidth" ] Decode.float))
-            (Decode.map2 (/) (Decode.field "offsetY" Decode.float) (Decode.at [ "currentTarget", "clientHeight" ] Decode.float))
-        )
-
-
-pointerIdDecoder : (Int -> InteractionMsg) -> Decode.Decoder InteractionMsg
-pointerIdDecoder toMsg =
-    Decode.map toMsg
-        (Decode.oneOf [ Decode.field "pointerId" Decode.int, Decode.succeed 0 ])
-
-
-wheelDecoder : Decode.Decoder ( InteractionMsg, Bool )
-wheelDecoder =
-    Decode.map4
-        (\deltaY ox cw ( oy, ch ) ->
-            let
-                u =
-                    if cw > 0 then
-                        clamp 0.0 1.0 (ox / cw)
-
-                    else
-                        0.5
-
-                v =
-                    if ch > 0 then
-                        clamp 0.0 1.0 (oy / ch)
-
-                    else
-                        0.5
-            in
-            ( Wheel deltaY (Point u v), True )
-        )
-        (Decode.field "deltaY" Decode.float)
-        (Decode.field "offsetX" Decode.float)
-        (Decode.at [ "currentTarget", "clientWidth" ] Decode.float)
-        (Decode.map2 Tuple.pair
-            (Decode.field "offsetY" Decode.float)
-            (Decode.at [ "currentTarget", "clientHeight" ] Decode.float)
-        )
-
-
 aspectPill : msg -> String -> Bool -> Html msg
 aspectPill msg label active =
     button
@@ -3279,8 +2032,8 @@ viewFooter lang actions model =
         , Attr.style "flex-wrap" "wrap"
         ]
         (case model.phase of
-            Framing _ ->
-                [ renderButton lang actions model.crop
+            Framing ->
+                [ renderButton lang actions
                 , Button.secondary actions.onClose (I18n.snapshotClose lang)
                 ]
 
@@ -3346,11 +2099,11 @@ viewFooter lang actions model =
         )
 
 
-renderButton : Language -> FramingActions msg -> CropRect -> Html msg
-renderButton lang actions crop =
+renderButton : Language -> FramingActions msg -> Html msg
+renderButton lang actions =
     button
         [ Attr.type_ "button"
-        , Html.Events.onClick (actions.onStartRender crop)
+        , Html.Events.onClick actions.onStartRender
         , Attr.class "ui-button touch-target"
         , Attr.style "display" "inline-flex"
         , Attr.style "align-items" "center"

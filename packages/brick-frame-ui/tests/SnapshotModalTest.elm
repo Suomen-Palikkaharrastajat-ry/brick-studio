@@ -17,11 +17,8 @@ import UI.SnapshotModal as SnapshotModal
 type TestMsg
     = Save { dataUrl : String, filename : String }
     | Close
-    | StartRender SnapshotModal.CropRect
     | Reframe
-    | SetCrop SnapshotModal.CropRect
     | SetAspect SnapshotModal.AspectPreset
-    | ResetCrop
     | Interaction SnapshotModal.InteractionMsg
     | Render
 
@@ -37,11 +34,9 @@ testFramingActions : SnapshotModal.FramingActions TestMsg
 testFramingActions =
     { onSave = Save
     , onClose = Close
-    , onStartRender = StartRender
+    , onStartRender = Render
     , onReframe = Reframe
-    , onSetCrop = SetCrop
     , onSetAspect = SetAspect
-    , onResetCrop = ResetCrop
     , onInteraction = Interaction
     }
 
@@ -292,63 +287,31 @@ suite =
                         |> Query.has [ Selector.text "1920 × 1080 PNG of the current view" ]
             ]
         , describe "Framing phase"
-            [ test "initFraming initializes with default crop and AspectFree" <|
+            [ test "initFraming starts framing the view-shaped frame" <|
                 \_ ->
                     let
                         modal =
-                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Just "data:image/png;base64,prev" }
+                            SnapshotModal.initFraming { filename = "frame.png" }
                     in
                     Expect.all
                         [ \m -> SnapshotModal.isFraming m |> Expect.equal True
                         , \m -> SnapshotModal.isRendering m |> Expect.equal False
-                        , \m -> SnapshotModal.getCrop m |> Expect.equal SnapshotModal.defaultCrop
+                        , \m -> m.aspect |> Expect.equal SnapshotModal.AspectFree
                         ]
                         modal
-            , test "setCrop updates and clamps crop coordinates" <|
+            , test "setAspect sets the frame's aspect while framing" <|
                 \_ ->
-                    let
-                        modal =
-                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
-                                |> SnapshotModal.setCrop { x = 0.2, y = 0.3, width = 0.5, height = 0.4 }
-                    in
-                    SnapshotModal.getCrop modal
-                        |> Expect.equal { x = 0.2, y = 0.3, width = 0.5, height = 0.4 }
-            , test "setAspect adjusts crop for 16:9, 4:3, and 1:1" <|
-                \_ ->
-                    let
-                        modal =
-                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
-
-                        m169 =
-                            SnapshotModal.setAspect SnapshotModal.Aspect16_9 modal
-
-                        m43 =
-                            SnapshotModal.setAspect SnapshotModal.Aspect4_3 modal
-
-                        m11 =
-                            SnapshotModal.setAspect SnapshotModal.Aspect1_1 modal
-                    in
-                    Expect.all
-                        [ \_ -> SnapshotModal.getCrop m169 |> Expect.equal { x = 0.0, y = 0.0, width = 1.0, height = 1.0 }
-                        , \_ -> SnapshotModal.getCrop m43 |> Expect.equal { x = 0.125, y = 0.0, width = 0.75, height = 1.0 }
-                        , \_ -> SnapshotModal.getCrop m11 |> Expect.equal { x = (1.0 - 9.0 / 16.0) / 2.0, y = 0.0, width = 9.0 / 16.0, height = 1.0 }
-                        ]
-                        ()
-            , test "resetCrop restores default full frame" <|
-                \_ ->
-                    let
-                        modal =
-                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
-                                |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
-                                |> SnapshotModal.resetCrop
-                    in
-                    SnapshotModal.getCrop modal
-                        |> Expect.equal SnapshotModal.defaultCrop
+                    SnapshotModal.initFraming { filename = "frame.png" }
+                        |> SnapshotModal.setAspect SnapshotModal.Aspect4_3
+                        |> Expect.all
+                            [ \m -> m.aspect |> Expect.equal SnapshotModal.Aspect4_3
+                            , \m -> SnapshotModal.isFraming m |> Expect.equal True
+                            ]
             , test "startRendering transitions from Framing to Rendering" <|
                 \_ ->
                     let
                         modal =
-                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                            SnapshotModal.initFraming { filename = "frame.png" }
                                 |> SnapshotModal.startRendering
                     in
                     Expect.all
@@ -356,16 +319,22 @@ suite =
                         , \m -> SnapshotModal.isRendering m |> Expect.equal True
                         ]
                         modal
-            , test "reframe transitions from Preview back to Framing" <|
+            , test "reframe goes from Preview back to Framing and keeps the chosen aspect" <|
                 \_ ->
                     let
                         modal =
                             readyModel
+                                |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
+                                |> SnapshotModal.startRendering
+                                |> SnapshotModal.setReady { dataUrl = "data:image/png;base64,mock", filename = "test.png" }
                                 |> SnapshotModal.reframe
                     in
-                    SnapshotModal.isFraming modal
-                        |> Expect.equal True
-            , test "setAspect while in Preview transitions back to Framing with updated aspect crop" <|
+                    Expect.all
+                        [ \m -> SnapshotModal.isFraming m |> Expect.equal True
+                        , \m -> m.aspect |> Expect.equal SnapshotModal.Aspect1_1
+                        ]
+                        modal
+            , test "setAspect while in Preview goes back to Framing with the new aspect" <|
                 \_ ->
                     let
                         modal =
@@ -374,27 +343,22 @@ suite =
                     in
                     Expect.all
                         [ \m -> SnapshotModal.isFraming m |> Expect.equal True
-                        , \m -> SnapshotModal.getCrop m |> Expect.equal { x = (1.0 - 9.0 / 16.0) / 2.0, y = 0.0, width = 9.0 / 16.0, height = 1.0 }
+                        , \m -> m.aspect |> Expect.equal SnapshotModal.Aspect1_1
                         ]
                         modal
-            , test "resetCrop while in Preview transitions back to Framing with defaultCrop" <|
+            , test "switching to animation and back keeps the still's aspect" <|
                 \_ ->
-                    let
-                        modal =
-                            readyModel
-                                |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
-                                |> SnapshotModal.resetCrop
-                    in
-                    Expect.all
-                        [ \m -> SnapshotModal.isFraming m |> Expect.equal True
-                        , \m -> SnapshotModal.getCrop m |> Expect.equal SnapshotModal.defaultCrop
-                        ]
-                        modal
+                    SnapshotModal.initFraming { filename = "frame.png" }
+                        |> SnapshotModal.setAspect SnapshotModal.Aspect4_3
+                        |> SnapshotModal.setMode SnapshotModal.ModeAnimation
+                        |> SnapshotModal.setMode SnapshotModal.ModeStill
+                        |> .aspect
+                        |> Expect.equal SnapshotModal.Aspect4_3
             , test "setReady in Framing updates previewUrl without transitioning to Preview" <|
                 \_ ->
                     let
                         modal =
-                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                            SnapshotModal.initFraming { filename = "frame.png" }
                                 |> SnapshotModal.setReady { dataUrl = "data:image/png;base64,rough", filename = "frame.png" }
                     in
                     Expect.all
@@ -403,51 +367,9 @@ suite =
                         , \m -> m.previewUrl |> Expect.equal (Just "data:image/png;base64,rough")
                         ]
                         modal
-            , test "handleInteraction pan moves crop rectangle" <|
-                \_ ->
-                    let
-                        initial =
-                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
-                                |> SnapshotModal.setCrop { x = 0.2, y = 0.2, width = 0.5, height = 0.5 }
-
-                        panned =
-                            initial
-                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerDown 1 { x = 0.4, y = 0.4 })
-                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerMove 1 { x = 0.45, y = 0.48 })
-                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerUp 1)
-
-                        crop =
-                            SnapshotModal.getCrop panned
-                    in
-                    Expect.all
-                        [ \c -> Expect.within (Expect.Absolute 0.001) 0.25 c.x
-                        , \c -> Expect.within (Expect.Absolute 0.001) 0.28 c.y
-                        , \c -> Expect.within (Expect.Absolute 0.001) 0.5 c.width
-                        , \c -> Expect.within (Expect.Absolute 0.001) 0.5 c.height
-                        ]
-                        crop
-            , test "handleInteraction wheel zooms crop rectangle" <|
-                \_ ->
-                    let
-                        initial =
-                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
-                                |> SnapshotModal.setCrop { x = 0.2, y = 0.2, width = 0.6, height = 0.6 }
-
-                        zoomedIn =
-                            initial
-                                |> SnapshotModal.handleInteraction (SnapshotModal.Wheel -50.0 { x = 0.5, y = 0.5 })
-
-                        crop =
-                            SnapshotModal.getCrop zoomedIn
-                    in
-                    Expect.all
-                        [ \c -> Expect.lessThan 0.6 c.width
-                        , \c -> Expect.lessThan 0.6 c.height
-                        ]
-                        crop
             , test "viewFramingWithLanguage renders framing aspect pills and Render button without 80% or arrows" <|
                 \_ ->
-                    SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                    SnapshotModal.initFraming { filename = "frame.png" }
                         |> SnapshotModal.viewFramingWithLanguage En testFramingActions
                         |> Query.fromHtml
                         |> Expect.all
@@ -525,7 +447,7 @@ suite =
                         modal
             , test "viewFramingWithLanguage in animation mode displays animation resolution, fps, duration, and speed pills" <|
                 \_ ->
-                    SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                    SnapshotModal.initFraming { filename = "frame.png" }
                         |> SnapshotModal.setMode SnapshotModal.ModeAnimation
                         |> SnapshotModal.viewFramingWithLanguage En testFramingActions
                         |> Query.fromHtml
@@ -549,54 +471,17 @@ suite =
                             , \q -> Query.hasNot [ Selector.text "4:3" ] q
                             , \q -> Query.hasNot [ Selector.text "1:1" ] q
                             ]
-            , test "animation mode allows panning the zoomed area on pointer drag" <|
+            , test "the preview image can be dragged out of the browser" <|
                 \_ ->
-                    let
-                        initModel =
-                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
-                                |> SnapshotModal.setMode SnapshotModal.ModeAnimation
-                                |> SnapshotModal.setCrop { x = 0.2, y = 0.2, width = 0.5, height = 0.5 }
-
-                        initialCrop =
-                            SnapshotModal.getCrop initModel
-
-                        pannedModel =
-                            initModel
-                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerDown 1 { x = 0.5, y = 0.5 })
-                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerMove 1 { x = 0.6, y = 0.55 })
-                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerUp 1)
-
-                        pannedCrop =
-                            SnapshotModal.getCrop pannedModel
-                    in
-                    Expect.all
-                        [ \c -> Expect.within (Expect.Absolute 0.001) (initialCrop.x + 0.1) c.x
-                        , \c -> Expect.within (Expect.Absolute 0.001) (initialCrop.y + 0.05) c.y
-                        , \c -> Expect.within (Expect.Absolute 0.001) initialCrop.width c.width
-                        , \c -> Expect.within (Expect.Absolute 0.001) initialCrop.height c.height
-                        ]
-                        pannedCrop
-            , test "preview phase allows browser dragging and does not re-enter framing on pointer down" <|
-                \_ ->
-                    let
-                        modal =
-                            readyModel
-                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerDown 0 { x = 0.5, y = 0.5 })
-                    in
-                    Expect.all
-                        [ \m -> SnapshotModal.isFraming m |> Expect.equal False
-                        , \m ->
-                            SnapshotModal.viewFramingWithLanguage En testFramingActions m
-                                |> Query.fromHtml
-                                |> Query.find [ Selector.tag "img", Selector.attribute (HtmlAttr.attribute "draggable" "true") ]
-                                |> Query.has [ Selector.attribute (HtmlAttr.style "pointer-events" "auto") ]
-                        ]
-                        modal
+                    SnapshotModal.viewFramingWithLanguage En testFramingActions readyModel
+                        |> Query.fromHtml
+                        |> Query.find [ Selector.tag "img", Selector.attribute (HtmlAttr.attribute "draggable" "true") ]
+                        |> Query.has [ Selector.attribute (HtmlAttr.style "pointer-events" "auto") ]
             ]
         , describe "Camera overlay"
             [ test "a 16:9 frame letterboxes a wide view between the bars, centred" <|
                 \_ ->
-                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                    SnapshotModal.initFraming { filename = "r.png" }
                         |> SnapshotModal.setAspect SnapshotModal.Aspect16_9
                         |> SnapshotModal.frameRect { width = 1280, height = 800 }
                         |> roundRect
@@ -606,7 +491,7 @@ suite =
                 \_ ->
                     let
                         rect =
-                            SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                            SnapshotModal.initFraming { filename = "r.png" }
                                 |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
                                 |> SnapshotModal.frameRect { width = 390, height = 844 }
                     in
@@ -618,7 +503,7 @@ suite =
                         rect
             , test "the view-shaped frame takes all the room between the bars" <|
                 \_ ->
-                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                    SnapshotModal.initFraming { filename = "r.png" }
                         |> SnapshotModal.frameRect { width = 1000, height = 1000 }
                         |> roundRect
                         |> Expect.equal (roundRect { x = 0.016, y = 0.076, width = 0.968, height = 0.836 })
@@ -626,7 +511,7 @@ suite =
                 \_ ->
                     let
                         framing =
-                            SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                            SnapshotModal.initFraming { filename = "r.png" }
 
                         sizeFor aspect quality =
                             framing
@@ -645,7 +530,7 @@ suite =
                             ]
             , test "an animation frame is 16:9 at the resolution preset" <|
                 \_ ->
-                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                    SnapshotModal.initFraming { filename = "r.png" }
                         |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
                         |> SnapshotModal.setMode SnapshotModal.ModeAnimation
                         |> (\modal ->
@@ -656,7 +541,7 @@ suite =
                         |> Expect.equal ( { width = 854, height = 480 }, 1778 )
             , test "framing shows the frame, the settings and Render, and lets input through" <|
                 \_ ->
-                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                    SnapshotModal.initFraming { filename = "r.png" }
                         |> SnapshotModal.setAspect SnapshotModal.Aspect16_9
                         |> SnapshotModal.viewCameraOverlay En cameraActions { width = 1280, height = 800 }
                         |> Query.fromHtml
@@ -664,7 +549,10 @@ suite =
                             [ Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-frame") ]
                             , Query.has [ Selector.text "1920 × 1080 PNG of the current view" ]
                             , Query.has [ Selector.text "View" ]
-                            , Query.has [ Selector.text "Drag to orbit · scroll to zoom · right-drag or two fingers to pan" ]
+                            , Query.find [ Selector.class "snapshot-hint-mouse" ]
+                                >> Query.has [ Selector.text "Drag to orbit · scroll to zoom · right-drag to pan" ]
+                            , Query.find [ Selector.class "snapshot-hint-touch" ]
+                                >> Query.has [ Selector.text "One finger orbits · pinch to zoom · two fingers pan" ]
                             , Query.has [ Selector.attribute (HtmlAttr.style "pointer-events" "none") ]
                             , Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-render") ]
                                 >> Event.simulate Event.click
@@ -672,7 +560,7 @@ suite =
                             ]
             , test "rendering blocks input, hides the settings and shows progress in the frame" <|
                 \_ ->
-                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                    SnapshotModal.initFraming { filename = "r.png" }
                         |> SnapshotModal.startCameraRendering { width = 1280, height = 800 }
                         |> SnapshotModal.viewCameraOverlay En cameraActions { width = 1280, height = 800 }
                         |> Query.fromHtml
@@ -685,7 +573,7 @@ suite =
                             ]
             , test "after a camera render the result describes the framed output" <|
                 \_ ->
-                    SnapshotModal.initFraming { filename = "r.png", previewUrl = Nothing }
+                    SnapshotModal.initFraming { filename = "r.png" }
                         |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
                         |> SnapshotModal.startCameraRendering { width = 1280, height = 800 }
                         |> SnapshotModal.setReady { dataUrl = "data:image/png;base64,abc", filename = "r.png" }
