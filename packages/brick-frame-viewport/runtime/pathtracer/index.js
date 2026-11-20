@@ -227,10 +227,8 @@ export async function renderSnapshot(request, options = {}) {
       if (request.outlineEdges !== false) {
         rasterizeEdges(scene.edges, scene.camera, depthBuffer, width, height, denoised.color, {
           crop: request.crop,
-          physicalBevel: true,
-          keyDir: [-0.35, 0.85, 0.38],
-          lineWidth: 0.85,
-          shader: request.shader || 'glossy',
+          lineWidth: 1.4,
+          edgeColor: [0.03, 0.03, 0.03],
         })
       }
       const rgba = toRgba8(denoised.color, denoised.alpha, width, height)

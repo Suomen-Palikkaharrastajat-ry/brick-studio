@@ -175,8 +175,8 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
   if (!edges || edges.length === 0 || !camera || !colorBuffer) return colorBuffer
 
   const nearPlane = options.nearPlane ?? 0.1
-  const lineWidth = options.lineWidth ?? 1.5
-  const edgeColor = options.edgeColor ?? [0.02, 0.02, 0.02]
+  const lineWidth = options.lineWidth ?? 1.4
+  const edgeColor = options.edgeColor ?? [0.03, 0.03, 0.03]
   const depthBias = options.depthBias ?? 0.12
   const depthBiasFactor = options.depthBiasFactor ?? 1.002
   const crop = options.crop
@@ -267,10 +267,8 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
           if (strokeDist > sceneDepth * depthBiasFactor + depthBias) {
             continue
           }
-          if (options.physicalBevel) {
-            if (sceneDepth - strokeDist > 1.2 + depthBias) {
-              continue
-            }
+          if (sceneDepth - strokeDist > 1.2 + depthBias) {
+            continue
           }
         }
 
@@ -280,53 +278,9 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
           maxCoverage[pixelIdx] = coverage
           const cIdx = pixelIdx * 3
 
-          if (options.physicalBevel) {
-            const keyDir = options.keyDir || [-0.35, 0.85, 0.38]
-            const kLen = Math.hypot(keyDir[0], keyDir[1], keyDir[2]) || 1
-            const kx = keyDir[0] / kLen
-            const ky = keyDir[1] / kLen
-            const kz = keyDir[2] / kLen
-
-            const vx = (p0[0] + t * (p1[0] - p0[0])) - camera.origin[0]
-            const vy = (p0[1] + t * (p1[1] - p0[1])) - camera.origin[1]
-            const vz = (p0[2] + t * (p1[2] - p0[2])) - camera.origin[2]
-            const vDist = Math.hypot(vx, vy, vz) || 1
-            const toCamX = -vx / vDist
-            const toCamY = -vy / vDist
-            const toCamZ = -vz / vDist
-
-            const hx = kx + toCamX
-            const hy = ky + toCamY
-            const hz = kz + toCamZ
-            const hLen = Math.hypot(hx, hy, hz) || 1
-            const hNormX = hx / hLen
-            const hNormY = hy / hLen
-            const hNormZ = hz / hLen
-
-            let bn = edge.bevelNormal || [0, 1, 0]
-            if (bn[0] * toCamX + bn[1] * toCamY + bn[2] * toCamZ < 0) {
-              bn = [-bn[0], -bn[1], -bn[2]]
-            }
-
-            const nh = Math.max(0, bn[0] * hNormX + bn[1] * hNormY + bn[2] * hNormZ)
-            let seamAo = 0.28
-            let specGlint = Math.pow(nh, 8) * 0.12
-
-            if (options.shader === 'matte') {
-              seamAo = 0.24
-              specGlint = Math.pow(nh, 4) * 0.04
-            }
-
-            // 1. Proportional Seam Ambient Occlusion: Darken existing color proportionally
-            // 2. 3D Bevel Specular Highlight Glint
-            colorBuffer[cIdx] = colorBuffer[cIdx] * (1 - seamAo * deltaAlpha) + specGlint * deltaAlpha
-            colorBuffer[cIdx + 1] = colorBuffer[cIdx + 1] * (1 - seamAo * deltaAlpha) + specGlint * deltaAlpha
-            colorBuffer[cIdx + 2] = colorBuffer[cIdx + 2] * (1 - seamAo * deltaAlpha) + specGlint * deltaAlpha
-          } else {
-            colorBuffer[cIdx] = colorBuffer[cIdx] * (1 - deltaAlpha) + edgeColor[0] * deltaAlpha
-            colorBuffer[cIdx + 1] = colorBuffer[cIdx + 1] * (1 - deltaAlpha) + edgeColor[1] * deltaAlpha
-            colorBuffer[cIdx + 2] = colorBuffer[cIdx + 2] * (1 - deltaAlpha) + edgeColor[2] * deltaAlpha
-          }
+          colorBuffer[cIdx] = colorBuffer[cIdx] * (1 - deltaAlpha) + edgeColor[0] * deltaAlpha
+          colorBuffer[cIdx + 1] = colorBuffer[cIdx + 1] * (1 - deltaAlpha) + edgeColor[1] * deltaAlpha
+          colorBuffer[cIdx + 2] = colorBuffer[cIdx + 2] * (1 - deltaAlpha) + edgeColor[2] * deltaAlpha
         }
       }
     }
