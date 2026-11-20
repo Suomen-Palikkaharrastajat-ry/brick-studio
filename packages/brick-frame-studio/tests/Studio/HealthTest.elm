@@ -398,6 +398,48 @@ technicTests =
 
                     other ->
                         Expect.fail ("expected exactly one snap fix, got " ++ String.fromInt (List.length other))
+        , test "a 16T gear placed slightly offset in Y on 3749 axle pin in 3700 Technic brick snaps onto the pin rather than lifting out" <|
+            \_ ->
+                let
+                    -- 3700 Technic brick 1x2 at (-20, -56, 10)
+                    -- 3749 axle pin in hole at (-20, -46, 0)
+                    -- 4019 16T gear offset in Y at (-20, -50, -10)
+                    doc =
+                        lines
+                            [ "1 4 -20 -56 10 1 0 0 0 1 0 0 0 1 3700.dat"
+                            , "1 14 -20 -46 0 0 0 1 0 1 0 -1 0 0 3749.dat"
+                            , "1 14 -20 -50 -10 1 0 0 0 1 0 0 0 1 4019.dat"
+                            ]
+
+                    issues =
+                        Health.check noParts doc Set.empty
+
+                    fixes =
+                        Health.plan noParts doc Set.empty issues
+                in
+                case fixes of
+                    [ fix ] ->
+                        let
+                            appliedDoc =
+                                documentWith doc fix
+
+                            gearPlacement =
+                                Document.getPlacement fix.placement appliedDoc
+
+                            yPos =
+                                gearPlacement
+                                    |> Maybe.map (\p -> Vec3.getY (Mat4.transform p.matrix (Vec3.vec3 0 0 0)))
+                        in
+                        Expect.all
+                            [ \_ -> Expect.equal 2 fix.placement
+                            , \_ -> Expect.equal SnapToStud fix.reason
+                            , \_ -> Expect.equal (Just -46) (Maybe.map round yPos)
+                            , \_ -> Expect.equal [] (Health.check noParts appliedDoc Set.empty)
+                            ]
+                            ()
+
+                    other ->
+                        Expect.fail ("expected exactly one snap fix for gear on 3749, got " ++ String.fromInt (List.length other))
         , test "two meshing 16T gears are not flagged as overlapping" <|
             \_ ->
                 let

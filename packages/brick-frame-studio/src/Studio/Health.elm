@@ -952,21 +952,44 @@ moverFor ( a, b ) =
             Just ( b, a )
 
 
-findSnapFix : Item -> List Item -> Maybe Mat4
-findSnapFix mover list =
+technicCompatible : Item -> Item -> Bool
+technicCompatible a b =
+    List.any
+        (\p ->
+            isTechnicType p.connType
+                && List.any (\q -> isTechnicType q.connType && Connectivity.isCompatible p.connType q.connType) b.conn.connections
+        )
+        a.conn.connections
+
+
+findSnapFix : Item -> Item -> List Item -> Maybe Mat4
+findSnapFix mover other list =
     let
         others =
             othersOf mover list
 
-        connected =
-            List.filter (\other -> technicJoined mover other || studJoined mover other) others
+        technicMates =
+            if technicCompatible mover other then
+                [ other ]
+
+            else
+                []
+
+        candidatePartners =
+            technicMates
+                ++ List.filter
+                    (\p ->
+                        not (List.member p.id (List.map .id technicMates))
+                            && (technicJoined mover p || studJoined mover p)
+                    )
+                    others
 
         targetPoints =
             List.concatMap
                 (\item ->
                     List.map (Connectivity.transformPoint item.matrix item.id) item.conn.connections
                 )
-                connected
+                candidatePartners
 
         candidates =
             Connectivity.solveSnapCandidates 24.0 0 mover.matrix mover.conn.connections targetPoints
@@ -992,7 +1015,7 @@ overlapStage budget list reasons =
     else
         case List.filterMap moverFor (overlapPairs list) of
             ( mover, other ) :: _ ->
-                case findSnapFix mover list of
+                case findSnapFix mover other list of
                     Just snappedMatrix ->
                         let
                             moved =
