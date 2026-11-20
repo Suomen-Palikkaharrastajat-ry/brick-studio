@@ -1204,6 +1204,8 @@ extractionTests =
                         , "2711"
                         , "32125"
                         , "89678"
+                        , "3749"
+                        , "11214"
                         , "99009"
                         , "99010"
                         ]
@@ -2282,6 +2284,25 @@ snapSolverTests =
                                     , \_ -> Expect.greaterThan 0.99 (abs (Vec3.getZ snappedPinNormal))
                                     , \_ -> Expect.equal 2 axleSnap.draggedPoint.id
                                     , \_ -> Expect.lessThan 0.001 (Vec3.distance axleSnap.targetPoint.worldPosition snappedAxlePos)
+                                    , \_ ->
+                                        case knownCatalogPart "3749.dat" of
+                                            Just part3749 ->
+                                                let
+                                                    axlePinWorldPoints =
+                                                        List.map (Connectivity.transformPoint Mat4.identity 3) part3749.connections
+
+                                                    gearDragHover =
+                                                        Mat4.makeTranslate3 10 0 0
+                                                in
+                                                case solveSnap 12.0 0 gearDragHover gearPart.connections axlePinWorldPoints of
+                                                    Just gSnap ->
+                                                        Expect.pass
+
+                                                    Nothing ->
+                                                        Expect.fail "Dragging gear onto 3749 axle pin failed to snap!"
+
+                                            Nothing ->
+                                                Expect.fail "Part 3749.dat not found in knownCatalogPart!"
                                     ]
                                     ()
 

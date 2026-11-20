@@ -1478,7 +1478,11 @@ isFrictionlessPinMaleFile f =
     f
         == "connect.dat"
         || f
+        == "connect1.dat"
+        || f
         == "connect2.dat"
+        || f
+        == "connect8.dat"
         || f
         == "pin.dat"
         || String.startsWith "wpin" f
@@ -2329,6 +2333,50 @@ knownCatalogPart name =
                     ]
                 , boundingBoxes =
                     [ { min = vec3 -20 -8 -8, max = vec3 20 8 8 } ]
+                }
+
+        "3749" ->
+            -- Technic Axle 1L with Pin without Friction
+            Just
+                { part = "3749.dat"
+                , connections =
+                    [ { id = 1
+                      , connType = TechnicPinMale { length = 20.0, friction = False }
+                      , localPosition = vec3 -10 0 0
+                      , normal = vec3 -1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    , { id = 2
+                      , connType = TechnicAxleMale { length = 20.0 }
+                      , localPosition = vec3 10 0 0
+                      , normal = vec3 1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    ]
+                , boundingBoxes =
+                    [ { min = vec3 -20 -8 -8, max = vec3 20 8 8 } ]
+                }
+
+        "11214" ->
+            -- Technic Axle Pin Long with Friction with 2L Pin
+            Just
+                { part = "11214.dat"
+                , connections =
+                    [ { id = 1
+                      , connType = TechnicPinMale { length = 40.0, friction = True }
+                      , localPosition = vec3 -20 0 0
+                      , normal = vec3 -1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    , { id = 2
+                      , connType = TechnicAxleMale { length = 20.0 }
+                      , localPosition = vec3 20 0 0
+                      , normal = vec3 1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    ]
+                , boundingBoxes =
+                    [ { min = vec3 -40 -8 -8, max = vec3 30 8 8 } ]
                 }
 
         "4274" ->
