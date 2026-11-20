@@ -73,12 +73,77 @@ export function fittedSize(sourceWidth, sourceHeight, maxWidth, maxHeight) {
 }
 
 function fillBackground(ctx, width, height) {
-  const bg = getComputedStyle(document.documentElement)
-    .getPropertyValue('--color-surface-canvas')
-    .trim()
-  if (!bg) return
-  ctx.fillStyle = bg
+  let bg = ''
+  try {
+    if (typeof getComputedStyle === 'function' && typeof document !== 'undefined' && document.documentElement) {
+      bg = getComputedStyle(document.documentElement)
+        .getPropertyValue('--color-surface-canvas')
+        .trim()
+    }
+  } catch {
+    bg = ''
+  }
+  ctx.fillStyle = bg || '#05131d'
   ctx.fillRect(0, 0, width, height)
+}
+
+/**
+ * Copies a WebGL or 2D canvas to a target 2D canvas context.
+ *
+ * Direct `ctx.drawImage(webglCanvas)` on Firefox Linux (WebRender / Mesa DMABUF)
+ * reads the native BGRA surface without swizzling, swapping Red and Blue channels.
+ * Reading via `gl.readPixels(..., gl.RGBA)` guarantees correct RGBA channel order
+ * across all browsers, operating systems, and GPU drivers.
+ */
+export function copyWebglCanvasTo2d(canvas, targetCtx, targetWidth, targetHeight, transparent = false) {
+  let gl = null
+  try {
+    gl =
+      canvas.getContext?.('webgl2') ||
+      canvas.getContext?.('webgl') ||
+      canvas.getContext?.('experimental-webgl')
+  } catch {
+    gl = null
+  }
+
+  if (gl && typeof gl.readPixels === 'function' && gl.drawingBufferWidth > 0 && gl.drawingBufferHeight > 0) {
+    const srcW = gl.drawingBufferWidth
+    const srcH = gl.drawingBufferHeight
+    const raw = new Uint8Array(srcW * srcH * 4)
+    gl.readPixels(0, 0, srcW, srcH, gl.RGBA ?? 0x1908, gl.UNSIGNED_BYTE ?? 0x1401, raw)
+
+    const flipped = new Uint8ClampedArray(srcW * srcH * 4)
+    const rowBytes = srcW * 4
+    for (let y = 0; y < srcH; y++) {
+      const srcOffset = (srcH - 1 - y) * rowBytes
+      const dstOffset = y * rowBytes
+      flipped.set(raw.subarray(srcOffset, srcOffset + rowBytes), dstOffset)
+    }
+
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+      const srcCanvas = document.createElement('canvas')
+      srcCanvas.width = srcW
+      srcCanvas.height = srcH
+      const srcCtx = srcCanvas.getContext?.('2d')
+      if (srcCtx && typeof srcCtx.putImageData === 'function') {
+        srcCtx.putImageData(new ImageData(flipped, srcW, srcH), 0, 0)
+        if (!transparent) {
+          fillBackground(targetCtx, targetWidth, targetHeight)
+        }
+        targetCtx.imageSmoothingEnabled = true
+        targetCtx.imageSmoothingQuality = 'high'
+        targetCtx.drawImage(srcCanvas, 0, 0, targetWidth, targetHeight)
+        return
+      }
+    }
+  }
+
+  if (!transparent) {
+    fillBackground(targetCtx, targetWidth, targetHeight)
+  }
+  targetCtx.imageSmoothingEnabled = true
+  targetCtx.imageSmoothingQuality = 'high'
+  targetCtx.drawImage(canvas, 0, 0, targetWidth, targetHeight)
 }
 
 /** Fallback: copies the on-screen WebGL canvas. */
@@ -99,11 +164,7 @@ function captureCanvasCopy(ports, { width, height, transparent = true, filename 
   const ctx = offscreen.getContext('2d')
   if (!ctx) return
 
-  if (!transparent) fillBackground(ctx, size.width, size.height)
-
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(canvas, 0, 0, size.width, size.height)
+  copyWebglCanvasTo2d(canvas, ctx, size.width, size.height, transparent)
 
   ports.snapshotReady?.send({
     dataUrl: offscreen.toDataURL('image/png'),

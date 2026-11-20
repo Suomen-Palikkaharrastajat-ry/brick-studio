@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { dataUrlToBlob, fittedSize, initSnapshots } from './snapshot.js'
+import { copyWebglCanvasTo2d, dataUrlToBlob, fittedSize, initSnapshots } from './snapshot.js'
 
 test('fittedSize preserves aspect ratio within maxWidth and maxHeight', () => {
   assert.deepEqual(fittedSize(1920, 1080, 960, 960), { width: 960, height: 540 })
@@ -94,4 +94,124 @@ test('saveSnapshot downloads via a blob: object URL and defers revocation for iO
   } finally {
     globalThis.document = prevDoc
   }
+})
+
+test('copyWebglCanvasTo2d reads pixels via gl.readPixels and flips rows vertically', () => {
+  const prevDoc = globalThis.document
+  const prevImageData = globalThis.ImageData
+  let readPixelsCalled = false
+  let putImageDataCalled = false
+  let drawImageCalled = false
+
+  globalThis.ImageData = class MockImageData {
+    constructor(data, width, height) {
+      this.data = data
+      this.width = width
+      this.height = height
+    }
+  }
+
+  const mockSrcCanvas = {
+    width: 0,
+    height: 0,
+    getContext(type) {
+      if (type === '2d') {
+        return {
+          putImageData(imgData, x, y) {
+            putImageDataCalled = true
+            assert.equal(x, 0)
+            assert.equal(y, 0)
+            // Bottom row in WebGL (y=0) should be at top row in 2D (y=0)
+            // Let's verify row flipping:
+            // WebGL had [10, 20, 30, 255] at bottom row (index 0..3)
+            // and [40, 50, 60, 255] at top row (index 4..7)
+            // After flip: top row (index 0..3) is [40, 50, 60, 255]
+            assert.equal(imgData.data[0], 40)
+            assert.equal(imgData.data[1], 50)
+            assert.equal(imgData.data[4], 10)
+            assert.equal(imgData.data[5], 20)
+          },
+        }
+      }
+      return null
+    },
+  }
+
+  globalThis.document = {
+    createElement(tag) {
+      if (tag === 'canvas') return mockSrcCanvas
+      return {}
+    },
+    documentElement: {},
+  }
+
+  try {
+    const mockWebgl = {
+      drawingBufferWidth: 1,
+      drawingBufferHeight: 2,
+      readPixels(x, y, w, h, format, type, dst) {
+        readPixelsCalled = true
+        assert.equal(format, 0x1908)
+        assert.equal(type, 0x1401)
+        // Row 0 (bottom row):
+        dst[0] = 10
+        dst[1] = 20
+        dst[2] = 30
+        dst[3] = 255
+        // Row 1 (top row):
+        dst[4] = 40
+        dst[5] = 50
+        dst[6] = 60
+        dst[7] = 255
+      },
+      RGBA: 0x1908,
+      UNSIGNED_BYTE: 0x1401,
+    }
+
+    const mockCanvas = {
+      getContext(type) {
+        if (type === 'webgl2') return mockWebgl
+        return null
+      },
+    }
+
+    const targetCtx = {
+      fillRect() {},
+      drawImage(source, x, y, w, h) {
+        drawImageCalled = true
+        assert.equal(source, mockSrcCanvas)
+        assert.equal(w, 100)
+        assert.equal(h, 200)
+      },
+    }
+
+    copyWebglCanvasTo2d(mockCanvas, targetCtx, 100, 200, false)
+    assert.ok(readPixelsCalled, 'readPixels should be called')
+    assert.ok(putImageDataCalled, 'putImageData should be called')
+    assert.ok(drawImageCalled, 'drawImage should be called')
+  } finally {
+    globalThis.document = prevDoc
+    globalThis.ImageData = prevImageData
+  }
+})
+
+test('copyWebglCanvasTo2d falls back to drawImage when canvas lacks WebGL context', () => {
+  let fallbackDrawn = false
+  const mockCanvas = {
+    getContext() {
+      return null
+    },
+  }
+  const targetCtx = {
+    fillRect() {},
+    drawImage(source, x, y, w, h) {
+      fallbackDrawn = true
+      assert.equal(source, mockCanvas)
+      assert.equal(w, 80)
+      assert.equal(h, 60)
+    },
+  }
+
+  copyWebglCanvasTo2d(mockCanvas, targetCtx, 80, 60, true)
+  assert.ok(fallbackDrawn, 'fallback drawImage should be called')
 })

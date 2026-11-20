@@ -321,7 +321,7 @@ encodePreviewRequest config =
     Encode.object
         [ ( "width", Encode.int imageWidth )
         , ( "height", Encode.int imageHeight )
-        , ( "transparent", Encode.bool True )
+        , ( "transparent", Encode.bool False )
         , ( "filename", Encode.string config.filename )
         ]
 
