@@ -188,7 +188,6 @@ type AnimResolution
 -}
 type AnimFps
     = Fps10
-    | Fps15
     | Fps30
 
 
@@ -196,7 +195,6 @@ type AnimFps
 -}
 type AnimDuration
     = Dur2s
-    | Dur4s
     | Dur6s
 
 
@@ -207,9 +205,6 @@ animFpsValue fps =
     case fps of
         Fps10 ->
             10
-
-        Fps15 ->
-            15
 
         Fps30 ->
             30
@@ -222,9 +217,6 @@ animSecondsValue dur =
     case dur of
         Dur2s ->
             2.0
-
-        Dur4s ->
-            4.0
 
         Dur6s ->
             6.0
@@ -376,8 +368,8 @@ init config =
     , quality = QualityStandard
     , mode = ModeStill
     , animRes = Res480p
-    , animFps = Fps15
-    , animDuration = Dur4s
+    , animFps = Fps10
+    , animDuration = Dur2s
     , phase = Rendering
     , progress = { fraction = 0, samples = 0 }
     , gesture = Nothing
@@ -396,8 +388,8 @@ initFraming config =
     , quality = QualityStandard
     , mode = ModeStill
     , animRes = Res480p
-    , animFps = Fps15
-    , animDuration = Dur4s
+    , animFps = Fps10
+    , animDuration = Dur2s
     , phase =
         Framing
             { previewUrl = config.previewUrl
@@ -1070,11 +1062,17 @@ handleInteraction msg model =
                             newDim =
                                 clamp 0.2 1.0 (data.crop.width * scale)
 
+                            oldCenterX =
+                                data.crop.x + data.crop.width / 2.0
+
+                            oldCenterY =
+                                data.crop.y + data.crop.height / 2.0
+
                             newX =
-                                (1.0 - newDim) / 2.0
+                                clamp 0.0 (1.0 - newDim) (oldCenterX - newDim / 2.0)
 
                             newY =
-                                (1.0 - newDim) / 2.0
+                                clamp 0.0 (1.0 - newDim) (oldCenterY - newDim / 2.0)
 
                             newCrop =
                                 { x = newX, y = newY, width = newDim, height = newDim }
@@ -1134,11 +1132,7 @@ handleInteraction msg model =
                         }
 
                 PointerDown pointerId point ->
-                    if model.mode == ModeAnimation then
-                        model
-
-                    else
-                        case model.gesture of
+                    case model.gesture of
                         Just (SinglePointer id1 _) ->
                             if pointerId /= id1 then
                                 let
@@ -1168,16 +1162,20 @@ handleInteraction msg model =
                                 model
 
                         _ ->
-                            case hitHandle data.crop point of
-                                Just handle ->
-                                    { model | gesture = Just (SinglePointer pointerId (HandleDrag handle point data.crop)) }
+                            if model.mode == ModeAnimation then
+                                { model | gesture = Just (SinglePointer pointerId (PanDrag point data.crop)) }
 
-                                Nothing ->
-                                    if insideCrop data.crop point then
-                                        { model | gesture = Just (SinglePointer pointerId (PanDrag point data.crop)) }
+                            else
+                                case hitHandle data.crop point of
+                                    Just handle ->
+                                        { model | gesture = Just (SinglePointer pointerId (HandleDrag handle point data.crop)) }
 
-                                    else
-                                        { model | gesture = Just (SinglePointer pointerId (DrawDrag point)) }
+                                    Nothing ->
+                                        if insideCrop data.crop point then
+                                            { model | gesture = Just (SinglePointer pointerId (PanDrag point data.crop)) }
+
+                                        else
+                                            { model | gesture = Just (SinglePointer pointerId (DrawDrag point)) }
 
                 PointerMove pointerId point ->
                     case model.gesture of
@@ -2028,13 +2026,11 @@ viewToolbar lang actions model =
 
                             -- 3. FPS
                             , optionPill "anim-fps-10" (actions.onInteraction (SelectAnimFps Fps10)) (I18n.snapshotAnimFps10 lang) (activeFps == Fps10)
-                            , optionPill "anim-fps-15" (actions.onInteraction (SelectAnimFps Fps15)) (I18n.snapshotAnimFps15 lang) (activeFps == Fps15)
                             , optionPill "anim-fps-30" (actions.onInteraction (SelectAnimFps Fps30)) (I18n.snapshotAnimFps30 lang) (activeFps == Fps30)
                             , toolbarDivider
 
                             -- 4. Duration
                             , optionPill "anim-dur-2s" (actions.onInteraction (SelectAnimDuration Dur2s)) (I18n.snapshotAnimDur2s lang) (activeDur == Dur2s)
-                            , optionPill "anim-dur-4s" (actions.onInteraction (SelectAnimDuration Dur4s)) (I18n.snapshotAnimDur4s lang) (activeDur == Dur4s)
                             , optionPill "anim-dur-6s" (actions.onInteraction (SelectAnimDuration Dur6s)) (I18n.snapshotAnimDur6s lang) (activeDur == Dur6s)
                             , toolbarDivider
 
@@ -2103,7 +2099,12 @@ viewStage lang actions model =
                 _ ->
                     case model.mode of
                         ModeAnimation ->
-                            "default"
+                            case model.gesture of
+                                Just _ ->
+                                    "grabbing"
+
+                                Nothing ->
+                                    "grab"
 
                         ModeStill ->
                             case model.gesture of

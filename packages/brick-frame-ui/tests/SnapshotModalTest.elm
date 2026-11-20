@@ -438,16 +438,43 @@ suite =
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-res-480p") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-res-360p") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-10") ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-15") ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-15") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-30") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-2s") ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-4s") ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-4s") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-6s") ] q
                             , \q -> Query.hasNot [ Selector.text "Free" ] q
                             , \q -> Query.hasNot [ Selector.text "16:9" ] q
                             , \q -> Query.hasNot [ Selector.text "4:3" ] q
                             , \q -> Query.hasNot [ Selector.text "1:1" ] q
                             ]
+            , test "animation mode allows panning the zoomed area on pointer drag" <|
+                \_ ->
+                    let
+                        initModel =
+                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                                |> SnapshotModal.setMode SnapshotModal.ModeAnimation
+                                |> SnapshotModal.setCrop { x = 0.2, y = 0.2, width = 0.5, height = 0.5 }
+
+                        initialCrop =
+                            SnapshotModal.getCrop initModel
+
+                        pannedModel =
+                            initModel
+                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerDown 1 { x = 0.5, y = 0.5 })
+                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerMove 1 { x = 0.6, y = 0.55 })
+                                |> SnapshotModal.handleInteraction (SnapshotModal.PointerUp 1)
+
+                        pannedCrop =
+                            SnapshotModal.getCrop pannedModel
+                    in
+                    Expect.all
+                        [ \c -> Expect.within (Expect.Absolute 0.001) (initialCrop.x + 0.1) c.x
+                        , \c -> Expect.within (Expect.Absolute 0.001) (initialCrop.y + 0.05) c.y
+                        , \c -> Expect.within (Expect.Absolute 0.001) initialCrop.width c.width
+                        , \c -> Expect.within (Expect.Absolute 0.001) initialCrop.height c.height
+                        ]
+                        pannedCrop
             , test "preview phase allows browser dragging and does not re-enter framing on pointer down" <|
                 \_ ->
                     let
