@@ -139,7 +139,7 @@ export function extractSharpEdges(triangles, minAngleDegrees = 30, options = {})
 /**
  * Projects a 3D point in render coordinates to camera space and screen space.
  */
-function projectPoint(p, camera, width, height) {
+function projectPoint(p, camera, width, height, crop) {
   const vx = p[0] - camera.origin[0]
   const vy = p[1] - camera.origin[1]
   const vz = p[2] - camera.origin[2]
@@ -149,8 +149,14 @@ function projectPoint(p, camera, width, height) {
   const dist = Math.hypot(vx, vy, vz)
   const ndcX = cx / (cz * camera.aspect * camera.tanHalfY)
   const ndcY = cy / (cz * camera.tanHalfY)
-  const sx = (ndcX + 1) * 0.5 * width
-  const sy = (1 - ndcY) * 0.5 * height
+  let u = (ndcX + 1) * 0.5
+  let v = (1 - ndcY) * 0.5
+  if (crop) {
+    u = (u - crop.x) / crop.width
+    v = (v - crop.y) / crop.height
+  }
+  const sx = u * width
+  const sy = v * height
   return { sx, sy, cz, dist }
 }
 
@@ -165,6 +171,7 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
   const edgeColor = options.edgeColor ?? [0.02, 0.02, 0.02]
   const depthBias = options.depthBias ?? 0.05
   const depthBiasFactor = options.depthBiasFactor ?? 1.005
+  const crop = options.crop
 
   const radius = lineWidth * 0.5
   const feather = 0.5
@@ -194,8 +201,8 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
       p1 = [p0[0] + t * (p1[0] - p0[0]), p0[1] + t * (p1[1] - p0[1]), p0[2] + t * (p1[2] - p0[2])]
     }
 
-    const pr0 = projectPoint(p0, camera, width, height)
-    const pr1 = projectPoint(p1, camera, width, height)
+    const pr0 = projectPoint(p0, camera, width, height, crop)
+    const pr1 = projectPoint(p1, camera, width, height, crop)
 
     const pad = radius + feather
     const minX = Math.max(0, Math.floor(Math.min(pr0.sx, pr1.sx) - pad))

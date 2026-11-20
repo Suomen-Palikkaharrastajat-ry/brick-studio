@@ -69,28 +69,62 @@ const offsetScratch = new Float64Array(3)
 
 /**
  * Camera ray through pixel (px, py) at sub-pixel offset (jx, jy) in [0, 1),
- * written into `out`. Vertical FOV from the contract, horizontal FOV from the
- * image aspect, so a non-square image is never stretched.
+ * written into `out`. Supports optional crop sub-frustum and thin-lens macro
+ * depth of field when apertureRadius > 0.
  */
-export function primaryRay(scene, px, py, jx, jy, out) {
+export function primaryRay(scene, px, py, jx, jy, out, rng) {
   const cam = scene.camera
-  const sx = (px + jx) / scene.width
-  const sy = (py + jy) / scene.height
-  const ndcX = (2 * sx - 1) * cam.aspect * cam.tanHalfY
-  const ndcY = (1 - 2 * sy) * cam.tanHalfY
+  const crop = scene.crop
+  const u = crop ? crop.x + ((px + jx) / scene.width) * crop.width : (px + jx) / scene.width
+  const v = crop ? crop.y + ((py + jy) / scene.height) * crop.height : (py + jy) / scene.height
+  const ndcX = (2 * u - 1) * cam.aspect * cam.tanHalfY
+  const ndcY = (1 - 2 * v) * cam.tanHalfY
   const f = cam.forward
   const r = cam.right
-  const u = cam.up
-  let dx = f[0] + r[0] * ndcX + u[0] * ndcY
-  let dy = f[1] + r[1] * ndcX + u[1] * ndcY
-  let dz = f[2] + r[2] * ndcX + u[2] * ndcY
+  const up = cam.up
+  let dx = f[0] + r[0] * ndcX + up[0] * ndcY
+  let dy = f[1] + r[1] * ndcX + up[1] * ndcY
+  let dz = f[2] + r[2] * ndcX + up[2] * ndcY
   const len = Math.sqrt(dx * dx + dy * dy + dz * dz)
   dx /= len
   dy /= len
   dz /= len
-  out.ox = cam.origin[0]
-  out.oy = cam.origin[1]
-  out.oz = cam.origin[2]
+
+  let ox = cam.origin[0]
+  let oy = cam.origin[1]
+  let oz = cam.origin[2]
+
+  const ap = cam.apertureRadius
+  if (ap > 0 && rng) {
+    const cosF = dx * f[0] + dy * f[1] + dz * f[2]
+    const tf = cosF > 1e-6 ? cam.focalDistance / cosF : cam.focalDistance
+    const fx = ox + dx * tf
+    const fy = oy + dy * tf
+    const fz = oz + dz * tf
+
+    const u1 = rng.next()
+    const u2 = rng.next()
+    const rad = ap * Math.sqrt(u1)
+    const phi = 2 * Math.PI * u2
+    const lx = rad * Math.cos(phi)
+    const ly = rad * Math.sin(phi)
+
+    ox += r[0] * lx + up[0] * ly
+    oy += r[1] * lx + up[1] * ly
+    oz += r[2] * lx + up[2] * ly
+
+    dx = fx - ox
+    dy = fy - oy
+    dz = fz - oz
+    const flen = Math.hypot(dx, dy, dz)
+    dx /= flen
+    dy /= flen
+    dz /= flen
+  }
+
+  out.ox = ox
+  out.oy = oy
+  out.oz = oz
   out.dx = dx
   out.dy = dy
   out.dz = dz
@@ -167,14 +201,34 @@ function groundLitFraction(scene, rng, p) {
   return den > 0 ? num / den : 1
 }
 
+function distToSegment(px, py, pz, ax, ay, az, bx, by, bz) {
+  const vx = bx - ax
+  const vy = by - ay
+  const vz = bz - az
+  const wx = px - ax
+  const wy = py - ay
+  const wz = pz - az
+  const c1 = wx * vx + wy * vy + wz * vz
+  if (c1 <= 0) return Math.hypot(wx, wy, wz)
+  const c2 = vx * vx + vy * vy + vz * vz
+  if (c2 <= c1) return Math.hypot(px - bx, py - by, pz - bz)
+  const b = c1 / c2
+  return Math.hypot(wx - b * vx, wy - b * vy, wz - b * vz)
+}
+
+const BEVEL_RADIUS = 0.35 // LDU, ~0.14 mm physical fillet
+
 /**
- * Interpolates the smoothed vertex normal at `hit`, aligned to face incoming ray `r`.
- * Falls back to the geometric normal at extreme grazing angles so `dot(n, -r) > 0`.
+ * Interpolates the smoothed vertex normal at `hit`, aligned to face incoming ray `r`,
+ * with procedural bevel normal rounding near sharp edges.
  */
 function shadingNormal(scene, hit, r, out) {
   const slot = hit.slot
   const o = slot * 9
   const tris = scene.bvh.tris
+  const ax = tris[o]
+  const ay = tris[o + 1]
+  const az = tris[o + 2]
   const e1x = tris[o + 3]
   const e1y = tris[o + 4]
   const e1z = tris[o + 5]
@@ -193,28 +247,102 @@ function shadingNormal(scene, hit, r, out) {
   gny *= sign
   gnz *= sign
 
+  let nx = gnx
+  let ny = gny
+  let nz = gnz
+
   const vn = scene.vertexNormals
   if (vn) {
     const u = hit.u
     const v = hit.v
     const w = 1 - u - v
-    let nx = sign * (w * vn[o] + u * vn[o + 3] + v * vn[o + 6])
-    let ny = sign * (w * vn[o + 1] + u * vn[o + 4] + v * vn[o + 7])
-    let nz = sign * (w * vn[o + 2] + u * vn[o + 5] + v * vn[o + 8])
-    const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1
-    nx /= nl
-    ny /= nl
-    nz /= nl
-    if (nx * r.dx + ny * r.dy + nz * r.dz < -1e-5) {
-      out[0] = nx
-      out[1] = ny
-      out[2] = nz
-      return out
+    let snx = sign * (w * vn[o] + u * vn[o + 3] + v * vn[o + 6])
+    let sny = sign * (w * vn[o + 1] + u * vn[o + 4] + v * vn[o + 7])
+    let snz = sign * (w * vn[o + 2] + u * vn[o + 5] + v * vn[o + 8])
+    const nl = Math.sqrt(snx * snx + sny * sny + snz * snz) || 1
+    snx /= nl
+    sny /= nl
+    snz /= nl
+    if (snx * r.dx + sny * r.dy + snz * r.dz < -1e-5) {
+      nx = snx
+      ny = sny
+      nz = snz
     }
   }
-  out[0] = gnx
-  out[1] = gny
-  out[2] = gnz
+
+  const bevel = scene.bevelEdges
+  if (bevel) {
+    const bx = ax + e1x
+    const by = ay + e1y
+    const bz = az + e1z
+    const cx = ax + e2x
+    const cy = ay + e2y
+    const cz = az + e2z
+    const px = r.ox + r.dx * hit.t
+    const py = r.oy + r.dy * hit.t
+    const pz = r.oz + r.dz * hit.t
+
+    const bo = slot * 12
+    let minDist = BEVEL_RADIUS
+    let bestNx = 0
+    let bestNy = 0
+    let bestNz = 0
+    let found = false
+
+    if (bevel[bo] > 0.5) {
+      const d0 = distToSegment(px, py, pz, ax, ay, az, bx, by, bz)
+      if (d0 < minDist) {
+        minDist = d0
+        bestNx = bevel[bo + 1]
+        bestNy = bevel[bo + 2]
+        bestNz = bevel[bo + 3]
+        found = true
+      }
+    }
+    if (bevel[bo + 4] > 0.5) {
+      const d1 = distToSegment(px, py, pz, bx, by, bz, cx, cy, cz)
+      if (d1 < minDist) {
+        minDist = d1
+        bestNx = bevel[bo + 5]
+        bestNy = bevel[bo + 6]
+        bestNz = bevel[bo + 7]
+        found = true
+      }
+    }
+    if (bevel[bo + 8] > 0.5) {
+      const d2 = distToSegment(px, py, pz, cx, cy, cz, ax, ay, az)
+      if (d2 < minDist) {
+        minDist = d2
+        bestNx = bevel[bo + 9]
+        bestNy = bevel[bo + 10]
+        bestNz = bevel[bo + 11]
+        found = true
+      }
+    }
+
+    if (found) {
+      const t = minDist / BEVEL_RADIUS
+      const s = 0.5 + 0.5 * t
+      let bnx = s * nx + (1 - s) * (bestNx * sign)
+      let bny = s * ny + (1 - s) * (bestNy * sign)
+      let bnz = s * nz + (1 - s) * (bestNz * sign)
+      const bnl = Math.hypot(bnx, bny, bnz)
+      if (bnl > 1e-6) {
+        bnx /= bnl
+        bny /= bnl
+        bnz /= bnl
+        if (bnx * r.dx + bny * r.dy + bnz * r.dz < -1e-5) {
+          nx = bnx
+          ny = bny
+          nz = bnz
+        }
+      }
+    }
+  }
+
+  out[0] = nx
+  out[1] = ny
+  out[2] = nz
   return out
 }
 
@@ -417,7 +545,7 @@ function applyRoulette(bounce, rng) {
  */
 export function renderRowSample(scene, rng, y, sums, pixel = new Float64Array(4)) {
   for (let x = 0; x < scene.width; x++) {
-    primaryRay(scene, x, y, rng.next(), rng.next(), ray)
+    primaryRay(scene, x, y, rng.next(), rng.next(), ray, rng)
     const v = tracePath(scene, rng, ray, pixel)
     const o = x * 4
     sums[o] += v[0]

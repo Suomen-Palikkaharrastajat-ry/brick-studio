@@ -236,6 +236,27 @@ suite =
                                 |> Expect.equal (Ok [ 0, 0, 0 ])
                         ]
                         ()
+            , test "encodeRequestWithCrop encodes crop rectangle in JSON" <|
+                \_ ->
+                    let
+                        request =
+                            Snapshot.encodeRequestWithCrop
+                                { filename = "cropped.png"
+                                , camera = Camera.init
+                                , lightDirection = Nothing
+                                , triangles = []
+                                , crop = Just { x = 0.25, y = 0.1, width = 0.5, height = 0.8 }
+                                }
+                    in
+                    Expect.all
+                        [ \_ ->
+                            Decode.decodeValue (Decode.at [ "crop", "x" ] Decode.float) request
+                                |> Expect.equal (Ok 0.25)
+                        , \_ ->
+                            Decode.decodeValue (Decode.at [ "crop", "width" ] Decode.float) request
+                                |> Expect.equal (Ok 0.5)
+                        ]
+                        ()
             ]
         ]
 

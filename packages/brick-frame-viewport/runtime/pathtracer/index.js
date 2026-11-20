@@ -140,9 +140,18 @@ export async function renderSnapshot(request, options = {}) {
   const source = request.triangles
   if (!source || source.length === 0) throw new Error('No model triangles to render')
   if (source.length % TRIANGLE_STRIDE !== 0) throw new Error('Triangle data is not 14 numbers per triangle')
-  const width = Math.round(request.width)
-  const height = Math.round(request.height)
+  let width = Math.round(request.width)
+  let height = Math.round(request.height)
   if (!(width > 0 && height > 0)) throw new Error('Render size must be positive')
+  if (request.crop) {
+    const cw = Math.max(0.01, Math.min(1, request.crop.width || 1))
+    const ch = Math.max(0.01, Math.min(1, request.crop.height || 1))
+    const rawW = Math.round(width * cw)
+    const rawH = Math.round(height * ch)
+    const scale = Math.min(1920 / rawW, 1080 / rawH)
+    width = Math.max(64, Math.round(rawW * scale))
+    height = Math.max(64, Math.round(rawH * scale))
+  }
   const triangles = Float32Array.from(source)
   const budget = clampBudget(request.timeBudgetMs, options.minBudgetMs)
   const count = Math.min(height, options.workerCount ?? workerCountFor(globalThis.navigator?.hardwareConcurrency))
@@ -152,6 +161,8 @@ export async function renderSnapshot(request, options = {}) {
     transparent: Boolean(request.transparent),
     camera: request.camera,
     lightDirection: request.lightDirection,
+    crop: request.crop,
+    outlineEdges: Boolean(request.outlineEdges),
   }
   const camera = makeCamera(request.camera, width, height)
   const edges = extractSharpEdges(triangles)
@@ -207,7 +218,9 @@ export async function renderSnapshot(request, options = {}) {
       )
       const { color, alpha } = resolveSums(done, width, height, count, sums)
       const denoised = denoise(color, alpha, albedo, normal, width, height)
-      rasterizeEdges(scene.edges, scene.camera, depthBuffer, width, height, denoised.color)
+      if (request.outlineEdges) {
+        rasterizeEdges(scene.edges, scene.camera, depthBuffer, width, height, denoised.color, { crop: request.crop })
+      }
       const rgba = toRgba8(denoised.color, denoised.alpha, width, height)
       const dataUrl = await encode(rgba, width, height)
       if (settled) return

@@ -111,13 +111,22 @@ export function makeCamera(contract, width, height) {
   const fov = Number(contract.fovYDegrees)
   if (!(fov > 0 && fov < 180)) throw new Error('Camera fovYDegrees must be in (0, 180)')
   const zoom = Number(contract.zoom) || DEFAULT_ZOOM
+  const focalDistance = Math.hypot(target[0] - origin[0], target[1] - origin[1], target[2] - origin[2])
+  const apertureRadius = Number.isFinite(contract.apertureRadius)
+    ? Number(contract.apertureRadius)
+    : contract.dof
+      ? 0.45
+      : 0
   return {
     origin,
+    target,
     forward,
     right,
     up,
     tanHalfY: Math.tan((fov * Math.PI) / 360) / zoom,
     aspect: width / height,
+    focalDistance,
+    apertureRadius,
   }
 }
 
@@ -395,6 +404,96 @@ function computeVertexNormals(triangles, bvh) {
 }
 
 /**
+ * Computes sharp feature edges and adjacent face normals per triangle slot
+ * for procedural bevel normal rounding at brick rims and tolerance seams.
+ */
+function computeBevelData(triangles, bvh) {
+  const count = bvh.count
+  const bevelData = new Float32Array(count * 12)
+  const faceNormals = new Float32Array(count * 3)
+
+  for (let slot = 0; slot < count; slot++) {
+    const o = slot * 9
+    const tris = bvh.tris
+    const e1x = tris[o + 3]
+    const e1y = tris[o + 4]
+    const e1z = tris[o + 5]
+    const e2x = tris[o + 6]
+    const e2y = tris[o + 7]
+    const e2z = tris[o + 8]
+    let nx = e1y * e2z - e1z * e2y
+    let ny = e1z * e2x - e1x * e2z
+    let nz = e1x * e2y - e1y * e2x
+    const nl = Math.hypot(nx, ny, nz) || 1
+    faceNormals[slot * 3] = nx / nl
+    faceNormals[slot * 3 + 1] = ny / nl
+    faceNormals[slot * 3 + 2] = nz / nl
+  }
+
+  const edgeMap = new Map()
+  for (let slot = 0; slot < count; slot++) {
+    const base = bvh.prims[slot] * STRIDE
+    const fnx = faceNormals[slot * 3]
+    const fny = faceNormals[slot * 3 + 1]
+    const fnz = faceNormals[slot * 3 + 2]
+    const normal = [fnx, fny, fnz]
+
+    const k0 = quantizeVertex(triangles[base], triangles[base + 1], triangles[base + 2])
+    const k1 = quantizeVertex(triangles[base + 3], triangles[base + 4], triangles[base + 5])
+    const k2 = quantizeVertex(triangles[base + 6], triangles[base + 7], triangles[base + 8])
+
+    const edges = [
+      { key: k0 < k1 ? `${k0}|${k1}` : `${k1}|${k0}`, edgeIndex: 0 },
+      { key: k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`, edgeIndex: 1 },
+      { key: k2 < k0 ? `${k2}|${k0}` : `${k0}|${k2}`, edgeIndex: 2 },
+    ]
+
+    for (const e of edges) {
+      let list = edgeMap.get(e.key)
+      if (!list) {
+        list = []
+        edgeMap.set(e.key, list)
+      }
+      list.push({ slot, edgeIndex: e.edgeIndex, normal })
+    }
+  }
+
+  for (const entries of edgeMap.values()) {
+    if (entries.length === 1) {
+      const { slot, edgeIndex, normal } = entries[0]
+      const bo = slot * 12 + edgeIndex * 4
+      bevelData[bo] = 1.0
+      bevelData[bo + 1] = normal[0]
+      bevelData[bo + 2] = normal[1]
+      bevelData[bo + 3] = normal[2]
+    } else {
+      for (let i = 0; i < entries.length; i++) {
+        for (let j = i + 1; j < entries.length; j++) {
+          const a = entries[i]
+          const b = entries[j]
+          const dot = a.normal[0] * b.normal[0] + a.normal[1] * b.normal[1] + a.normal[2] * b.normal[2]
+          if (dot < SMOOTH_COS) {
+            const boA = a.slot * 12 + a.edgeIndex * 4
+            bevelData[boA] = 1.0
+            bevelData[boA + 1] = b.normal[0]
+            bevelData[boA + 2] = b.normal[1]
+            bevelData[boA + 3] = b.normal[2]
+
+            const boB = b.slot * 12 + b.edgeIndex * 4
+            bevelData[boB] = 1.0
+            bevelData[boB + 1] = a.normal[0]
+            bevelData[boB + 2] = a.normal[1]
+            bevelData[boB + 3] = a.normal[2]
+          }
+        }
+      }
+    }
+  }
+
+  return bevelData
+}
+
+/**
  * Turns a contract request into everything the integrator reads. Throws if
  * there are no triangles. Triangle colours are converted to linear here. Per-triangle data is indexed by BVH slot, so a
  * hit's `slot` addresses `albedo` (3 floats) and `material` directly.
@@ -428,16 +527,20 @@ export function prepareScene(request) {
   const customLightDir = request.lightDirection ?? request.camera?.lightDirection
   const edges = extractSharpEdges(triangles)
   const vertexNormals = computeVertexNormals(triangles, bvh)
+  const bevelEdges = computeBevelData(triangles, bvh)
   return {
     width,
     height,
     transparent: Boolean(request.transparent),
     camera,
+    crop: request.crop,
+    outlineEdges: Boolean(request.outlineEdges),
     lights: studioLights(camera, customLightDir),
     bvh,
     albedo,
     material,
     vertexNormals,
+    bevelEdges,
     edges,
     groundY: minY - GROUND_OFFSET,
     skyIrradiance: ENV_IRRADIANCE,

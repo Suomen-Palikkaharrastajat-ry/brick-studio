@@ -326,3 +326,37 @@ test('prepareScene respects custom lightDirection when provided', () => {
   assert.equal(key.kind, 'cone')
   assert.ok(Math.abs(key.dir[0]) < 1e-6 && Math.abs(key.dir[1] - 1) < 1e-6 && Math.abs(key.dir[2]) < 1e-6)
 })
+
+test('primaryRay maps crop sub-frustum across pixel coords', () => {
+  const scene = prepareScene({
+    width: 100,
+    height: 100,
+    crop: { x: 0.25, y: 0.25, width: 0.5, height: 0.5 },
+    camera: { position: [0, 0, 100], target: [0, 0, 0], up: [0, 1, 0], fovYDegrees: 45 },
+    triangles: Float32Array.from(squareAt(0)),
+  })
+  const r = createRay()
+  // Center of cropped region (px=50, py=50) should map to u=0.5, v=0.5 (center of full camera view)
+  primaryRay(scene, 50, 50, 0, 0, r)
+  assert.ok(Math.abs(r.dx) < 1e-5 && Math.abs(r.dy) < 1e-5 && r.dz < 0)
+})
+
+test('primaryRay with apertureRadius jitters origin and focuses on target', () => {
+  const scene = prepareScene({
+    width: 64,
+    height: 64,
+    camera: { position: [0, 0, 100], target: [0, 0, 0], up: [0, 1, 0], fovYDegrees: 45, dof: true, apertureRadius: 1.0 },
+    triangles: Float32Array.from(squareAt(0)),
+  })
+  const rng = createRng(42)
+  const r = createRay()
+  primaryRay(scene, 32, 32, 0, 0, r, rng)
+  // Origin should be jittered on the lens
+  assert.ok(r.ox !== 0 || r.oy !== 0)
+  // Ray should aim at focal plane (z = 0) at center (x ~ 0, y ~ 0)
+  const tFocus = (0 - r.oz) / r.dz
+  const xFocus = r.ox + r.dx * tFocus
+  const yFocus = r.oy + r.dy * tFocus
+  assert.ok(Math.abs(xFocus) < 0.05, `xFocus ${xFocus} should be near 0`)
+  assert.ok(Math.abs(yFocus) < 0.05, `yFocus ${yFocus} should be near 0`)
+})

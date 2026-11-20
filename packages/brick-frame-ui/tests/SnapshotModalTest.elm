@@ -5,6 +5,7 @@ module SnapshotModalTest exposing (suite)
 
 import Expect
 import Html.Attributes as HtmlAttr
+import I18n exposing (Language(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
@@ -14,12 +15,29 @@ import UI.SnapshotModal as SnapshotModal
 type TestMsg
     = Save { dataUrl : String, filename : String }
     | Close
+    | StartRender SnapshotModal.CropRect
+    | Reframe
+    | SetCrop SnapshotModal.CropRect
+    | SetAspect SnapshotModal.AspectPreset
+    | ResetCrop
 
 
 testActions : SnapshotModal.Actions TestMsg
 testActions =
     { onSave = Save
     , onClose = Close
+    }
+
+
+testFramingActions : SnapshotModal.FramingActions TestMsg
+testFramingActions =
+    { onSave = Save
+    , onClose = Close
+    , onStartRender = StartRender
+    , onReframe = Reframe
+    , onSetCrop = SetCrop
+    , onSetAspect = SetAspect
+    , onResetCrop = ResetCrop
     }
 
 
@@ -172,5 +190,92 @@ suite =
                         |> SnapshotModal.view testActions
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "A 1920 × 1080 PNG of the current view" ]
+            ]
+        , describe "Framing phase"
+            [ test "initFraming initializes with default crop and AspectFree" <|
+                \_ ->
+                    let
+                        modal =
+                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Just "data:image/png;base64,prev" }
+                    in
+                    Expect.all
+                        [ \m -> SnapshotModal.isFraming m |> Expect.equal True
+                        , \m -> SnapshotModal.isRendering m |> Expect.equal False
+                        , \m -> SnapshotModal.getCrop m |> Expect.equal SnapshotModal.defaultCrop
+                        ]
+                        modal
+            , test "setCrop updates and clamps crop coordinates" <|
+                \_ ->
+                    let
+                        modal =
+                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                                |> SnapshotModal.setCrop { x = 0.2, y = 0.3, width = 0.5, height = 0.4 }
+                    in
+                    SnapshotModal.getCrop modal
+                        |> Expect.equal { x = 0.2, y = 0.3, width = 0.5, height = 0.4 }
+            , test "setAspect adjusts crop for 16:9, 4:3, and 1:1" <|
+                \_ ->
+                    let
+                        modal =
+                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+
+                        m169 =
+                            SnapshotModal.setAspect SnapshotModal.Aspect16_9 modal
+
+                        m43 =
+                            SnapshotModal.setAspect SnapshotModal.Aspect4_3 modal
+
+                        m11 =
+                            SnapshotModal.setAspect SnapshotModal.Aspect1_1 modal
+                    in
+                    Expect.all
+                        [ \_ -> SnapshotModal.getCrop m169 |> Expect.equal { x = 0.0, y = 0.0, width = 1.0, height = 1.0 }
+                        , \_ -> SnapshotModal.getCrop m43 |> Expect.equal { x = 0.125, y = 0.0, width = 0.75, height = 1.0 }
+                        , \_ -> SnapshotModal.getCrop m11 |> Expect.equal { x = (1.0 - 9.0 / 16.0) / 2.0, y = 0.0, width = 9.0 / 16.0, height = 1.0 }
+                        ]
+                        ()
+            , test "resetCrop restores default full frame" <|
+                \_ ->
+                    let
+                        modal =
+                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                                |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
+                                |> SnapshotModal.resetCrop
+                    in
+                    SnapshotModal.getCrop modal
+                        |> Expect.equal SnapshotModal.defaultCrop
+            , test "startRendering transitions from Framing to Rendering" <|
+                \_ ->
+                    let
+                        modal =
+                            SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                                |> SnapshotModal.startRendering
+                    in
+                    Expect.all
+                        [ \m -> SnapshotModal.isFraming m |> Expect.equal False
+                        , \m -> SnapshotModal.isRendering m |> Expect.equal True
+                        ]
+                        modal
+            , test "reframe transitions from Preview back to Framing" <|
+                \_ ->
+                    let
+                        modal =
+                            readyModel
+                                |> SnapshotModal.reframe
+                    in
+                    SnapshotModal.isFraming modal
+                        |> Expect.equal True
+            , test "viewFramingWithLanguage renders framing aspect pills and Render button" <|
+                \_ ->
+                    SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
+                        |> SnapshotModal.viewFramingWithLanguage En testFramingActions
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ \q -> Query.has [ Selector.tag "button", Selector.text "Free" ] q
+                            , \q -> Query.has [ Selector.tag "button", Selector.text "16:9" ] q
+                            , \q -> Query.has [ Selector.tag "button", Selector.text "4:3" ] q
+                            , \q -> Query.has [ Selector.tag "button", Selector.text "1:1" ] q
+                            , \q -> Query.has [ Selector.tag "button", Selector.text "Render" ] q
+                            ]
             ]
         ]

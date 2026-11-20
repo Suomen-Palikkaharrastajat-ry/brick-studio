@@ -1446,6 +1446,10 @@ isAxleHoleFile : String -> Bool
 isAxleHoleFile f =
     String.startsWith "axlehole" f
         || String.startsWith "axlehol" f
+        || String.startsWith "axl2ho" f
+        || String.startsWith "axl3ho" f
+        || String.startsWith "axl4ho" f
+        || String.startsWith "axl5ho" f
 
 
 isAxleMaleFile : String -> Bool
@@ -2075,6 +2079,18 @@ knownCatalogPart name =
 
         "4019" ->
             Just (makeGear 20.0 20.0 "4019.dat")
+
+        "69778" ->
+            Just (makeGear 12.0 20.0 "69778.dat")
+
+        "94925" ->
+            Just (makeGear 20.0 20.0 "94925.dat")
+
+        "32498" ->
+            Just (makeGear 45.0 20.0 "32498.dat")
+
+        "32072" ->
+            Just (makeGear 20.0 20.0 "32072.dat")
 
         "3648" ->
             let

@@ -217,11 +217,20 @@ module I18n exposing
     , shortcutsFootnote
       -- Inspector & BOM
     , shortcutsHelpRows
+    , snapshotAspect16_9
+    , snapshotAspect1_1
+    , snapshotAspect4_3
+    , snapshotAspectFree
     , snapshotClose
       -- Language Switcher
+    , snapshotFramingDesc
+    , snapshotFramingTitle
     , snapshotPathTracing
     , snapshotReadyToSave
+    , snapshotReframe
+    , snapshotRenderAction
     , snapshotRenderNotice
+    , snapshotResetCrop
     , snapshotSaveImage
     , snapshotSavedImage
     , snapshotSavedNotice
@@ -3239,6 +3248,81 @@ snapshotSubtitle lang =
 
         En ->
             "A 1920 × 1080 PNG of the current view"
+
+
+snapshotFramingTitle : Language -> String
+snapshotFramingTitle lang =
+    case lang of
+        Fi ->
+            "Rajaa tilannekuva"
+
+        En ->
+            "Frame snapshot"
+
+
+snapshotFramingDesc : Language -> String
+snapshotFramingDesc lang =
+    case lang of
+        Fi ->
+            "Rajaa haluamasi alue tai valitse kuvasuhde ennen renderöintiä"
+
+        En ->
+            "Crop the region or pick an aspect ratio before rendering"
+
+
+snapshotRenderAction : Language -> String
+snapshotRenderAction lang =
+    case lang of
+        Fi ->
+            "Renderöi"
+
+        En ->
+            "Render"
+
+
+snapshotReframe : Language -> String
+snapshotReframe lang =
+    case lang of
+        Fi ->
+            "Rajaa uudelleen"
+
+        En ->
+            "Trim again"
+
+
+snapshotResetCrop : Language -> String
+snapshotResetCrop lang =
+    case lang of
+        Fi ->
+            "Koko kuva"
+
+        En ->
+            "Reset crop"
+
+
+snapshotAspectFree : Language -> String
+snapshotAspectFree lang =
+    case lang of
+        Fi ->
+            "Vapaa"
+
+        En ->
+            "Free"
+
+
+snapshotAspect16_9 : Language -> String
+snapshotAspect16_9 _ =
+    "16:9"
+
+
+snapshotAspect4_3 : Language -> String
+snapshotAspect4_3 _ =
+    "4:3"
+
+
+snapshotAspect1_1 : Language -> String
+snapshotAspect1_1 _ =
+    "1:1"
 
 
 snapshotPathTracing : Language -> Int -> String

@@ -1,6 +1,9 @@
 module Viewport.Snapshot exposing
-    ( encodeRequest
+    ( CropRect
+    , encodeRequest
+    , encodeRequestWithCrop
     , encodeRequestWithLight
+    , encodeRequestWithOptions
     , imageHeight
     , imageWidth
     , sceneTriangles
@@ -120,6 +123,16 @@ isGhost activeSources source =
             False
 
 
+{-| Normalized crop rectangle `[0, 1]` in viewport coordinates.
+-}
+type alias CropRect =
+    { x : Float
+    , y : Float
+    , width : Float
+    , height : Float
+    }
+
+
 {-| The JSON object `captureRender` takes: output size, the camera, and the triangles.
 -}
 encodeRequest : { filename : String, camera : Camera, triangles : List Float } -> Encode.Value
@@ -143,11 +156,77 @@ encodeRequestWithLight :
     }
     -> Encode.Value
 encodeRequestWithLight config =
+    encodeRequestWithCrop
+        { filename = config.filename
+        , camera = config.camera
+        , lightDirection = config.lightDirection
+        , triangles = config.triangles
+        , crop = Nothing
+        }
+
+
+{-| The JSON object `captureRender` takes, with optional key light and crop bounds.
+-}
+encodeRequestWithCrop :
+    { filename : String
+    , camera : Camera
+    , lightDirection : Maybe Vec3
+    , triangles : List Float
+    , crop : Maybe CropRect
+    }
+    -> Encode.Value
+encodeRequestWithCrop config =
+    encodeRequestWithOptions
+        { filename = config.filename
+        , camera = config.camera
+        , lightDirection = config.lightDirection
+        , triangles = config.triangles
+        , crop = config.crop
+        , outlineEdges = Nothing
+        }
+
+
+{-| Full configuration for `captureRender`, including optional outline edge rasterization.
+-}
+encodeRequestWithOptions :
+    { filename : String
+    , camera : Camera
+    , lightDirection : Maybe Vec3
+    , triangles : List Float
+    , crop : Maybe CropRect
+    , outlineEdges : Maybe Bool
+    }
+    -> Encode.Value
+encodeRequestWithOptions config =
     let
         lightFields =
             case config.lightDirection of
                 Just dir ->
                     [ ( "lightDirection", encodeVec3 dir ) ]
+
+                Nothing ->
+                    []
+
+        cropFields =
+            case config.crop of
+                Just c ->
+                    [ ( "crop"
+                      , Encode.object
+                            [ ( "x", Encode.float c.x )
+                            , ( "y", Encode.float c.y )
+                            , ( "width", Encode.float c.width )
+                            , ( "height", Encode.float c.height )
+                            ]
+                      )
+                    ]
+
+                Nothing ->
+                    []
+
+        outlineFields =
+            case config.outlineEdges of
+                Just outline ->
+                    [ ( "outlineEdges", Encode.bool outline ) ]
 
                 Nothing ->
                     []
@@ -170,6 +249,8 @@ encodeRequestWithLight config =
            )
          ]
             ++ lightFields
+            ++ cropFields
+            ++ outlineFields
             ++ [ ( "triangles", Encode.list Encode.float config.triangles ) ]
         )
 

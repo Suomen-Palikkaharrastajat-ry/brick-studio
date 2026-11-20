@@ -1,27 +1,40 @@
 module UI.SnapshotModal exposing
     ( Actions
+    , AspectPreset(..)
+    , CropRect
+    , FramingActions
+    , FramingData
     , Model
     , Phase(..)
     , PreviewData
     , Progress
+    , defaultCrop
+    , getCrop
     , init
+    , initFraming
+    , isFraming
     , isRendering
     , markSaved
+    , reframe
+    , resetCrop
+    , setAspect
+    , setCrop
     , setFailed
     , setProgress
     , setReady
+    , startRendering
     , view
+    , viewFramingWithLanguage
     , viewWithLanguage
     )
 
-{-| Full-screen modal for capturing, previewing, and saving a snapshot of the
-canvas as a 1920 × 1080 PNG.
+{-| Full-screen modal for framing, capturing, previewing, and saving a snapshot of
+the canvas as a PNG.
 
-The modal takes over the whole UI with a blurred backdrop while the offline
-path tracer works. It shows the sample count and a progress bar from the
-tracer's progress reports (`setProgress`). A failed render shows its error
-(`setFailed`). Once the image is ready it appears with a Save button. The user
-can close the modal at any time, whether or not the image has been saved.
+The modal provides an interactive framing phase where the user can crop the scene
+or select an aspect ratio (Free, 16:9, 4:3, 1:1) before path tracing. During
+rendering, it displays a progress bar and sample count. Once ready, the preview
+allows saving the PNG or reframing.
 
 -}
 
@@ -52,10 +65,50 @@ type alias PreviewData =
     }
 
 
-{-| The phases of snapshot capture: rendering, then either a preview or a failure.
+{-| Normalized crop rectangle `[0, 1]` in viewport coordinates.
+-}
+type alias CropRect =
+    { x : Float
+    , y : Float
+    , width : Float
+    , height : Float
+    }
+
+
+{-| Default full-frame crop.
+-}
+defaultCrop : CropRect
+defaultCrop =
+    { x = 0.0
+    , y = 0.0
+    , width = 1.0
+    , height = 1.0
+    }
+
+
+{-| Pre-render aspect ratio presets.
+-}
+type AspectPreset
+    = AspectFree
+    | Aspect16_9
+    | Aspect4_3
+    | Aspect1_1
+
+
+{-| State for the interactive pre-render framing phase.
+-}
+type alias FramingData =
+    { previewUrl : Maybe String
+    , crop : CropRect
+    , aspect : AspectPreset
+    }
+
+
+{-| The phases of snapshot capture: framing, rendering, preview, or error.
 -}
 type Phase
-    = Rendering
+    = Framing FramingData
+    | Rendering
     | Preview PreviewData
     | Failed String
 
@@ -69,7 +122,7 @@ type alias Model =
     }
 
 
-{-| Actions triggered from the modal.
+{-| Basic actions triggered from the modal.
 -}
 type alias Actions msg =
     { onSave : { dataUrl : String, filename : String } -> msg
@@ -77,7 +130,20 @@ type alias Actions msg =
     }
 
 
-{-| Initialize modal in the capturing phase.
+{-| Comprehensive actions for framing and rendering.
+-}
+type alias FramingActions msg =
+    { onSave : { dataUrl : String, filename : String } -> msg
+    , onClose : msg
+    , onStartRender : CropRect -> msg
+    , onReframe : msg
+    , onSetCrop : CropRect -> msg
+    , onSetAspect : AspectPreset -> msg
+    , onResetCrop : msg
+    }
+
+
+{-| Initialize modal directly in the rendering phase (backward compatible).
 -}
 init : { filename : String } -> Model
 init config =
@@ -87,8 +153,34 @@ init config =
     }
 
 
-{-| Whether the modal is still waiting for the path tracer. Closing it then
-should cancel the render.
+{-| Initialize modal in the pre-render framing phase.
+-}
+initFraming : { filename : String, previewUrl : Maybe String } -> Model
+initFraming config =
+    { filename = config.filename
+    , phase =
+        Framing
+            { previewUrl = config.previewUrl
+            , crop = defaultCrop
+            , aspect = AspectFree
+            }
+    , progress = { fraction = 0, samples = 0 }
+    }
+
+
+{-| Whether the modal is in the framing phase.
+-}
+isFraming : Model -> Bool
+isFraming model =
+    case model.phase of
+        Framing _ ->
+            True
+
+        _ ->
+            False
+
+
+{-| Whether the modal is waiting for the path tracer.
 -}
 isRendering : Model -> Bool
 isRendering model =
@@ -100,7 +192,163 @@ isRendering model =
             False
 
 
-{-| Record the path tracer's progress. Ignored once the render has finished or failed.
+{-| Transition to the rendering phase.
+-}
+startRendering : Model -> Model
+startRendering model =
+    { model | phase = Rendering, progress = { fraction = 0, samples = 0 } }
+
+
+{-| Return from preview back to the framing phase.
+-}
+reframe : Model -> Model
+reframe model =
+    case model.phase of
+        Preview data ->
+            { model
+                | phase =
+                    Framing
+                        { previewUrl = Just data.dataUrl
+                        , crop = defaultCrop
+                        , aspect = AspectFree
+                        }
+            }
+
+        _ ->
+            model
+
+
+{-| Get the current crop bounds.
+-}
+getCrop : Model -> CropRect
+getCrop model =
+    case model.phase of
+        Framing data ->
+            data.crop
+
+        _ ->
+            defaultCrop
+
+
+{-| Set the crop bounds, clamping within [0, 1].
+-}
+setCrop : CropRect -> Model -> Model
+setCrop crop model =
+    case model.phase of
+        Framing data ->
+            let
+                clampedX =
+                    clamp 0.0 0.9 crop.x
+
+                clampedY =
+                    clamp 0.0 0.9 crop.y
+
+                clampedW =
+                    clamp 0.1 (1.0 - clampedX) crop.width
+
+                clampedH =
+                    clamp 0.1 (1.0 - clampedY) crop.height
+            in
+            { model
+                | phase =
+                    Framing
+                        { data
+                            | crop =
+                                { x = clampedX
+                                , y = clampedY
+                                , width = clampedW
+                                , height = clampedH
+                                }
+                        }
+            }
+
+        _ ->
+            model
+
+
+{-| Calculate normalized crop for a specific aspect ratio on a 16:9 canvas.
+-}
+cropForAspect : AspectPreset -> CropRect -> CropRect
+cropForAspect aspect current =
+    case aspect of
+        AspectFree ->
+            current
+
+        Aspect16_9 ->
+            defaultCrop
+
+        Aspect4_3 ->
+            -- In a 16:9 canvas, 4:3 width ratio = (4/3) / (16/9) = 0.75
+            let
+                w =
+                    0.75
+
+                h =
+                    1.0
+
+                x =
+                    (1.0 - w) / 2.0
+            in
+            { x = x, y = 0.0, width = w, height = h }
+
+        Aspect1_1 ->
+            -- In a 16:9 canvas, 1:1 width ratio = 1.0 / (16/9) = 0.5625
+            let
+                w =
+                    9.0 / 16.0
+
+                h =
+                    1.0
+
+                x =
+                    (1.0 - w) / 2.0
+            in
+            { x = x, y = 0.0, width = w, height = h }
+
+
+{-| Set an aspect ratio preset and update the crop box accordingly.
+-}
+setAspect : AspectPreset -> Model -> Model
+setAspect aspect model =
+    case model.phase of
+        Framing data ->
+            let
+                newCrop =
+                    cropForAspect aspect data.crop
+            in
+            { model
+                | phase =
+                    Framing
+                        { data
+                            | aspect = aspect
+                            , crop = newCrop
+                        }
+            }
+
+        _ ->
+            model
+
+
+{-| Reset crop to the full viewport frame.
+-}
+resetCrop : Model -> Model
+resetCrop model =
+    case model.phase of
+        Framing data ->
+            { model
+                | phase =
+                    Framing
+                        { data
+                            | crop = defaultCrop
+                            , aspect = AspectFree
+                        }
+            }
+
+        _ ->
+            model
+
+
+{-| Record the path tracer's progress.
 -}
 setProgress : Progress -> Model -> Model
 setProgress progress model =
@@ -117,7 +365,7 @@ setProgress progress model =
             model
 
 
-{-| Show the error of a failed render. Ignored once the render has finished.
+{-| Show error message on render failure.
 -}
 setFailed : String -> Model -> Model
 setFailed message model =
@@ -129,7 +377,7 @@ setFailed message model =
             model
 
 
-{-| Transition to the preview phase when JavaScript delivers the captured data URL.
+{-| Transition to the preview phase when the render is ready.
 -}
 setReady : { dataUrl : String, filename : String } -> Model -> Model
 setReady { dataUrl, filename } model =
@@ -144,7 +392,7 @@ setReady { dataUrl, filename } model =
     }
 
 
-{-| Mark the image as saved after download has been initiated.
+{-| Mark the image as saved.
 -}
 markSaved : Model -> Model
 markSaved model =
@@ -163,10 +411,26 @@ view =
     viewWithLanguage En
 
 
-{-| Render the modal overlay in the given language.
+{-| Backward-compatible view with default actions.
 -}
 viewWithLanguage : Language -> Actions msg -> Model -> Html msg
 viewWithLanguage lang actions model =
+    viewFramingWithLanguage lang
+        { onSave = actions.onSave
+        , onClose = actions.onClose
+        , onStartRender = \_ -> actions.onClose
+        , onReframe = actions.onClose
+        , onSetCrop = \_ -> actions.onClose
+        , onSetAspect = \_ -> actions.onClose
+        , onResetCrop = actions.onClose
+        }
+        model
+
+
+{-| Render the modal overlay with framing actions.
+-}
+viewFramingWithLanguage : Language -> FramingActions msg -> Model -> Html msg
+viewFramingWithLanguage lang actions model =
     div
         [ Attr.attribute "role" "dialog"
         , Attr.attribute "aria-modal" "true"
@@ -197,29 +461,23 @@ viewWithLanguage lang actions model =
             , Attr.style "flex-direction" "column"
             , Attr.style "overflow" "hidden"
             ]
-            [ viewHeader lang
-            , viewBody lang model
+            [ viewHeader lang model
+            , viewBody lang actions model
             , viewFooter lang actions model
             ]
         ]
 
 
-{-| The dimmed backdrop behind the dialog, derived from the brand colour.
--}
 scrim : String
 scrim =
     "color-mix(in srgb, " ++ Theme.brand ++ " 85%, transparent)"
 
 
-{-| The backdrop behind the captured image, a dark tone from the theme.
--}
 previewBackground : String
 previewBackground =
     "var(--color-bg-dark)"
 
 
-{-| The drop shadow colour of the dialog, derived from the brand colour.
--}
 shadowColour : String
 shadowColour =
     "color-mix(in srgb, " ++ Theme.brand ++ " 75%, transparent)"
@@ -238,8 +496,8 @@ viewStyles =
         ]
 
 
-viewHeader : Language -> Html msg
-viewHeader lang =
+viewHeader : Language -> Model -> Html msg
+viewHeader lang model =
     div
         [ Attr.style "padding" "16px 20px"
         , Attr.style "border-bottom" ("1px solid " ++ Theme.borderDefault)
@@ -254,13 +512,29 @@ viewHeader lang =
                 , Attr.style "font-weight" "600"
                 , Attr.style "letter-spacing" "-0.01em"
                 ]
-                [ text (I18n.snapshotTitle lang) ]
+                [ text
+                    (case model.phase of
+                        Framing _ ->
+                            I18n.snapshotFramingTitle lang
+
+                        _ ->
+                            I18n.snapshotTitle lang
+                    )
+                ]
             , p
                 [ Attr.style "margin" "2px 0 0"
                 , Attr.style "font-size" "12px"
                 , Attr.style "color" Theme.textMuted
                 ]
-                [ text (I18n.snapshotSubtitle lang) ]
+                [ text
+                    (case model.phase of
+                        Framing _ ->
+                            I18n.snapshotFramingDesc lang
+
+                        _ ->
+                            I18n.snapshotSubtitle lang
+                    )
+                ]
             ]
         , span
             [ Attr.style "font-size" "11px"
@@ -275,16 +549,19 @@ viewHeader lang =
         ]
 
 
-viewBody : Language -> Model -> Html msg
-viewBody lang model =
+viewBody : Language -> FramingActions msg -> Model -> Html msg
+viewBody lang actions model =
     div
-        [ Attr.style "padding" "24px 20px"
+        [ Attr.style "padding" "20px"
         , Attr.style "overflow-y" "auto"
         , Attr.style "display" "flex"
         , Attr.style "flex-direction" "column"
         , Attr.style "gap" "16px"
         ]
         (case model.phase of
+            Framing data ->
+                [ viewFraming lang actions data ]
+
             Rendering ->
                 [ viewRendering lang model.progress ]
 
@@ -294,6 +571,233 @@ viewBody lang model =
             Failed message ->
                 [ viewFailed message ]
         )
+
+
+viewFraming : Language -> FramingActions msg -> FramingData -> Html msg
+viewFraming lang actions data =
+    div
+        [ Attr.style "display" "flex"
+        , Attr.style "flex-direction" "column"
+        , Attr.style "gap" "14px"
+        ]
+        [ -- Toolbar for aspect ratio presets and zoom/framing presets
+          div
+            [ Attr.style "display" "flex"
+            , Attr.style "align-items" "center"
+            , Attr.style "justify-content" "space-between"
+            , Attr.style "flex-wrap" "wrap"
+            , Attr.style "gap" "8px"
+            ]
+            [ div
+                [ Attr.style "display" "flex"
+                , Attr.style "align-items" "center"
+                , Attr.style "gap" "6px"
+                ]
+                [ aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectFree lang) (data.aspect == AspectFree)
+                , aspectPill (actions.onSetAspect Aspect16_9) (I18n.snapshotAspect16_9 lang) (data.aspect == Aspect16_9)
+                , aspectPill (actions.onSetAspect Aspect4_3) (I18n.snapshotAspect4_3 lang) (data.aspect == Aspect4_3)
+                , aspectPill (actions.onSetAspect Aspect1_1) (I18n.snapshotAspect1_1 lang) (data.aspect == Aspect1_1)
+                ]
+            , div
+                [ Attr.style "display" "flex"
+                , Attr.style "align-items" "center"
+                , Attr.style "gap" "6px"
+                ]
+                [ quickCropPill (actions.onSetCrop { x = 0.1, y = 0.1, width = 0.8, height = 0.8 }) "80%"
+                , quickCropPill (actions.onSetCrop { x = 0.2, y = 0.2, width = 0.6, height = 0.6 }) "60%"
+                , button
+                    [ Attr.type_ "button"
+                    , Html.Events.onClick actions.onResetCrop
+                    , Attr.class "ui-button"
+                    , Attr.style "padding" "4px 10px"
+                    , Attr.style "font-size" "12px"
+                    , Attr.style "font-weight" "500"
+                    , Attr.style "background" Theme.panelSubtleBackground
+                    , Attr.style "color" Theme.textPrimary
+                    , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+                    , Attr.style "border-radius" "6px"
+                    , Attr.style "cursor" "pointer"
+                    ]
+                    [ text (I18n.snapshotResetCrop lang) ]
+                ]
+            ]
+        , -- Interactive framing canvas / viewport display
+          div
+            [ Attr.style "position" "relative"
+            , Attr.style "width" "100%"
+            , Attr.style "aspect-ratio" "16 / 9"
+            , Attr.style "background" previewBackground
+            , Attr.style "background-image" "radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)"
+            , Attr.style "background-size" "16px 16px"
+            , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+            , Attr.style "border-radius" "8px"
+            , Attr.style "overflow" "hidden"
+            , Attr.style "user-select" "none"
+            ]
+            [ case data.previewUrl of
+                Just url ->
+                    img
+                        [ Attr.src url
+                        , Attr.alt "Framing preview"
+                        , Attr.style "width" "100%"
+                        , Attr.style "height" "100%"
+                        , Attr.style "object-fit" "contain"
+                        , Attr.style "display" "block"
+                        ]
+                        []
+
+                Nothing ->
+                    div
+                        [ Attr.style "width" "100%"
+                        , Attr.style "height" "100%"
+                        , Attr.style "display" "flex"
+                        , Attr.style "align-items" "center"
+                        , Attr.style "justify-content" "center"
+                        , Attr.style "color" Theme.textMuted
+                        , Attr.style "font-size" "13px"
+                        ]
+                        [ text (I18n.snapshotSubtitle lang) ]
+            , -- Crop box with rule-of-thirds grid and outer shadow scrim
+              div
+                [ Attr.style "position" "absolute"
+                , Attr.style "left" (String.fromFloat (data.crop.x * 100.0) ++ "%")
+                , Attr.style "top" (String.fromFloat (data.crop.y * 100.0) ++ "%")
+                , Attr.style "width" (String.fromFloat (data.crop.width * 100.0) ++ "%")
+                , Attr.style "height" (String.fromFloat (data.crop.height * 100.0) ++ "%")
+                , Attr.style "box-sizing" "border-box"
+                , Attr.style "border" ("2px solid " ++ Theme.brandYellow)
+                , Attr.style "box-shadow" "0 0 0 9999px rgba(0, 0, 0, 0.55)"
+                , Attr.style "pointer-events" "none"
+                ]
+                [ -- Grid line 1/3 horizontal
+                  div
+                    [ Attr.style "position" "absolute"
+                    , Attr.style "left" "0"
+                    , Attr.style "right" "0"
+                    , Attr.style "top" "33.33%"
+                    , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
+                    ]
+                    []
+                , -- Grid line 2/3 horizontal
+                  div
+                    [ Attr.style "position" "absolute"
+                    , Attr.style "left" "0"
+                    , Attr.style "right" "0"
+                    , Attr.style "top" "66.66%"
+                    , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
+                    ]
+                    []
+                , -- Grid line 1/3 vertical
+                  div
+                    [ Attr.style "position" "absolute"
+                    , Attr.style "top" "0"
+                    , Attr.style "bottom" "0"
+                    , Attr.style "left" "33.33%"
+                    , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
+                    ]
+                    []
+                , -- Grid line 2/3 vertical
+                  div
+                    [ Attr.style "position" "absolute"
+                    , Attr.style "top" "0"
+                    , Attr.style "bottom" "0"
+                    , Attr.style "left" "66.66%"
+                    , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
+                    ]
+                    []
+                ]
+            ]
+        , -- Nudge / positioning row if cropped
+          if data.crop.width < 0.99 || data.crop.height < 0.99 then
+            div
+                [ Attr.style "display" "flex"
+                , Attr.style "align-items" "center"
+                , Attr.style "justify-content" "center"
+                , Attr.style "gap" "8px"
+                ]
+                [ nudgeButton (actions.onSetCrop (nudgeCrop -0.05 0.0 data.crop)) "←"
+                , nudgeButton (actions.onSetCrop (nudgeCrop 0.0 -0.05 data.crop)) "↑"
+                , nudgeButton (actions.onSetCrop (nudgeCrop 0.0 0.05 data.crop)) "↓"
+                , nudgeButton (actions.onSetCrop (nudgeCrop 0.05 0.0 data.crop)) "→"
+                ]
+
+          else
+            text ""
+        ]
+
+
+nudgeCrop : Float -> Float -> CropRect -> CropRect
+nudgeCrop dx dy crop =
+    { x = clamp 0.0 (1.0 - crop.width) (crop.x + dx)
+    , y = clamp 0.0 (1.0 - crop.height) (crop.y + dy)
+    , width = crop.width
+    , height = crop.height
+    }
+
+
+nudgeButton : msg -> String -> Html msg
+nudgeButton msg label =
+    button
+        [ Attr.type_ "button"
+        , Html.Events.onClick msg
+        , Attr.class "ui-button"
+        , Attr.style "padding" "4px 10px"
+        , Attr.style "font-size" "12px"
+        , Attr.style "font-weight" "600"
+        , Attr.style "background" Theme.panelSubtleBackground
+        , Attr.style "color" Theme.textPrimary
+        , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+        , Attr.style "border-radius" "4px"
+        , Attr.style "cursor" "pointer"
+        ]
+        [ text label ]
+
+
+aspectPill : msg -> String -> Bool -> Html msg
+aspectPill msg label active =
+    button
+        [ Attr.type_ "button"
+        , Html.Events.onClick msg
+        , Attr.class "ui-button"
+        , Attr.style "padding" "4px 10px"
+        , Attr.style "font-size" "12px"
+        , Attr.style "font-weight" "600"
+        , Attr.style "border-radius" "6px"
+        , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+        , Attr.style "cursor" "pointer"
+        , Attr.style "background"
+            (if active then
+                Theme.brandYellow
+
+             else
+                Theme.panelSubtleBackground
+            )
+        , Attr.style "color"
+            (if active then
+                Theme.brand
+
+             else
+                Theme.textPrimary
+            )
+        ]
+        [ text label ]
+
+
+quickCropPill : msg -> String -> Html msg
+quickCropPill msg label =
+    button
+        [ Attr.type_ "button"
+        , Html.Events.onClick msg
+        , Attr.class "ui-button"
+        , Attr.style "padding" "4px 8px"
+        , Attr.style "font-size" "12px"
+        , Attr.style "background" Theme.panelSubtleBackground
+        , Attr.style "color" Theme.textMuted
+        , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+        , Attr.style "border-radius" "6px"
+        , Attr.style "cursor" "pointer"
+        ]
+        [ text label ]
 
 
 viewRendering : Language -> Progress -> Html msg
@@ -434,7 +938,7 @@ viewPreview lang data =
         ]
 
 
-viewFooter : Language -> Actions msg -> Model -> Html msg
+viewFooter : Language -> FramingActions msg -> Model -> Html msg
 viewFooter lang actions model =
     div
         [ Attr.style "padding" "14px 20px"
@@ -447,6 +951,11 @@ viewFooter lang actions model =
         , Attr.style "flex-wrap" "wrap"
         ]
         (case model.phase of
+            Framing data ->
+                [ Button.secondary actions.onClose (I18n.snapshotClose lang)
+                , renderButton lang actions data.crop
+                ]
+
             Rendering ->
                 [ div
                     [ Attr.style "font-size" "13px"
@@ -465,13 +974,15 @@ viewFooter lang actions model =
                 ]
 
             Preview data ->
-                [ div
+                [ Button.secondary actions.onReframe (I18n.snapshotReframe lang)
+                , div
                     [ Attr.style "display" "flex"
                     , Attr.style "align-items" "center"
                     , Attr.style "gap" "10px"
                     ]
-                    [ saveButton lang actions data ]
-                , Button.secondary actions.onClose (I18n.snapshotClose lang)
+                    [ saveButton lang actions data
+                    , Button.secondary actions.onClose (I18n.snapshotClose lang)
+                    ]
                 ]
 
             Failed _ ->
@@ -493,7 +1004,30 @@ viewFooter lang actions model =
         )
 
 
-saveButton : Language -> Actions msg -> PreviewData -> Html msg
+renderButton : Language -> FramingActions msg -> CropRect -> Html msg
+renderButton lang actions crop =
+    button
+        [ Attr.type_ "button"
+        , Html.Events.onClick (actions.onStartRender crop)
+        , Attr.class "ui-button touch-target"
+        , Attr.style "display" "inline-flex"
+        , Attr.style "align-items" "center"
+        , Attr.style "gap" "8px"
+        , Attr.style "padding" "8px 18px"
+        , Attr.style "border" ("1px solid " ++ Theme.brand)
+        , Attr.style "border-radius" "6px"
+        , Attr.style "font-weight" "600"
+        , Attr.style "font-size" "13px"
+        , Attr.style "cursor" "pointer"
+        , Attr.style "background" Theme.brandYellow
+        , Attr.style "color" Theme.brand
+        ]
+        [ Icon.feather "camera"
+        , text (I18n.snapshotRenderAction lang)
+        ]
+
+
+saveButton : Language -> FramingActions msg -> PreviewData -> Html msg
 saveButton lang actions data =
     button
         [ Attr.type_ "button"

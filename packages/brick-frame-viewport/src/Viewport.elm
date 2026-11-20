@@ -36,6 +36,7 @@ module Viewport exposing
     , setSpacePan
     , setTwoFingerOrbits
     , snapshotRequest
+    , snapshotRequestWithCrop
     , subscriptions
     , update
     , view
@@ -3387,7 +3388,25 @@ triangle, from e.g. `Simulation.snapshotTriangles`) for host-owned moving parts.
 -}
 snapshotRequest : { filename : String, extraTriangles : List Float } -> Model -> Encode.Value
 snapshotRequest config model =
-    Snapshot.encodeRequestWithLight
+    snapshotRequestWithCrop
+        { filename = config.filename
+        , extraTriangles = config.extraTriangles
+        , crop = Nothing
+        }
+        model
+
+
+{-| Build a `captureRender` request with an optional pre-render crop rectangle.
+-}
+snapshotRequestWithCrop :
+    { filename : String
+    , extraTriangles : List Float
+    , crop : Maybe Snapshot.CropRect
+    }
+    -> Model
+    -> Encode.Value
+snapshotRequestWithCrop config model =
+    Snapshot.encodeRequestWithCrop
         { filename = config.filename
         , camera = model.camera
         , lightDirection = lightDirection model
@@ -3399,6 +3418,7 @@ snapshotRequest config model =
                 , activeSources = model.activeSources
                 }
                 ++ config.extraTriangles
+        , crop = config.crop
         }
 
 
