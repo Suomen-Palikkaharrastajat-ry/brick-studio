@@ -192,7 +192,6 @@ type AnimResolution
 -}
 type AnimFps
     = Fps10
-    | Fps15
     | Fps30
 
 
@@ -200,7 +199,6 @@ type AnimFps
 -}
 type AnimDuration
     = Dur2s
-    | Dur4s
     | Dur6s
 
 
@@ -235,9 +233,6 @@ animFpsValue fps =
         Fps10 ->
             10
 
-        Fps15 ->
-            15
-
         Fps30 ->
             30
 
@@ -249,9 +244,6 @@ animSecondsValue dur =
     case dur of
         Dur2s ->
             2.0
-
-        Dur4s ->
-            4.0
 
         Dur6s ->
             6.0
@@ -405,8 +397,8 @@ init config =
     , quality = QualityStandard
     , mode = ModeStill
     , animRes = Res480p
-    , animFps = Fps15
-    , animDuration = Dur4s
+    , animFps = Fps10
+    , animDuration = Dur2s
     , animSpeed = SpeedHalf
     , phase = Rendering
     , progress = { fraction = 0, samples = 0 }
@@ -426,8 +418,8 @@ initFraming config =
     , quality = QualityStandard
     , mode = ModeStill
     , animRes = Res480p
-    , animFps = Fps15
-    , animDuration = Dur4s
+    , animFps = Fps10
+    , animDuration = Dur2s
     , animSpeed = SpeedHalf
     , phase =
         Framing
@@ -2109,13 +2101,11 @@ viewToolbar lang actions model =
 
                             -- 3. FPS
                             , optionPill "anim-fps-10" (actions.onInteraction (SelectAnimFps Fps10)) (I18n.snapshotAnimFps10 lang) (activeFps == Fps10)
-                            , optionPill "anim-fps-15" (actions.onInteraction (SelectAnimFps Fps15)) (I18n.snapshotAnimFps15 lang) (activeFps == Fps15)
                             , optionPill "anim-fps-30" (actions.onInteraction (SelectAnimFps Fps30)) (I18n.snapshotAnimFps30 lang) (activeFps == Fps30)
                             , toolbarDivider
 
                             -- 4. Duration
                             , optionPill "anim-dur-2s" (actions.onInteraction (SelectAnimDuration Dur2s)) (I18n.snapshotAnimDur2s lang) (activeDur == Dur2s)
-                            , optionPill "anim-dur-4s" (actions.onInteraction (SelectAnimDuration Dur4s)) (I18n.snapshotAnimDur4s lang) (activeDur == Dur4s)
                             , optionPill "anim-dur-6s" (actions.onInteraction (SelectAnimDuration Dur6s)) (I18n.snapshotAnimDur6s lang) (activeDur == Dur6s)
                             , toolbarDivider
 
