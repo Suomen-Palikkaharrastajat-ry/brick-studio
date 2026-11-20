@@ -2684,7 +2684,7 @@ touchHelpRows lang config =
                 ++ (if config.technic then
                         [ ( "Mekanismi"
                           , [ ( "Käynnistä / pysäytä (yläpalkki)", "Käynnistä tai pysäytä mekanismi (muokkaus pysäyttää ja kelaa alkuun)" )
-                            , ( "Pyörimissuunta (yläpalkki)", "Käännä moottorin pyörimissuunta (⟳ / ⟲)" )
+                            , ( "Nopeussäädin ja suunta (yläpalkki)", "Säädä moottorin nopeutta ja suuntaa (-60 ... +60 RPM)" )
                             , ( "Moottorin valinta (yläpalkki)", "Valitse vetävä ratas tai automaattinen tunnistus" )
                             , ( "Rattaat kytkeytyvät", "Ratas joka kohtaa toisen kääntää akseliaan niin että hampaat kytkeytyvät" )
                             , ( "Rataspilleri", "Kun yksi ratas on valittuna, kertoo miten se kytkeytyy lähimpään rattaaseen" )
@@ -2756,7 +2756,7 @@ touchHelpRows lang config =
                 ++ (if config.technic then
                         [ ( "Machine"
                           , [ ( "Play / pause (top bar)", "Play or pause the machine (an edit stops it and rewinds)" )
-                            , ( "Direction (top bar)", "Toggle motor rotation direction (⟳ / ⟲)" )
+                            , ( "Speed & direction (top bar)", "Adjust motor speed and direction (-60 ... +60 RPM)" )
                             , ( "Motor selector (top bar)", "Select driving gear or use auto-detection" )
                             , ( "Gears turn to mesh", "A gear that meets another turns its axle line so the teeth interlock" )
                             , ( "Gear pill", "With one gear selected, says how it meets its nearest gear" )
