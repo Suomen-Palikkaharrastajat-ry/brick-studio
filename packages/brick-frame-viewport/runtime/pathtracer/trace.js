@@ -36,7 +36,7 @@ import { environmentRadiance, lightPdf, sampleLight, skyRadiance } from './scene
 export const MAX_BOUNCES = 6
 const RR_START = 3
 const RR_MAX_SURVIVAL = 0.95
-export const FIREFLY_CLAMP = 10
+export const FIREFLY_CLAMP = 8.0
 /** Offset (LDU) applied along the normal before spawning a ray, to avoid self-hits. */
 const SURFACE_EPS = 0.02
 /** Reference path length (LDU) over which the transparent tint reaches its full colour. */
@@ -159,13 +159,12 @@ function groundDistance(scene, r) {
   return t > 1e-9 ? t : Infinity
 }
 
-/** Adds an RGB contribution (premultiplied output), clamping fireflies on indirect bounces. */
+/** Adds an RGB contribution (premultiplied output), clamping fireflies. */
 function addClamped(out, r, g, b, indirect) {
   let scale = 1
-  if (indirect) {
-    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    if (lum > FIREFLY_CLAMP) scale = FIREFLY_CLAMP / lum
-  }
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  const maxLum = indirect ? FIREFLY_CLAMP : 25
+  if (lum > maxLum) scale = maxLum / lum
   out[0] += r * scale
   out[1] += g * scale
   out[2] += b * scale

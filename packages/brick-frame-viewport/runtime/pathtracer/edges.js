@@ -175,14 +175,14 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
   if (!edges || edges.length === 0 || !camera || !colorBuffer) return colorBuffer
 
   const nearPlane = options.nearPlane ?? 0.1
-  const lineWidth = options.lineWidth ?? 1.4
+  const lineWidth = options.lineWidth ?? 1.2
   const edgeColor = options.edgeColor ?? [0.03, 0.03, 0.03]
   const depthBias = options.depthBias ?? 0.12
   const depthBiasFactor = options.depthBiasFactor ?? 1.002
   const crop = options.crop
 
   const radius = lineWidth * 0.5
-  const feather = 0.5
+  const feather = options.feather ?? 0.35
   const maxCoverage = new Float32Array(width * height)
 
   for (const edge of edges) {

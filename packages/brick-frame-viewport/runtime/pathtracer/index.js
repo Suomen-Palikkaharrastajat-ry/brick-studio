@@ -149,9 +149,10 @@ export async function renderSnapshot(request, options = {}) {
   if (request.crop) {
     const cw = Math.max(0.01, Math.min(1, request.crop.width || 1))
     const ch = Math.max(0.01, Math.min(1, request.crop.height || 1))
-    const rawW = Math.round(width * cw)
-    const rawH = Math.round(height * ch)
-    const scale = Math.min(maxWidth / rawW, maxHeight / rawH)
+    const rawW = width * cw
+    const rawH = height * ch
+    const maxDim = Math.max(maxWidth, maxHeight)
+    const scale = maxDim / Math.max(rawW, rawH)
     width = Math.max(64, Math.round(rawW * scale))
     height = Math.max(64, Math.round(rawH * scale))
   }
@@ -227,7 +228,8 @@ export async function renderSnapshot(request, options = {}) {
       if (request.outlineEdges !== false) {
         rasterizeEdges(scene.edges, scene.camera, depthBuffer, width, height, denoised.color, {
           crop: request.crop,
-          lineWidth: 1.4,
+          lineWidth: 1.2,
+          feather: 0.35,
           edgeColor: [0.03, 0.03, 0.03],
         })
       }

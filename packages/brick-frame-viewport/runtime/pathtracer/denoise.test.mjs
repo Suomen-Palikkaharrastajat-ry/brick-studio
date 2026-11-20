@@ -144,3 +144,46 @@ test('denoising preserves full opacity for black brick pixels bordering transpar
   }
 })
 
+test('denoising filters narrow grooves and crevices on solid bricks without bypassing filter', () => {
+  const rng = createRng(17)
+  const n = W * H
+  const albedo = new Float32Array(n * 3).fill(0.7) // gold metallic plastic
+  const normal = new Float32Array(n * 3)
+  const color = new Float32Array(n * 3)
+  const alpha = new Float32Array(n).fill(1.0) // solid brick
+  const noisyVals = []
+
+  // Alternating narrow 1px grooves with normal pointing in different directions (like a grill tile)
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const p = y * W + x
+      const inGroove = x % 2 === 1
+      if (inGroove) {
+        normal[p * 3] = 1.0 // wall facing sideways
+      } else {
+        normal[p * 3 + 1] = 1.0 // top face up
+      }
+      const noise = 1.0 + 0.5 * (rng.next() * 2 - 1)
+      color[p * 3] = 0.7 * noise
+      color[p * 3 + 1] = 0.5 * noise
+      color[p * 3 + 2] = 0.1 * noise
+      if (inGroove) noisyVals.push(color[p * 3])
+    }
+  }
+
+  const out = denoise(color, alpha, albedo, normal, W, H)
+
+  // Verify that noise inside the narrow grooves was filtered rather than left completely raw
+  const filteredGrooveVals = []
+  for (let y = 0; y < H; y++) {
+    for (let x = 1; x < W; x += 2) {
+      filteredGrooveVals.push(out.color[(y * W + x) * 3])
+    }
+  }
+
+  assert.ok(
+    stdDev(filteredGrooveVals) < stdDev(noisyVals),
+    `Groove noise must be filtered: got std ${stdDev(filteredGrooveVals)} vs raw ${stdDev(noisyVals)}`,
+  )
+})
+

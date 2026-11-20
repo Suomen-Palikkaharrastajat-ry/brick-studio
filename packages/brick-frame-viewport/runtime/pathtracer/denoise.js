@@ -24,56 +24,41 @@
  */
 
 const KERNEL = Float32Array.from([1 / 16, 4 / 16, 6 / 16, 4 / 16, 1 / 16])
-const PASSES = 5
+const PASSES = 4
 /** Added to the albedo before demodulating, so near-black materials stay finite. */
 const DEMOD_EPSILON = 0.02
 /** Colour sigma as a fraction of the squared local luminance. */
-const SIGMA_RELATIVE = 4.0
+const SIGMA_RELATIVE = 0.6
 /** Absolute floor on the colour sigma, so pure black still filters. */
 const SIGMA_FLOOR = 1e-4
 const SIGMA_ALBEDO = 0.02
 const NORMAL_POWER = 8
 
 /**
- * Computes an interior surface mask in [0, 1] from 3x3 local neighborhood similarity.
+ * Computes an interior surface mask in [0, 1] from local alpha coverage.
  *
- * Geometric silhouettes, stud outlines, and color edges are boundary pixels where
- * the single-sample center guide ray differs from the multi-sample antialiased pixel
- * average. Preserving the true path-traced antialiased color and alpha along these
- * boundaries avoids stair-stepped aliasing artifacts from demodulation.
+ * Outer silhouette boundary pixels where the model meets transparent sky/ground
+ * have fractional coverage (alpha < 0.999) from multi-sample sub-pixel antialiasing.
+ * Preserving the raw multi-sample color and alpha along these outer silhouette
+ * boundaries avoids stair-stepped aliasing artifacts from demodulation, while
+ * allowing full denoising across all solid brick surfaces, crevices, and internal grooves.
  */
-function computeInteriorMask(albedo, normal, width, height) {
+function computeInteriorMask(alpha, width, height) {
   const n = width * height
   const mask = new Float32Array(n)
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const p = y * width + x
-      const pc = p * 3
-      const nx = normal[pc]
-      const ny = normal[pc + 1]
-      const nz = normal[pc + 2]
-      const nlen = Math.hypot(nx, ny, nz)
-      const ar = albedo[pc]
-      const ag = albedo[pc + 1]
-      const ab = albedo[pc + 2]
+      if (alpha[p] < 0.999) {
+        mask[p] = 0.0
+        continue
+      }
       let isInterior = 1.0
       for (let dy = -1; dy <= 1; dy++) {
         const qy = Math.max(0, Math.min(height - 1, y + dy))
         for (let dx = -1; dx <= 1; dx++) {
           const qx = Math.max(0, Math.min(width - 1, x + dx))
-          if (dx === 0 && dy === 0) continue
-          const qc = (qy * width + qx) * 3
-          if (nlen > 0.5) {
-            const dn = nx * normal[qc] + ny * normal[qc + 1] + nz * normal[qc + 2]
-            if (dn < 0.90) {
-              isInterior = 0.0
-              break
-            }
-          }
-          const dr = ar - albedo[qc]
-          const dg = ag - albedo[qc + 1]
-          const db = ab - albedo[qc + 2]
-          if (dr * dr + dg * dg + db * db > 0.04) {
+          if (alpha[qy * width + qx] < 0.999) {
             isInterior = 0.0
             break
           }
@@ -107,7 +92,7 @@ export function denoise(color, alpha, albedo, normal, width, height, passes = PA
     ;[srcC, dstC] = [dstC, srcC]
     ;[srcA, dstA] = [dstA, srcA]
   }
-  const interior = computeInteriorMask(albedo, normal, width, height)
+  const interior = computeInteriorMask(alpha, width, height)
   for (let p = 0; p < n; p++) {
     const m = interior[p]
     for (let k = 0; k < 3; k++) {
