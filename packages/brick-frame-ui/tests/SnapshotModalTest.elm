@@ -357,7 +357,7 @@ suite =
                             , \q -> Query.has [ Selector.tag "button", Selector.text "16:9" ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "4:3" ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "1:1" ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-glossy") ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-glossy") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-used") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-matte") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "quality-preset-fast") ] q
@@ -373,10 +373,10 @@ suite =
                     let
                         modal =
                             readyModel
-                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectShader SnapshotModal.ShaderUsed)
+                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectShader SnapshotModal.ShaderMatte)
                     in
                     Expect.all
-                        [ \m -> SnapshotModal.getShader m |> Expect.equal SnapshotModal.ShaderUsed
+                        [ \m -> SnapshotModal.getShader m |> Expect.equal SnapshotModal.ShaderMatte
                         , \m -> SnapshotModal.isFraming m |> Expect.equal True
                         ]
                         modal

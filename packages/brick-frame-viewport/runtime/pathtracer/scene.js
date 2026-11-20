@@ -68,7 +68,7 @@ export const GROUND_ALBEDO = [0.6, 0.58, 0.55]
 /** The ground sits this far (LDU) below the model's lowest point. */
 const GROUND_OFFSET = 0.01
 const STRIDE = 14
-export const DEFAULT_ZOOM = 1.5
+export const DEFAULT_ZOOM = 1.0
 
 /** sRGB transfer function (0..1) to linear. */
 export function srgbToLinear(c) {

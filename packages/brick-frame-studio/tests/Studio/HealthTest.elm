@@ -473,6 +473,28 @@ technicTests =
         , test "reported model with meshing 16T gears on Technic brick has no false overlap" <|
             \_ ->
                 Expect.equal [] (Health.check noParts reportedModelDoc Set.empty)
+        , test "wheel rim 4624 on holder 4600 pin and tire 3641 on rim 4624 has 0 overlaps in Health.check" <|
+            \_ ->
+                let
+                    doc =
+                        lines
+                            [ "1 72 0 -8 0 1 0 0 0 1 0 0 0 1 4600.dat"
+                            , "1 71 28 -3 0 0 0 1 0 1 0 -1 0 0 4624.dat"
+                            , "1 0 28 -3 0 0 0 1 0 1 0 -1 0 0 3641.dat"
+                            ]
+                in
+                Expect.equal [] (Health.check noParts doc Set.empty)
+        , test "Technic axle 3705 with wheel 55982 and off-road tire 56891 has 0 overlaps in Health.check" <|
+            \_ ->
+                let
+                    doc =
+                        lines
+                            [ "1 0 0 -20 0 1 0 0 0 1 0 0 0 1 3705.dat"
+                            , "1 71 20 -20 0 0 0 1 0 1 0 -1 0 0 55982.dat"
+                            , "1 0 20 -20 0 0 0 1 0 1 0 -1 0 0 56891.dat"
+                            ]
+                in
+                Expect.equal [] (Health.check noParts doc Set.empty)
         ]
 
 

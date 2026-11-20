@@ -112,8 +112,7 @@ type AspectPreset
 {-| Surface finish / shader preset for the path tracer.
 -}
 type ShaderPreset
-    = ShaderGlossy
-    | ShaderUsed
+    = ShaderUsed
     | ShaderMatte
 
 
@@ -122,9 +121,6 @@ type ShaderPreset
 shaderToString : ShaderPreset -> String
 shaderToString preset =
     case preset of
-        ShaderGlossy ->
-            "glossy"
-
         ShaderUsed ->
             "used"
 
@@ -274,7 +270,7 @@ init config =
     , previewUrl = Nothing
     , crop = defaultCrop
     , aspect = AspectFree
-    , shader = ShaderGlossy
+    , shader = ShaderUsed
     , quality = QualityStandard
     , phase = Rendering
     , progress = { fraction = 0, samples = 0 }
@@ -290,7 +286,7 @@ initFraming config =
     , previewUrl = config.previewUrl
     , crop = defaultCrop
     , aspect = AspectFree
-    , shader = ShaderGlossy
+    , shader = ShaderUsed
     , quality = QualityStandard
     , phase =
         Framing
@@ -1647,7 +1643,6 @@ viewToolbar lang actions model =
             , -- Subtle divider
               toolbarDivider
               -- 2. Shader / surface presets
-            , optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
             , optionPill "shader-preset-used" (actions.onInteraction (SelectShader ShaderUsed)) (I18n.snapshotShaderUsed lang) (activeShader == ShaderUsed)
             , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
             , -- Subtle divider

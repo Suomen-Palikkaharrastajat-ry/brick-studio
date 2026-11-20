@@ -25,6 +25,8 @@ module LDraw.Connectivity exposing
     , makeGear
     , makeGearPinHoles
     , makeSlope
+    , makeTire
+    , makeWheelRim
     , setGuideColliding
     , snapEnterDistance
     , snapReleaseDistance
@@ -71,6 +73,8 @@ type ConnectionType
     | BarFemale { diameter : Float }
     | BallMale
     | BallSocketFemale
+    | WheelRim { diameter : Float }
+    | WheelTire { diameter : Float }
 
 
 {-| A local connection site on a part.
@@ -216,6 +220,9 @@ canConnect a b =
         ( BallMale, BallSocketFemale ) ->
             True
 
+        ( WheelRim r, WheelTire t ) ->
+            abs (r.diameter - t.diameter) <= 2.5
+
         _ ->
             False
 
@@ -255,7 +262,15 @@ connectionPairBias dragged target =
         -3.0
 
     else
-        0.0
+        case ( dragged, target ) of
+            ( WheelRim _, WheelTire _ ) ->
+                -4.0
+
+            ( WheelTire _, WheelRim _ ) ->
+                -4.0
+
+            _ ->
+                0.0
 
 
 
@@ -852,6 +867,12 @@ isBidirectionalAxis conn =
         TechnicPinFemale _ ->
             True
 
+        WheelRim _ ->
+            True
+
+        WheelTire _ ->
+            True
+
         _ ->
             False
 
@@ -1037,6 +1058,12 @@ makeGuide conn pos normal isColliding =
             AxleAxisGuide pos normal isColliding
 
         TechnicPinFemale _ ->
+            AxleAxisGuide pos normal isColliding
+
+        WheelRim _ ->
+            AxleAxisGuide pos normal isColliding
+
+        WheelTire _ ->
             AxleAxisGuide pos normal isColliding
 
         _ ->
@@ -1470,6 +1497,7 @@ isPinHoleFile f =
         == "beamhole.dat"
         || f
         == "connhole.dat"
+        || String.startsWith "wpinhol" f
 
 
 isFrictionPinMaleFile : String -> Bool
@@ -2842,6 +2870,254 @@ knownCatalogPart name =
             in
             Just { base | connections = socket :: base.connections }
 
+        "4624" ->
+            Just (makeWheelRim False 10.0 16.0 16.0 "4624.dat")
+
+        "3641" ->
+            Just (makeTire 8.0 18.0 16.0 16.0 "3641.dat")
+
+        "6014b" ->
+            Just (makeWheelRim False 13.5 24.0 27.0 (clean ++ ".dat"))
+
+        "6014" ->
+            Just (makeWheelRim False 13.5 24.0 27.0 (clean ++ ".dat"))
+
+        "6015" ->
+            Just (makeTire 12.5 24.8 28.0 27.0 "6015.dat")
+
+        "56890" ->
+            Just (makeTire 12.5 30.0 28.0 27.0 "56890.dat")
+
+        "42610" ->
+            Just (makeWheelRim False 14.0 20.0 27.0 "42610.dat")
+
+        "50951" ->
+            Just (makeTire 12.0 19.0 16.0 27.0 (clean ++ ".dat"))
+
+        "50945" ->
+            Just (makeTire 12.0 19.0 16.0 27.0 (clean ++ ".dat"))
+
+        "55982" ->
+            Just (makeWheelRim True 21.0 34.0 42.0 "55982.dat")
+
+        "55981" ->
+            Just (makeWheelRim False 21.0 34.0 42.0 "55981.dat")
+
+        "56891" ->
+            Just (makeTire 20.0 37.0 35.0 42.0 "56891.dat")
+
+        "56145" ->
+            let
+                baseRim =
+                    makeWheelRim True 38.0 44.0 75.0 "56145.dat"
+            in
+            Just
+                { baseRim
+                    | connections =
+                        baseRim.connections
+                            ++ makeGearPinHoles 200
+                                [ ( 0, 20 )
+                                , ( 0, -20 )
+                                , ( 17.32, 10 )
+                                , ( -17.32, 10 )
+                                , ( 17.32, -10 )
+                                , ( -17.32, -10 )
+                                ]
+                }
+
+        "44309" ->
+            Just (makeTire 34.0 54.0 56.0 75.0 "44309.dat")
+
+        "4600" ->
+            let
+                base =
+                    makeBrick 2 2 8 "4600.dat"
+
+                wheelPins =
+                    [ { id = 50
+                      , connType = TechnicPinMale { length = 12.0, friction = False }
+                      , localPosition = vec3 28 5 0
+                      , normal = vec3 1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    , { id = 51
+                      , connType = TechnicPinMale { length = 12.0, friction = False }
+                      , localPosition = vec3 -28 5 0
+                      , normal = vec3 -1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    ]
+            in
+            Just
+                { part = "4600.dat"
+                , connections = base.connections ++ wheelPins
+                , boundingBoxes = [ { min = vec3 -20 -4 -20, max = vec3 20 8 20 } ]
+                }
+
+        "4488" ->
+            Just
+                { part = "4488.dat"
+                , connections =
+                    [ studAt 1 (vec3 -10 0 -10)
+                    , studAt 2 (vec3 10 0 -10)
+                    , studAt 3 (vec3 -10 0 10)
+                    , studAt 4 (vec3 10 0 10)
+                    , antiStudAt 10 (vec3 -10 8 -10)
+                    , antiStudAt 11 (vec3 -10 8 10)
+                    , antiStudAt 12 (vec3 10 16 -10)
+                    , antiStudAt 13 (vec3 10 16 10)
+                    , { id = 50
+                      , connType = TechnicPinMale { length = 12.0, friction = False }
+                      , localPosition = vec3 28 5 0
+                      , normal = vec3 1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    ]
+                , boundingBoxes = [ { min = vec3 -20 -4 -20, max = vec3 20 16 20 } ]
+                }
+
+        "24326" ->
+            Just
+                { part = "24326.dat"
+                , connections =
+                    [ studAt 1 (vec3 -10 0 -30)
+                    , studAt 2 (vec3 10 0 -30)
+                    , studAt 3 (vec3 -10 0 30)
+                    , studAt 4 (vec3 10 0 30)
+                    , studAt 5 (vec3 -10 8 -10)
+                    , studAt 6 (vec3 10 8 -10)
+                    , studAt 7 (vec3 -10 8 10)
+                    , studAt 8 (vec3 10 8 10)
+                    , antiStudAt 10 (vec3 -10 16 -30)
+                    , antiStudAt 11 (vec3 10 16 -30)
+                    , antiStudAt 12 (vec3 -10 16 30)
+                    , antiStudAt 13 (vec3 10 16 30)
+                    , antiStudAt 14 (vec3 -10 16 -10)
+                    , antiStudAt 15 (vec3 10 16 -10)
+                    , antiStudAt 16 (vec3 -10 16 10)
+                    , antiStudAt 17 (vec3 10 16 10)
+                    , { id = 50
+                      , connType = TechnicPinMale { length = 12.0, friction = False }
+                      , localPosition = vec3 38 5 20
+                      , normal = vec3 1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    , { id = 51
+                      , connType = TechnicPinMale { length = 12.0, friction = False }
+                      , localPosition = vec3 38 5 -20
+                      , normal = vec3 1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    , { id = 52
+                      , connType = TechnicPinMale { length = 12.0, friction = False }
+                      , localPosition = vec3 -38 5 20
+                      , normal = vec3 -1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    , { id = 53
+                      , connType = TechnicPinMale { length = 12.0, friction = False }
+                      , localPosition = vec3 -38 5 -20
+                      , normal = vec3 -1 0 0
+                      , tangent = vec3 0 1 0
+                      }
+                    ]
+                , boundingBoxes = [ { min = vec3 -30 -4 -40, max = vec3 30 16 40 } ]
+                }
+
+        "1846" ->
+            Just
+                { part = "1846.dat"
+                , connections =
+                    [ studAt 1 (vec3 -10 0 0)
+                    , studAt 2 (vec3 10 0 0)
+                    , studAt 3 (vec3 -30 24 0)
+                    , studAt 4 (vec3 30 24 0)
+                    , antiStudAt 10 (vec3 -10 32 0)
+                    , antiStudAt 11 (vec3 0 32 0)
+                    , antiStudAt 12 (vec3 10 32 0)
+                    , antiStudAt 13 (vec3 -30 40 0)
+                    , antiStudAt 14 (vec3 30 40 0)
+                    , antiStudAt 15 (vec3 -30 40 -40)
+                    , antiStudAt 16 (vec3 30 40 -40)
+                    ]
+                , boundingBoxes = [ { min = vec3 -40 -4 -10, max = vec3 40 32 10 } ]
+                }
+
+        "50745" ->
+            Just
+                { part = "50745.dat"
+                , connections =
+                    [ studAt 1 (vec3 -30 0 10)
+                    , studAt 2 (vec3 -10 0 10)
+                    , studAt 3 (vec3 10 0 10)
+                    , studAt 4 (vec3 30 0 10)
+                    , antiStudAt 10 (vec3 -30 24 10)
+                    , antiStudAt 11 (vec3 -10 24 10)
+                    , antiStudAt 12 (vec3 10 24 10)
+                    , antiStudAt 13 (vec3 30 24 10)
+                    ]
+                , boundingBoxes = [ { min = vec3 -40 -4 0, max = vec3 40 24 20 } ]
+                }
+
+        "2352" ->
+            Just (makeSlope 4 2 72 "2352.dat")
+
+        "3823" ->
+            Just
+                { part = "3823.dat"
+                , connections =
+                    [ studAt 1 (vec3 -30 0 0)
+                    , studAt 2 (vec3 30 0 0)
+                    , antiStudAt 10 (vec3 -30 48 0)
+                    , antiStudAt 11 (vec3 30 48 0)
+                    , antiStudAt 12 (vec3 -30 48 -20)
+                    , antiStudAt 13 (vec3 -10 48 -20)
+                    , antiStudAt 14 (vec3 10 48 -20)
+                    , antiStudAt 15 (vec3 30 48 -20)
+                    ]
+                , boundingBoxes = [ { min = vec3 -40 -4 -30, max = vec3 40 48 10 } ]
+                }
+
+        "3829c01" ->
+            Just
+                { part = "3829c01.dat"
+                , connections =
+                    [ antiStudAt 1 (vec3 -10 8 0)
+                    , antiStudAt 2 (vec3 10 8 0)
+                    , antiStudAt 3 (vec3 0 8 0)
+                    ]
+                , boundingBoxes = [ { min = vec3 -20 -38 -10, max = vec3 20 8 10 } ]
+                }
+
+        "3829" ->
+            Just
+                { part = "3829c01.dat"
+                , connections =
+                    [ antiStudAt 1 (vec3 -10 8 0)
+                    , antiStudAt 2 (vec3 10 8 0)
+                    , antiStudAt 3 (vec3 0 8 0)
+                    ]
+                , boundingBoxes = [ { min = vec3 -20 -38 -10, max = vec3 20 8 10 } ]
+                }
+
+        "4079" ->
+            Just
+                { part = "4079.dat"
+                , connections =
+                    [ studAt 1 (vec3 -10 0 -10)
+                    , studAt 2 (vec3 10 0 -10)
+                    , antiStudAt 10 (vec3 -10 8 -10)
+                    , antiStudAt 11 (vec3 10 8 -10)
+                    , antiStudAt 12 (vec3 -10 8 10)
+                    , antiStudAt 13 (vec3 10 8 10)
+                    , antiStudAt 14 (vec3 0 8 0)
+                    ]
+                , boundingBoxes =
+                    [ { min = vec3 -20 -4 -20, max = vec3 20 8 20 }
+                    , { min = vec3 -20 -40 12, max = vec3 20 0 20 }
+                    ]
+                }
+
         _ ->
             Nothing
 
@@ -3369,4 +3645,107 @@ makeLiftarm studs partName =
     { part = partName
     , connections = connections
     , boundingBoxes = [ bbox ]
+    }
+
+
+{-| Procedurally generate connectivity descriptor for a wheel rim.
+Center is at (0, 0, 0) with axis Z.
+If isAxleHole is True, creates TechnicAxleFemale points;
+if False, creates 3 TechnicPinFemale points at z=0, z=min 10 halfThick, and z=-(min 10 halfThick).
+Also includes a concentric WheelRim connection point at (0, 0, 0).
+-}
+makeWheelRim : Bool -> Float -> Float -> Float -> String -> PartConnectivity
+makeWheelRim isAxleHole thickness radius tireDiameter partName =
+    let
+        halfThick =
+            thickness / 2.0
+
+        centerPoints =
+            if isAxleHole then
+                makeAxleHolePoints 1 halfThick (vec3 0 0 0)
+
+            else
+                [ { id = 1
+                  , connType = TechnicPinFemale { length = thickness }
+                  , localPosition = vec3 0 0 0
+                  , normal = vec3 0 0 1
+                  , tangent = vec3 1 0 0
+                  }
+                , { id = 2
+                  , connType = TechnicPinFemale { length = thickness }
+                  , localPosition = vec3 0 0 (min 10.0 halfThick)
+                  , normal = vec3 0 0 1
+                  , tangent = vec3 1 0 0
+                  }
+                , { id = 3
+                  , connType = TechnicPinFemale { length = thickness }
+                  , localPosition = vec3 0 0 -(min 10.0 halfThick)
+                  , normal = vec3 0 0 -1
+                  , tangent = vec3 1 0 0
+                  }
+                ]
+
+        tirePoint =
+            { id = 100
+            , connType = WheelRim { diameter = tireDiameter }
+            , localPosition = vec3 0 0 0
+            , normal = vec3 0 0 1
+            , tangent = vec3 1 0 0
+            }
+
+        connections =
+            tirePoint :: centerPoints
+
+        boundingBoxes =
+            [ { min = vec3 -radius -radius -halfThick
+              , max = vec3 radius radius halfThick
+              }
+            ]
+    in
+    { part = partName
+    , connections = connections
+    , boundingBoxes = boundingBoxes
+    }
+
+
+{-| Procedurally generate connectivity descriptor for a tire.
+Center is at (0, 0, 0) with axis Z.
+Uses 4 hollow ring wall bounding boxes surrounding the central bore [-innerR, innerR] x [-innerR, innerR]
+so axles, pins, bushes, and wheel holders passing through the center never collide with the tire.
+-}
+makeTire : Float -> Float -> Float -> Float -> String -> PartConnectivity
+makeTire thickness outerR inner tireDiameter partName =
+    let
+        halfThick =
+            thickness / 2.0
+
+        innerR =
+            if inner >= outerR then
+                inner / 2.0
+
+            else if inner > outerR * 0.65 then
+                inner / 2.0
+
+            else
+                inner
+
+        connections =
+            [ { id = 1
+              , connType = WheelTire { diameter = tireDiameter }
+              , localPosition = vec3 0 0 0
+              , normal = vec3 0 0 1
+              , tangent = vec3 1 0 0
+              }
+            ]
+
+        boundingBoxes =
+            [ { min = vec3 -outerR -outerR -halfThick, max = vec3 -innerR outerR halfThick }
+            , { min = vec3 innerR -outerR -halfThick, max = vec3 outerR outerR halfThick }
+            , { min = vec3 -innerR -outerR -halfThick, max = vec3 innerR -innerR halfThick }
+            , { min = vec3 -innerR innerR -halfThick, max = vec3 innerR outerR halfThick }
+            ]
+    in
+    { part = partName
+    , connections = connections
+    , boundingBoxes = boundingBoxes
     }

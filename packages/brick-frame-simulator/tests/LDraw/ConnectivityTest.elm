@@ -3776,4 +3776,141 @@ shortestArcSnapTests =
 
                     _ ->
                         Expect.fail "3023.dat or 99781.dat not found in catalog"
+        , test "wheel rim 4624 snaps onto wheel holder 4600 pin and tire 3641 snaps onto rim 4624" <|
+            \_ ->
+                case ( knownCatalogPart "4600.dat", knownCatalogPart "4624.dat", knownCatalogPart "3641.dat" ) of
+                    ( Just holder, Just rim, Just tire ) ->
+                        let
+                            holderMatrix =
+                                Mat4.identity
+
+                            -- Holder pin 50 is at (28, 5, 0)
+                            holderPins =
+                                holder.connections
+                                    |> List.filter (\c -> Vec3.getX c.localPosition > 20)
+                                    |> List.map (Connectivity.transformPoint holderMatrix 1)
+
+                            hoverRim =
+                                Mat4.makeTranslate3 35 5 0
+
+                            maybeRimSnap =
+                                solveSnap 20.0 0 hoverRim rim.connections holderPins
+                        in
+                        case maybeRimSnap of
+                            Just rimSnap ->
+                                let
+                                    rimWorldPoints =
+                                        rim.connections
+                                            |> List.map (Connectivity.transformPoint rimSnap.snapMatrix 2)
+
+                                    hoverTire =
+                                        Mat4.makeTranslate3 35 5 5
+
+                                    maybeTireSnap =
+                                        solveSnap 20.0 0 hoverTire tire.connections rimWorldPoints
+                                in
+                                case maybeTireSnap of
+                                    Just tireSnap ->
+                                        let
+                                            rimPos =
+                                                Mat4.transform rimSnap.snapMatrix (vec3 0 0 0)
+
+                                            tirePos =
+                                                Mat4.transform tireSnap.snapMatrix (vec3 0 0 0)
+
+                                            holderBoxes =
+                                                holder.boundingBoxes
+                                                    |> List.map (\b -> ( 1, holderMatrix, b ))
+
+                                            rimBoxes =
+                                                rim.boundingBoxes
+                                                    |> List.map (\b -> ( 2, rimSnap.snapMatrix, b ))
+
+                                            tireBoxes =
+                                                tire.boundingBoxes
+                                                    |> List.map (\b -> ( 3, tireSnap.snapMatrix, b ))
+                                        in
+                                        Expect.all
+                                            [ \_ -> Expect.within (Expect.Absolute 0.001) 28.0 (Vec3.getX rimPos)
+                                            , \_ -> Expect.within (Expect.Absolute 0.001) 5.0 (Vec3.getY rimPos)
+                                            , \_ -> Expect.within (Expect.Absolute 0.001) (Vec3.getX rimPos) (Vec3.getX tirePos)
+                                            , \_ -> Expect.within (Expect.Absolute 0.001) (Vec3.getY rimPos) (Vec3.getY tirePos)
+                                            , \_ -> Expect.within (Expect.Absolute 0.001) (Vec3.getZ rimPos) (Vec3.getZ tirePos)
+                                            , \_ -> Expect.equal [] (checkCollisions 0.5 rimBoxes holderBoxes)
+                                            , \_ -> Expect.equal [] (checkCollisions 0.5 tireBoxes holderBoxes)
+                                            ]
+                                            ()
+
+                                    Nothing ->
+                                        Expect.fail "Tire 3641 failed to snap onto rim 4624"
+
+                            Nothing ->
+                                Expect.fail "Wheel rim 4624 failed to snap onto holder 4600"
+
+                    _ ->
+                        Expect.fail "Vehicle parts not found in catalog"
+        , test "Technic wheel 55982 snaps onto axle 3705 and tire 56891 snaps onto 55982 without collisions" <|
+            \_ ->
+                case ( knownCatalogPart "3705.dat", knownCatalogPart "55982.dat", knownCatalogPart "56891.dat" ) of
+                    ( Just axle, Just wheel, Just tire ) ->
+                        let
+                            axleMatrix =
+                                Mat4.identity
+
+                            axlePoints =
+                                axle.connections
+                                    |> List.map (Connectivity.transformPoint axleMatrix 1)
+
+                            hoverWheel =
+                                Mat4.makeTranslate3 0 0 10
+
+                            maybeWheelSnap =
+                                solveSnap 20.0 0 hoverWheel wheel.connections axlePoints
+                        in
+                        case maybeWheelSnap of
+                            Just wheelSnap ->
+                                let
+                                    wheelWorldPoints =
+                                        wheel.connections
+                                            |> List.map (Connectivity.transformPoint wheelSnap.snapMatrix 2)
+
+                                    wheelPos =
+                                        Mat4.transform wheelSnap.snapMatrix (vec3 0 0 0)
+
+                                    hoverTire =
+                                        Mat4.makeTranslate3 (Vec3.getX wheelPos + 5) (Vec3.getY wheelPos) (Vec3.getZ wheelPos)
+
+                                    maybeTireSnap =
+                                        solveSnap 20.0 0 hoverTire tire.connections wheelWorldPoints
+                                in
+                                case maybeTireSnap of
+                                    Just tireSnap ->
+                                        let
+                                            tirePos =
+                                                Mat4.transform tireSnap.snapMatrix (vec3 0 0 0)
+
+                                            axleBoxes =
+                                                axle.boundingBoxes
+                                                    |> List.map (\b -> ( 1, axleMatrix, b ))
+
+                                            tireBoxes =
+                                                tire.boundingBoxes
+                                                    |> List.map (\b -> ( 3, tireSnap.snapMatrix, b ))
+                                        in
+                                        Expect.all
+                                            [ \_ -> Expect.within (Expect.Absolute 0.001) (Vec3.getX wheelPos) (Vec3.getX tirePos)
+                                            , \_ -> Expect.within (Expect.Absolute 0.001) (Vec3.getY wheelPos) (Vec3.getY tirePos)
+                                            , \_ -> Expect.within (Expect.Absolute 0.001) (Vec3.getZ wheelPos) (Vec3.getZ tirePos)
+                                            , \_ -> Expect.equal [] (checkCollisions 0.5 tireBoxes axleBoxes)
+                                            ]
+                                            ()
+
+                                    Nothing ->
+                                        Expect.fail "Tire 56891 failed to snap onto wheel 55982"
+
+                            Nothing ->
+                                Expect.fail "Wheel 55982 failed to snap onto axle 3705"
+
+                    _ ->
+                        Expect.fail "Axle, wheel or tire not found in catalog"
         ]

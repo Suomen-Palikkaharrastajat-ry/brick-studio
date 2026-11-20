@@ -187,6 +187,24 @@ async function fetchDatText(file, ldrawBase) {
         if (!text.trimStart().startsWith('<')) return text
       } catch (_) {}
     }
+
+    if (base.startsWith('http://') || base.startsWith('https://')) {
+      const fallbackUrls = [
+        `/raw/parts/${normalized}`,
+        `/raw/parts/s/${normalized}`,
+        `/raw/p/${normalized}`,
+      ]
+      for (const url of fallbackUrls) {
+        try {
+          const resp = await fetch(url)
+          if (!resp.ok) continue
+          if ((resp.headers.get('content-type') ?? '').includes('text/html')) continue
+          const text = await resp.text()
+          if (!text.trimStart().startsWith('<')) return text
+        } catch (_) {}
+      }
+    }
+
     return null
   })()
   datTextCache.set(key, pending)

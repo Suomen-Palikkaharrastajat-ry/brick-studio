@@ -132,7 +132,10 @@ export function copyWebglCanvasTo2d(canvas, targetCtx, targetWidth, targetHeight
         }
         targetCtx.imageSmoothingEnabled = true
         targetCtx.imageSmoothingQuality = 'high'
-        targetCtx.drawImage(srcCanvas, 0, 0, targetWidth, targetHeight)
+        const srcAspect = srcW / srcH
+        const drawnW = Math.round(targetHeight * srcAspect)
+        const offsetX = Math.round((targetWidth - drawnW) / 2)
+        targetCtx.drawImage(srcCanvas, offsetX, 0, drawnW, targetHeight)
         return
       }
     }
@@ -143,7 +146,12 @@ export function copyWebglCanvasTo2d(canvas, targetCtx, targetWidth, targetHeight
   }
   targetCtx.imageSmoothingEnabled = true
   targetCtx.imageSmoothingQuality = 'high'
-  targetCtx.drawImage(canvas, 0, 0, targetWidth, targetHeight)
+  const srcW = canvas.width || targetWidth
+  const srcH = canvas.height || targetHeight
+  const srcAspect = srcW / srcH
+  const drawnW = Math.round(targetHeight * srcAspect)
+  const offsetX = Math.round((targetWidth - drawnW) / 2)
+  targetCtx.drawImage(canvas, offsetX, 0, drawnW, targetHeight)
 }
 
 /** Fallback: copies the on-screen WebGL canvas. */
@@ -152,19 +160,17 @@ function captureCanvasCopy(ports, { width, height, transparent = true, filename 
   const canvas = largestVisibleCanvas(document)
   if (!canvas) return
 
-  const sourceWidth = canvas.width || canvas.clientWidth
-  const sourceHeight = canvas.height || canvas.clientHeight
-  if (!sourceWidth || !sourceHeight) return
-
-  const size = fittedSize(sourceWidth, sourceHeight, width, height)
+  const targetWidth = width > 0 ? Math.round(width) : (canvas.width || canvas.clientWidth)
+  const targetHeight = height > 0 ? Math.round(height) : (canvas.height || canvas.clientHeight)
+  if (!targetWidth || !targetHeight) return
 
   const offscreen = document.createElement('canvas')
-  offscreen.width = size.width
-  offscreen.height = size.height
+  offscreen.width = targetWidth
+  offscreen.height = targetHeight
   const ctx = offscreen.getContext('2d')
   if (!ctx) return
 
-  copyWebglCanvasTo2d(canvas, ctx, size.width, size.height, transparent)
+  copyWebglCanvasTo2d(canvas, ctx, targetWidth, targetHeight, transparent)
 
   ports.snapshotReady?.send({
     dataUrl: offscreen.toDataURL('image/png'),

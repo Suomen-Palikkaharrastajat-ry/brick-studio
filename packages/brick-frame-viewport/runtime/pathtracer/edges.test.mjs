@@ -123,30 +123,27 @@ test('50% zoom scales camera NDC appropriately', () => {
     up: [0, 1, 0],
     fovYDegrees: 45,
   }
-  const contract1x = {
+  const contract15x = {
     ...contractDefault,
-    zoom: 1.0,
+    zoom: 1.5,
   }
 
   const camDefault = makeCamera(contractDefault, width, height)
-  const cam1x = makeCamera(contract1x, width, height)
+  const cam15x = makeCamera(contract15x, width, height)
 
-  assert.equal(DEFAULT_ZOOM, 1.5)
+  assert.equal(DEFAULT_ZOOM, 1.0)
   assert.ok(
-    Math.abs(cam1x.tanHalfY / camDefault.tanHalfY - 1.5) < 1e-9,
-    `default camera tanHalfY should be scaled down by 1.5 (got ratio ${cam1x.tanHalfY / camDefault.tanHalfY})`,
+    Math.abs(camDefault.tanHalfY / cam15x.tanHalfY - 1.5) < 1e-9,
+    `1.5x zoom camera tanHalfY should be scaled down by 1.5 (got ratio ${camDefault.tanHalfY / cam15x.tanHalfY})`,
   )
 
-  // Project an off-center point [5, 5, 0] (cz = 50)
-  // ndc = camCoord / (cz * tanHalfY)
-  // Smaller tanHalfY means larger NDC (zoomed in view of object)
   const p = [5, 5, 0]
   const cz = 50
-  const ndcX1x = p[0] / (cz * cam1x.aspect * cam1x.tanHalfY)
   const ndcXDefault = p[0] / (cz * camDefault.aspect * camDefault.tanHalfY)
+  const ndcX15x = p[0] / (cz * cam15x.aspect * cam15x.tanHalfY)
 
   assert.ok(
-    Math.abs(ndcXDefault / ndcX1x - 1.5) < 1e-9,
-    `NDC coordinates should be scaled up by exactly 1.5x under 50% zoom (got ratio ${ndcXDefault / ndcX1x})`,
+    Math.abs(ndcX15x / ndcXDefault - 1.5) < 1e-9,
+    `NDC coordinates should be scaled up by exactly 1.5x under 1.5x zoom (got ratio ${ndcX15x / ndcXDefault})`,
   )
 })

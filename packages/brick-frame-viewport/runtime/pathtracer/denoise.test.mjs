@@ -96,3 +96,51 @@ test('denoising keeps black and bright areas both filtered', () => {
   assert.ok(stdDev(dark) < 0.5 * stdDev(darkIn), 'dark area is smoothed')
   assert.ok(stdDev(bright) < 0.5 * stdDev(brightIn), 'bright area is smoothed')
 })
+
+test('denoising preserves full opacity for black brick pixels bordering transparent ground', () => {
+  const n = W * H
+  const albedo = new Float32Array(n * 3)
+  const normal = new Float32Array(n * 3)
+  const color = new Float32Array(n * 3)
+  const alpha = new Float32Array(n)
+
+  // Top half: black LEGO plastic (LDraw 0, albedo linear ~ 0.02, normal up [0, 1, 0], alpha = 1.0)
+  // Bottom half: transparent ground shadow catcher (normal up [0, 1, 0], dark shadow color, alpha = 0.0)
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const p = y * W + x
+      const isBlackBrick = y < H / 2
+      if (isBlackBrick) {
+        albedo[p * 3] = 0.011
+        albedo[p * 3 + 1] = 0.023
+        albedo[p * 3 + 2] = 0.034
+        color[p * 3] = 0.015
+        color[p * 3 + 1] = 0.025
+        color[p * 3 + 2] = 0.035
+        normal[p * 3 + 1] = 1.0 // facing up
+        alpha[p] = 1.0 // opaque
+      } else {
+        // Ground plane shadow catcher
+        albedo[p * 3] = 0.6
+        albedo[p * 3 + 1] = 0.58
+        albedo[p * 3 + 2] = 0.55
+        color[p * 3] = 0.0
+        color[p * 3 + 1] = 0.0
+        color[p * 3 + 2] = 0.0
+        normal[p * 3 + 1] = 1.0 // facing up
+        alpha[p] = 0.0 // fully transparent
+      }
+    }
+  }
+
+  const out = denoise(color, alpha, albedo, normal, W, H)
+
+  // Check every pixel on the black brick, including the border right next to ground (y = H/2 - 1)
+  for (let y = 0; y < H / 2; y++) {
+    for (let x = 0; x < W; x++) {
+      const p = y * W + x
+      assert.equal(out.alpha[p], 1.0, `Black brick pixel at (${x}, ${y}) must remain fully opaque (1.0), got ${out.alpha[p]}`)
+    }
+  }
+})
+

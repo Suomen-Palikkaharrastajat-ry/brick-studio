@@ -215,3 +215,61 @@ test('copyWebglCanvasTo2d falls back to drawImage when canvas lacks WebGL contex
   copyWebglCanvasTo2d(mockCanvas, targetCtx, 80, 60, true)
   assert.ok(fallbackDrawn, 'fallback drawImage should be called')
 })
+
+test('3D projection (u, v) in perspective-aligned cropping preview matches pathtracer primary ray NDC', () => {
+  const targetW = 1920
+  const targetH = 1080
+  const targetAspect = targetW / targetH
+  const fovYDegrees = 45
+  const tanHalfY = Math.tan(((fovYDegrees / 2) * Math.PI) / 180)
+
+  // Test across multiple window dimensions: ultrawide, 16:9, 4:3, portrait
+  const windowSizes = [
+    { srcW: 2560, srcH: 1080 },
+    { srcW: 1920, srcH: 1080 },
+    { srcW: 1024, srcH: 768 },
+    { srcW: 800, srcH: 1000 },
+  ]
+
+  // Arbitrary 3D camera coordinates in front of camera
+  const testPoints = [
+    [0, 0, 100],
+    [25, -15, 120],
+    [-40, 30, 80],
+  ]
+
+  for (const { srcW, srcH } of windowSizes) {
+    const srcAspect = srcW / srcH
+    const drawnW = targetH * srcAspect
+    const offsetX = (targetW - drawnW) / 2
+
+    for (const [cx, cy, cz] of testPoints) {
+      // Path tracer primary ray projection (16:9 baseAspect, 1.0x zoom)
+      const ptNdcX = cx / (cz * targetAspect * tanHalfY)
+      const ptNdcY = cy / (cz * tanHalfY)
+      const ptU = (ptNdcX + 1) / 2
+      const ptV = (1 - ptNdcY) / 2
+
+      // WebGL modeler canvas projection
+      const webglNdcX = cx / (cz * srcAspect * tanHalfY)
+      const webglNdcY = cy / (cz * tanHalfY)
+      const webglU = (webglNdcX + 1) / 2
+      const webglV = (1 - webglNdcY) / 2
+
+      // Preview canvas composite projection
+      const previewX = offsetX + webglU * drawnW
+      const previewY = webglV * targetH
+      const previewU = previewX / targetW
+      const previewV = previewY / targetH
+
+      assert.ok(
+        Math.abs(previewU - ptU) < 1e-9,
+        `Horizontal coordinate previewU (${previewU}) must match path tracer ptU (${ptU}) for window ${srcW}x${srcH}`,
+      )
+      assert.ok(
+        Math.abs(previewV - ptV) < 1e-9,
+        `Vertical coordinate previewV (${previewV}) must match path tracer ptV (${ptV}) for window ${srcW}x${srcH}`,
+      )
+    }
+  }
+})

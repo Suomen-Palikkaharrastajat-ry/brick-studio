@@ -315,21 +315,18 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
             }
 
             const nh = Math.max(0, bn[0] * hNormX + bn[1] * hNormY + bn[2] * hNormZ)
-            let seamAo = 0.22
-            let specGlint = Math.pow(nh, 12) * 0.28
+            let seamAo = 0.26
+            let specGlint = Math.pow(nh, 6) * 0.06
 
-            if (options.shader === 'used') {
+            if (options.shader !== 'matte') {
               const sx = p0[0] + t * (p1[0] - p0[0])
               const sy = p0[1] + t * (p1[1] - p0[1])
               const sz = p0[2] + t * (p1[2] - p0[2])
               let n = (Math.floor(sx * 2.5) * 374761393 + Math.floor(sy * 2.5) * 668265263 + Math.floor(sz * 2.5) * 1274126177) | 0
               n = Math.imul(n ^ (n >>> 13), 1274126177)
               const edgeNoise = 0.85 + 0.3 * (((n ^ (n >>> 16)) >>> 0) / 4294967296)
-              seamAo = 0.34 * edgeNoise
-              specGlint = Math.pow(nh, 8) * 0.14
-            } else if (options.shader === 'matte') {
-              seamAo = 0.26
-              specGlint = Math.pow(nh, 6) * 0.06
+              seamAo = 0.30 * edgeNoise
+              specGlint = Math.pow(nh, 6) * 0.08 * edgeNoise
             }
 
             // 1. Proportional Seam Ambient Occlusion: Darken existing color proportionally

@@ -30,17 +30,11 @@ export const MATERIAL = Object.freeze({
 })
 
 export const SHADER_PARAMS = Object.freeze({
-  glossy: {
-    coreRoughness: 0.038,
-    shoulderRoughness: 0.18,
-    coatIor: 1.535,
-    coatF0: ((1.535 - 1) / (1.535 + 1)) ** 2,
-  },
   used: {
-    coreRoughness: 0.17,
-    shoulderRoughness: 0.38,
-    coatIor: 1.47,
-    coatF0: ((1.47 - 1) / (1.47 + 1)) ** 2,
+    coreRoughness: 0.32,
+    shoulderRoughness: 0.54,
+    coatIor: 1.43,
+    coatF0: ((1.43 - 1) / (1.43 + 1)) ** 2,
   },
   matte: {
     coreRoughness: 0.32,
@@ -159,7 +153,7 @@ function coatProbability(nv, f0avg) {
  * Sets the coat F0 per channel in `f0v` for the material and returns its
  * specular roughness.
  */
-function materialParams(material, albedo, shader = 'glossy') {
+function materialParams(material, albedo, shader = 'used') {
   switch (material) {
     case MATERIAL.CHROME:
       f0v[0] = albedo[0]
@@ -175,7 +169,7 @@ function materialParams(material, albedo, shader = 'glossy') {
       }
       return PEARL_ROUGHNESS
     default: {
-      const sp = SHADER_PARAMS[shader] || SHADER_PARAMS.glossy
+      const sp = SHADER_PARAMS[shader] || SHADER_PARAMS.used
       f0v[0] = f0v[1] = f0v[2] = sp.coatF0
       return sp.coreRoughness
     }
@@ -188,7 +182,7 @@ function materialParams(material, albedo, shader = 'glossy') {
  * `sampleSurface` choosing `wi` into `out.pdf`. Only valid for non-delta
  * materials (everything except TRANSPARENT).
  */
-export function evalSurface(material, albedo, frame, wo, wi, out, shader = 'glossy') {
+export function evalSurface(material, albedo, frame, wo, wi, out, shader = 'used') {
   toLocal(frame, wo, lo)
   toLocal(frame, wi, li)
   const nv = lo[2]
@@ -223,7 +217,7 @@ export function evalSurface(material, albedo, frame, wo, wi, out, shader = 'glos
   let specScale
   let specPdf
   if (material === MATERIAL.PLASTIC) {
-    const sp = SHADER_PARAMS[shader] || SHADER_PARAMS.glossy
+    const sp = SHADER_PARAMS[shader] || SHADER_PARAMS.used
     const aCore = sp.coreRoughness * sp.coreRoughness
     const a2Core = aCore * aCore
     const dCore = ggxD(a2Core, nh)
@@ -293,7 +287,7 @@ export function evalSurface(material, albedo, frame, wo, wi, out, shader = 'glos
  * `out.pdf` and `out.weight` = f·cos/pdf. Returns false if the sample is
  * below the surface (the caller should terminate the path).
  */
-export function sampleSurface(material, albedo, frame, wo, rng, out, shader = 'glossy') {
+export function sampleSurface(material, albedo, frame, wo, rng, out, shader = 'used') {
   toLocal(frame, wo, lo)
   const nv = lo[2]
   if (nv <= 0) return false
@@ -315,7 +309,7 @@ export function sampleSurface(material, albedo, frame, wo, rng, out, shader = 'g
     let lobeRoughness = roughness
     let uLobe = u1
     if (material === MATERIAL.PLASTIC) {
-      const sp = SHADER_PARAMS[shader] || SHADER_PARAMS.glossy
+      const sp = SHADER_PARAMS[shader] || SHADER_PARAMS.used
       if (u1 < PLASTIC_CORE_WEIGHT) {
         lobeRoughness = sp.coreRoughness
         uLobe = u1 / PLASTIC_CORE_WEIGHT

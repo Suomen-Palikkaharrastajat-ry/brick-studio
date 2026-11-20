@@ -114,7 +114,11 @@ export function denoise(color, alpha, albedo, normal, width, height, passes = PA
       const denoisedVal = srcC[p * 3 + k] * (albedo[p * 3 + k] + DEMOD_EPSILON)
       srcC[p * 3 + k] = denoisedVal * m + color[p * 3 + k] * (1 - m)
     }
-    srcA[p] = srcA[p] * m + alpha[p] * (1 - m)
+    if (alpha[p] >= 0.999) {
+      srcA[p] = 1.0
+    } else {
+      srcA[p] = srcA[p] * m + alpha[p] * (1 - m)
+    }
   }
   return { color: srcC, alpha: srcA }
 }
@@ -127,6 +131,7 @@ function atrousPass(srcC, srcA, albedo, normal, dstC, dstA, width, height, step)
       const pr = srcC[pc]
       const pg = srcC[pc + 1]
       const pb = srcC[pc + 2]
+      const pa = srcA[p]
       const pLum = 0.2126 * pr + 0.7152 * pg + 0.0722 * pb
       const nx = normal[pc]
       const ny = normal[pc + 1]
@@ -151,6 +156,7 @@ function atrousPass(srcC, srcA, albedo, normal, dstC, dstA, width, height, step)
           const qr = srcC[qc]
           const qg = srcC[qc + 1]
           const qb = srcC[qc + 2]
+          const qa = srcA[q]
           const cr = qr - pr
           const cg = qg - pg
           const cb = qb - pb
@@ -169,11 +175,13 @@ function atrousPass(srcC, srcA, albedo, normal, dstC, dstA, width, height, step)
           const ga = albedo[qc + 1] - ag
           const ba = albedo[qc + 2] - ab
           const wAlbedo = 1 / (1 + (ra * ra + ga * ga + ba * ba) / SIGMA_ALBEDO)
-          const w = KERNEL[dx + 2] * hy * wColor * wNormal * wAlbedo
+          const diffA = qa - pa
+          const wAlpha = 1 / (1 + (diffA * diffA) / 0.002)
+          const w = KERNEL[dx + 2] * hy * wColor * wNormal * wAlbedo * wAlpha
           sr += w * qr
           sg += w * qg
           sb += w * qb
-          sa += w * srcA[q]
+          sa += w * qa
           wsum += w
         }
       }
@@ -181,12 +189,12 @@ function atrousPass(srcC, srcA, albedo, normal, dstC, dstA, width, height, step)
         dstC[pc] = sr / wsum
         dstC[pc + 1] = sg / wsum
         dstC[pc + 2] = sb / wsum
-        dstA[p] = sa / wsum
+        dstA[p] = pa >= 0.999 ? 1.0 : sa / wsum
       } else {
         dstC[pc] = pr
         dstC[pc + 1] = pg
         dstC[pc + 2] = pb
-        dstA[p] = srcA[p]
+        dstA[p] = pa >= 0.999 ? 1.0 : pa
       }
     }
   }

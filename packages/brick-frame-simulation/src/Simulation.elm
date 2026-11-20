@@ -855,6 +855,22 @@ arePointsRigidlyConnected ptA ptB =
         ( BarFemale _, ClipMale _ ) ->
             Vec3.distance ptA.worldPosition ptB.worldPosition <= 1.0
 
+        ( Connectivity.WheelRim r, Connectivity.WheelTire t ) ->
+            abs (r.diameter - t.diameter)
+                <= 2.5
+                && Vec3.distance ptA.worldPosition ptB.worldPosition
+                <= 1.0
+                && abs (Vec3.dot ptA.worldNormal ptB.worldNormal)
+                > 0.7
+
+        ( Connectivity.WheelTire t, Connectivity.WheelRim r ) ->
+            abs (r.diameter - t.diameter)
+                <= 2.5
+                && Vec3.distance ptA.worldPosition ptB.worldPosition
+                <= 1.0
+                && abs (Vec3.dot ptA.worldNormal ptB.worldNormal)
+                > 0.7
+
         _ ->
             False
 

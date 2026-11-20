@@ -810,6 +810,59 @@ overlaps a b =
         && not (technicJoined a b)
         && not (studJoined a b)
         && not (gearsMeshing a b)
+        && not (wheelJoined a b)
+
+
+{-| Whether a wheel rim and matching tire are concentrically mounted.
+Exempts tire-on-rim assemblies from collision overlaps.
+-}
+wheelJoined : Item -> Item -> Bool
+wheelJoined a b =
+    let
+        pointsA =
+            wheelPoints a
+
+        pointsB =
+            wheelPoints b
+    in
+    List.any
+        (\p ->
+            List.any
+                (\q ->
+                    Connectivity.isCompatible p.connType q.connType
+                        && distance p.position q.position <= 2.0
+                )
+                pointsB
+        )
+        pointsA
+
+
+wheelPoints : Item -> List WorldPoint
+wheelPoints item =
+    item.conn.connections
+        |> List.filter
+            (\point ->
+                case point.connType of
+                    Connectivity.WheelRim _ ->
+                        True
+
+                    Connectivity.WheelTire _ ->
+                        True
+
+                    _ ->
+                        False
+            )
+        |> List.map
+            (\point ->
+                let
+                    world =
+                        Connectivity.transformPoint item.matrix item.id point
+                in
+                { position = world.worldPosition
+                , normal = world.worldNormal
+                , connType = point.connType
+                }
+            )
 
 
 {-| Whether a stud of one part connects with an anti-stud of the other, or vice-versa.
