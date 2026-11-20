@@ -1956,18 +1956,18 @@ viewBody lang actions model =
           viewStage lang actions model
         , -- Details row for Preview
           case model.phase of
-              Preview data ->
-                  viewPreviewDetails lang model data
+            Preview data ->
+                viewPreviewDetails lang model data
 
-              _ ->
-                  text ""
+            _ ->
+                text ""
         , -- Failure message if Failed
           case model.phase of
-              Failed message ->
-                  viewFailed message
+            Failed message ->
+                viewFailed message
 
-              _ ->
-                  text ""
+            _ ->
+                text ""
         ]
 
 
@@ -2012,7 +2012,8 @@ viewToolbar lang actions model =
                optionPill "mode-still" (actions.onInteraction (SelectOutputMode ModeStill)) (I18n.snapshotModeStill lang) (activeMode == ModeStill)
              , optionPill "mode-anim" (actions.onInteraction (SelectOutputMode ModeAnimation)) (I18n.snapshotModeAnimation lang) (activeMode == ModeAnimation)
              , toolbarDivider
-               -- 2. Aspect Ratio presets (shared by both modes)
+
+             -- 2. Aspect Ratio presets (shared by both modes)
              , aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectFree lang) (activeAspect == AspectFree)
              , aspectPill (actions.onSetAspect Aspect16_9) (I18n.snapshotAspect16_9 lang) (activeAspect == Aspect16_9)
              , aspectPill (actions.onSetAspect Aspect4_3) (I18n.snapshotAspect4_3 lang) (activeAspect == Aspect4_3)
@@ -2025,7 +2026,8 @@ viewToolbar lang actions model =
                               optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
                             , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
                             , toolbarDivider
-                              -- 4. Quality presets
+
+                            -- 4. Quality presets
                             , optionPill "quality-preset-fast" (actions.onInteraction (SelectQuality QualityFast)) (I18n.snapshotQualityFast lang) (activeQuality == QualityFast)
                             , optionPill "quality-preset-standard" (actions.onInteraction (SelectQuality QualityStandard)) (I18n.snapshotQualityStandard lang) (activeQuality == QualityStandard)
                             , optionPill "quality-preset-high" (actions.onInteraction (SelectQuality QualityHigh)) (I18n.snapshotQualityHigh lang) (activeQuality == QualityHigh)
@@ -2037,42 +2039,25 @@ viewToolbar lang actions model =
                             , optionPill "anim-res-480p" (actions.onInteraction (SelectAnimResolution Res480p)) (I18n.snapshotAnimRes480p lang) (activeRes == Res480p)
                             , optionPill "anim-res-360p" (actions.onInteraction (SelectAnimResolution Res360p)) (I18n.snapshotAnimRes360p lang) (activeRes == Res360p)
                             , toolbarDivider
-                              -- 4. FPS
+
+                            -- 4. FPS
                             , optionPill "anim-fps-10" (actions.onInteraction (SelectAnimFps Fps10)) (I18n.snapshotAnimFps10 lang) (activeFps == Fps10)
                             , optionPill "anim-fps-15" (actions.onInteraction (SelectAnimFps Fps15)) (I18n.snapshotAnimFps15 lang) (activeFps == Fps15)
                             , optionPill "anim-fps-30" (actions.onInteraction (SelectAnimFps Fps30)) (I18n.snapshotAnimFps30 lang) (activeFps == Fps30)
                             , toolbarDivider
-                              -- 5. Duration
+
+                            -- 5. Duration
                             , optionPill "anim-dur-2s" (actions.onInteraction (SelectAnimDuration Dur2s)) (I18n.snapshotAnimDur2s lang) (activeDur == Dur2s)
                             , optionPill "anim-dur-4s" (actions.onInteraction (SelectAnimDuration Dur4s)) (I18n.snapshotAnimDur4s lang) (activeDur == Dur4s)
                             , optionPill "anim-dur-6s" (actions.onInteraction (SelectAnimDuration Dur6s)) (I18n.snapshotAnimDur6s lang) (activeDur == Dur6s)
                             , toolbarDivider
-                              -- 6. Shader presets
+
+                            -- 6. Shader presets
                             , optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
                             , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
                             ]
                    )
             )
-        , div
-            [ Attr.style "display" "flex"
-            , Attr.style "align-items" "center"
-            , Attr.style "gap" "6px"
-            ]
-            [ button
-                [ Attr.type_ "button"
-                , Html.Events.onClick actions.onResetCrop
-                , Attr.class "ui-button"
-                , Attr.style "padding" "4px 10px"
-                , Attr.style "font-size" "12px"
-                , Attr.style "font-weight" "500"
-                , Attr.style "background" Theme.panelSubtleBackground
-                , Attr.style "color" Theme.textPrimary
-                , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
-                , Attr.style "border-radius" "6px"
-                , Attr.style "cursor" "pointer"
-                ]
-                [ text (I18n.snapshotResetCrop lang) ]
-            ]
         ]
 
 
