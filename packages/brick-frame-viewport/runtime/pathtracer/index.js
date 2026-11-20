@@ -41,7 +41,7 @@
 import { denoise } from './denoise.js'
 import { toRgba8 } from './output.js'
 import { makeCamera } from './scene.js'
-import { extractSharpEdges, rasterizeEdges } from './edges.js'
+import { edgeLineWidth, extractSharpEdges, rasterizeEdges } from './edges.js'
 
 const DEFAULT_BUDGET_MS = 30000
 const MIN_BUDGET_MS = 5000
@@ -340,9 +340,9 @@ export function createRenderSession(request, options = {}) {
       const edges = state.extra ? staticEdges.concat(extractSharpEdges(state.extra)) : staticEdges
       rasterizeEdges(edges, state.camera, depthBuffer, width, height, denoised.color, {
         crop: request.crop,
-        lineWidth: 1.2,
+        lineWidth: edgeLineWidth(width, height),
         feather: 0.35,
-        edgeColor: [0.03, 0.03, 0.03],
+        albedo,
       })
     }
     const rgba = toRgba8(denoised.color, denoised.alpha, width, height)

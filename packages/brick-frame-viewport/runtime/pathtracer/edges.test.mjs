@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { extractSharpEdges, rasterizeEdges } from './edges.js'
+import { edgeColorForAlbedo, edgeLineWidth, extractSharpEdges, rasterizeEdges } from './edges.js'
 import { makeCamera, DEFAULT_ZOOM } from './scene.js'
 
 function makeBox(minX, minY, minZ, maxX, maxY, maxZ) {
@@ -157,4 +157,41 @@ test('50% zoom scales camera NDC appropriately', () => {
     Math.abs(ndcX15x / ndcXDefault - 1.5) < 1e-9,
     `NDC coordinates should be scaled up by exactly 1.5x under 1.5x zoom (got ratio ${ndcX15x / ndcXDefault})`,
   )
+})
+
+test('edges on near-black parts are a lighter grey, on other parts a darker shade of the part', () => {
+  const out = [0, 0, 0]
+  const black = edgeColorForAlbedo([0.011, 0.023, 0.034], 0, out).slice()
+  assert.ok(black.every((c) => c > 0.08), `grey edge on black (got ${black})`)
+  assert.ok(black.every((c) => c > 0.034), 'lighter than the black part')
+
+  const red = edgeColorForAlbedo([0.456, 0, 0], 0, out).slice()
+  assert.ok(red[0] < 0.456 * 0.2 && red[0] > red[1], `dark red edge on red (got ${red})`)
+
+  const white = edgeColorForAlbedo([0.8, 0.8, 0.8], 0, out).slice()
+  assert.ok(white.every((c) => c < 0.1), `dark edge on white (got ${white})`)
+})
+
+test('line width is 1.2 px up to Full HD and grows with the image beyond', () => {
+  assert.equal(edgeLineWidth(1280, 720), 1.2)
+  assert.equal(edgeLineWidth(1920, 1080), 1.2)
+  assert.ok(Math.abs(edgeLineWidth(3840, 2160) - 2.4) < 1e-9)
+  const square = edgeLineWidth(2560, 2560)
+  assert.ok(square > 2 && square < 2.3, `2560 square (got ${square})`)
+})
+
+test('with an albedo buffer, rasterized lines take the colour of the part under them', () => {
+  const width = 32
+  const height = 32
+  const camera = makeCamera(
+    { position: [0, 0, 50], target: [0, 0, 0], up: [0, 1, 0], fovYDegrees: 45, zoom: 1 },
+    width,
+    height,
+  )
+  const depthBuffer = new Float32Array(width * height).fill(50.0)
+  const albedo = new Float32Array(width * height * 3).fill(0.015)
+  const color = new Float32Array(width * height * 3).fill(0.02)
+  rasterizeEdges([{ p0: [-10, 0, 0], p1: [10, 0, 0] }], camera, depthBuffer, width, height, color, { albedo })
+  const centerIdx = (16 * width + 16) * 3
+  assert.ok(color[centerIdx] > 0.06, `a black part gets a visible grey line (got ${color[centerIdx]})`)
 })

@@ -11,8 +11,9 @@
  * - Russian roulette from bounce RR_START; a firefly clamp on indirect
  *   contributions (luminance FIREFLY_CLAMP).
  * - Transparent renders are shadow-catcher output: a primary ray that hits
- *   the ground writes black with alpha = 1 − (lit fraction), a primary ray
- *   that escapes to the sky writes alpha 0.
+ *   the ground writes black with alpha = 1 − (lit fraction, from
+ *   SHADOW_SAMPLES light samples), a primary ray that escapes to the sky
+ *   writes alpha 0.
  *
  * Colour is accumulated premultiplied: `out` holds (r·a, g·a, b·a, a).
  * Pixel rows are rendered through `renderRowSample`, which takes one jittered
@@ -44,7 +45,13 @@ import { environmentRadiance, lightPdf, sampleLight, skyRadiance } from './scene
 export const MAX_BOUNCES = 6
 const RR_START = 3
 const RR_MAX_SURVIVAL = 0.95
-export const FIREFLY_CLAMP = 8.0
+export const FIREFLY_CLAMP = 4.0
+/**
+ * Light samples per primary ground hit of a transparent render. The shadow's
+ * alpha is not denoised (it sits outside the model), so it takes several
+ * cheap shadow rays per sample instead of one.
+ */
+export const SHADOW_SAMPLES = 4
 /** Offset (LDU) applied along the normal before spawning a ray, to avoid self-hits. */
 const SURFACE_EPS = 0.02
 /** Reference path length (LDU) over which the transparent tint reaches its full colour. */
@@ -215,31 +222,33 @@ function sceneOccluded(scene, r) {
 
 /**
  * Lit fraction of the ground point `p` (normal up), in [0, 1]. Estimated from
- * one sample per light cone plus one cosine-weighted sky direction, each
- * weighted by its unshadowed irradiance.
+ * `samples` rounds of one sample per light cone plus one cosine-weighted sky
+ * direction, each weighted by its unshadowed irradiance.
  */
-function groundLitFraction(scene, rng, p) {
+function groundLitFraction(scene, rng, p, samples = 1) {
   let num = 0
   let den = 0
   const origin = [p[0], p[1] + SURFACE_EPS, p[2]]
-  for (const light of scene.lights) {
-    const pl = sampleLightDir(light, rng, lightDir)
-    const cosL = lightDir[1]
-    if (cosL <= 0) continue
-    // Estimate of the light's irradiance from one sample: L·cos / pdf, with L = E / solid angle.
-    const e = ((light.irradiance / light.solidAngle) * cosL) / pl
-    den += e
-    if (!sceneOccluded(scene, setShadowRay(origin, lightDir))) num += e
+  for (let i = 0; i < samples; i++) {
+    for (const light of scene.lights) {
+      const pl = sampleLightDir(light, rng, lightDir)
+      const cosL = lightDir[1]
+      if (cosL <= 0) continue
+      // Estimate of the light's irradiance from one sample: L·cos / pdf, with L = E / solid angle.
+      const e = ((light.irradiance / light.solidAngle) * cosL) / pl
+      den += e
+      if (!sceneOccluded(scene, setShadowRay(origin, lightDir))) num += e
+    }
+    const u1 = rng.next()
+    const u2 = rng.next()
+    const r = Math.sqrt(u1)
+    const phi = 2 * Math.PI * u2
+    lightDir[0] = r * Math.cos(phi)
+    lightDir[1] = Math.sqrt(Math.max(0, 1 - u1))
+    lightDir[2] = r * Math.sin(phi)
+    den += scene.skyIrradiance
+    if (!sceneOccluded(scene, setShadowRay(origin, lightDir))) num += scene.skyIrradiance
   }
-  const u1 = rng.next()
-  const u2 = rng.next()
-  const r = Math.sqrt(u1)
-  const phi = 2 * Math.PI * u2
-  lightDir[0] = r * Math.cos(phi)
-  lightDir[1] = Math.sqrt(Math.max(0, 1 - u1))
-  lightDir[2] = r * Math.sin(phi)
-  den += scene.skyIrradiance
-  if (!sceneOccluded(scene, setShadowRay(origin, lightDir))) num += scene.skyIrradiance
   return den > 0 ? num / den : 1
 }
 
@@ -445,7 +454,7 @@ export function tracePath(scene, rng, primary, out) {
       pos[2] = ray.oz + ray.dz * tHit
       if (bounce === 0 && scene.transparent) {
         out[0] = out[1] = out[2] = 0
-        const shadow = 1 - groundLitFraction(scene, rng, pos)
+        const shadow = 1 - groundLitFraction(scene, rng, pos, SHADOW_SAMPLES)
         out[3] = shadow > 0.04 ? (shadow - 0.04) / (1 - 0.04) : 0
         return out
       }

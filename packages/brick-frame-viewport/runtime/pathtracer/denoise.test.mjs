@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { denoise } from './denoise.js'
+import { clampOutliers, denoise } from './denoise.js'
 import { createRng } from './rng.js'
 
 const W = 16
@@ -187,3 +187,49 @@ test('denoising filters narrow grooves and crevices on solid bricks without bypa
   )
 })
 
+
+test('clampOutliers clamps an isolated firefly and a single-pixel colour speck', () => {
+  const w = 5
+  const h = 5
+  const src = new Float32Array(w * h * 3).fill(0)
+  for (let p = 0; p < w * h; p++) {
+    src[p * 3] = 1 + 0.02 * (p % 3)
+    src[p * 3 + 1] = 0.05
+    src[p * 3 + 2] = 0.05
+  }
+  const alpha = new Float32Array(w * h).fill(1)
+  const centre = 2 * w + 2
+  src[centre * 3] = 40
+  src[centre * 3 + 1] = 0.05
+  const speck = 1 * w + 3
+  src[speck * 3 + 1] = 3
+  const out = clampOutliers(src, alpha, w, h)
+  assert.ok(out[centre * 3] < 1.5, `firefly clamped near its neighbours (got ${out[centre * 3]})`)
+  assert.ok(out[speck * 3 + 1] < 0.2, `green speck clamped (got ${out[speck * 3 + 1]})`)
+  assert.ok(Math.abs(out[speck * 3] - src[speck * 3]) < 1e-6, 'the speck keeps its normal channels')
+  assert.equal(src[centre * 3], 40, 'the input is not modified')
+})
+
+test('clampOutliers leaves a smooth gradient, edges between areas and non-opaque pixels alone', () => {
+  const w = 8
+  const h = 4
+  const src = new Float32Array(w * h * 3)
+  const alpha = new Float32Array(w * h).fill(1)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x
+      // Dark left half, bright right half, with a gentle ramp.
+      const v = (x < w / 2 ? 0.1 : 2) + 0.01 * x
+      src[p * 3] = src[p * 3 + 1] = src[p * 3 + 2] = v
+    }
+  }
+  const lone = 0
+  alpha[lone] = 0.5
+  src[lone * 3] = 50
+  const out = clampOutliers(src, alpha, w, h)
+  for (let p = 0; p < w * h; p++) {
+    for (let k = 0; k < 3; k++) {
+      assert.ok(Math.abs(out[p * 3 + k] - src[p * 3 + k]) < 1e-6, `pixel ${p} channel ${k} unchanged`)
+    }
+  }
+})

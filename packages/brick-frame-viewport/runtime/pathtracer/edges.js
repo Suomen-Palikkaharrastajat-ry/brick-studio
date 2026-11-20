@@ -3,10 +3,45 @@
  *
  * Extracts crease feature edges from triangle geometry (e.g. brick contours
  * and seams between adjacent parts) and renders crisp, antialiased, depth-tested
- * dark borders into the linear RGB color buffer.
+ * borders into the linear RGB color buffer. Given the first-hit albedo, each
+ * line pixel takes its colour from the part under it, as LDraw edge colours
+ * do: a darker shade of the part's colour, or a lighter grey on near-black
+ * parts, where a dark line would not show.
  */
 
 const STRIDE = 14
+/** Edge colour as a fraction of the part's albedo. */
+const EDGE_SHADE = 0.1
+/** Grey edge radiance on near-black parts. */
+const DARK_PART_EDGE = 0.12
+/** Albedo luminance range over which edges go from grey (below) to shaded (above). */
+const DARK_PART_LUMINANCE = [0.02, 0.06]
+
+/**
+ * Edge colour for a part of linear `albedo` (r, g, b at `i`), written to `out`.
+ */
+export function edgeColorForAlbedo(albedo, i, out) {
+  const r = albedo[i]
+  const g = albedo[i + 1]
+  const b = albedo[i + 2]
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  const [lo, hi] = DARK_PART_LUMINANCE
+  const u = Math.max(0, Math.min(1, (lum - lo) / (hi - lo)))
+  const t = u * u * (3 - 2 * u)
+  out[0] = DARK_PART_EDGE * (1 - t) + r * EDGE_SHADE * t
+  out[1] = DARK_PART_EDGE * (1 - t) + g * EDGE_SHADE * t
+  out[2] = DARK_PART_EDGE * (1 - t) + b * EDGE_SHADE * t
+  return out
+}
+
+/**
+ * Line width in pixels for an image of `width` × `height`: `base` up to Full
+ * HD, growing with the square root of the pixel count beyond, so lines keep
+ * their weight relative to the image.
+ */
+export function edgeLineWidth(width, height, base = 1.2) {
+  return base * Math.max(1, Math.sqrt((width * height) / (1920 * 1080)))
+}
 
 /**
  * Quantizes 3D coordinates to millildu (0.001 LDU) to match coincident vertices.
@@ -169,7 +204,9 @@ function projectPoint(p, camera, width, height, crop) {
 }
 
 /**
- * Rasterizes feature edges with subpixel antialiasing and depth testing into colorBuffer.
+ * Rasterizes feature edges with subpixel antialiasing and depth testing into
+ * colorBuffer. With `options.albedo` (3 floats per pixel) each line pixel is
+ * coloured by `edgeColorForAlbedo`, otherwise by `options.edgeColor`.
  */
 export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorBuffer, options = {}) {
   if (!edges || edges.length === 0 || !camera || !colorBuffer) return colorBuffer
@@ -177,6 +214,8 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
   const nearPlane = options.nearPlane ?? 0.1
   const lineWidth = options.lineWidth ?? 1.2
   const edgeColor = options.edgeColor ?? [0.03, 0.03, 0.03]
+  const albedo = options.albedo ?? null
+  const pixelEdge = [0, 0, 0]
   const depthBias = options.depthBias ?? 0.12
   const depthBiasFactor = options.depthBiasFactor ?? 1.002
   const crop = options.crop
@@ -280,10 +319,11 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
           const deltaAlpha = (coverage - prev) / Math.max(1e-6, 1 - prev)
           maxCoverage[pixelIdx] = coverage
           const cIdx = pixelIdx * 3
+          const ec = albedo ? edgeColorForAlbedo(albedo, cIdx, pixelEdge) : edgeColor
 
-          colorBuffer[cIdx] = colorBuffer[cIdx] * (1 - deltaAlpha) + edgeColor[0] * deltaAlpha
-          colorBuffer[cIdx + 1] = colorBuffer[cIdx + 1] * (1 - deltaAlpha) + edgeColor[1] * deltaAlpha
-          colorBuffer[cIdx + 2] = colorBuffer[cIdx + 2] * (1 - deltaAlpha) + edgeColor[2] * deltaAlpha
+          colorBuffer[cIdx] = colorBuffer[cIdx] * (1 - deltaAlpha) + ec[0] * deltaAlpha
+          colorBuffer[cIdx + 1] = colorBuffer[cIdx + 1] * (1 - deltaAlpha) + ec[1] * deltaAlpha
+          colorBuffer[cIdx + 2] = colorBuffer[cIdx + 2] * (1 - deltaAlpha) + ec[2] * deltaAlpha
         }
       }
     }

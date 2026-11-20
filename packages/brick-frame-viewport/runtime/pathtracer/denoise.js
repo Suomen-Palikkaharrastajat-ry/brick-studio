@@ -19,6 +19,11 @@
  * - albedo similarity from the first-hit albedo buffer (rational falloff).
  * Weights are rational rather than exponential to keep the inner loop cheap.
  *
+ * The colour guide keeps bright outliers on purpose, so before the passes
+ * isolated fireflies and single-pixel colour specks are clamped: each channel
+ * of an opaque pixel's illumination is limited to the mean plus
+ * OUTLIER_SIGMAS standard deviations of its opaque 3×3 neighbours.
+ *
  * Operates on unpremultiplied linear colour and on alpha (coverage). Input
  * buffers are not modified.
  */
@@ -33,6 +38,53 @@ const SIGMA_RELATIVE = 0.6
 const SIGMA_FLOOR = 1e-4
 const SIGMA_ALBEDO = 0.02
 const NORMAL_POWER = 8
+/** Standard deviations above the neighbours' mean at which a channel counts as an outlier. */
+const OUTLIER_SIGMAS = 3
+/** Relative slack on the outlier limit, so flat areas with tiny spread are left alone. */
+const OUTLIER_SLACK = 0.25
+/** Fewest opaque neighbours a pixel needs before it is judged an outlier. */
+const OUTLIER_MIN_NEIGHBOURS = 5
+
+/**
+ * Clamps single-pixel outliers of the illumination `src` (3 floats per
+ * pixel) of opaque pixels into a new buffer. A channel is limited to the
+ * mean plus OUTLIER_SIGMAS standard deviations (plus OUTLIER_SLACK of the
+ * mean) of the same channel over the pixel's opaque 3×3 neighbours.
+ */
+export function clampOutliers(src, alpha, width, height) {
+  const out = Float32Array.from(src)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const p = y * width + x
+      if (alpha[p] < 0.999) continue
+      for (let k = 0; k < 3; k++) {
+        let sum = 0
+        let sumSq = 0
+        let count = 0
+        for (let dy = -1; dy <= 1; dy++) {
+          const qy = y + dy
+          if (qy < 0 || qy >= height) continue
+          for (let dx = -1; dx <= 1; dx++) {
+            const qx = x + dx
+            if ((dx === 0 && dy === 0) || qx < 0 || qx >= width) continue
+            const q = qy * width + qx
+            if (alpha[q] < 0.999) continue
+            const v = src[q * 3 + k]
+            sum += v
+            sumSq += v * v
+            count++
+          }
+        }
+        if (count < OUTLIER_MIN_NEIGHBOURS) continue
+        const mean = sum / count
+        const sd = Math.sqrt(Math.max(0, sumSq / count - mean * mean))
+        const limit = mean + OUTLIER_SIGMAS * sd + OUTLIER_SLACK * mean + SIGMA_FLOOR
+        if (out[p * 3 + k] > limit) out[p * 3 + k] = limit
+      }
+    }
+  }
+  return out
+}
 
 /**
  * Computes an interior surface mask in [0, 1] from local alpha coverage.
@@ -78,13 +130,14 @@ function computeInteriorMask(alpha, width, height) {
  */
 export function denoise(color, alpha, albedo, normal, width, height, passes = PASSES) {
   const n = width * height
-  let srcC = new Float32Array(n * 3)
+  const illumination = new Float32Array(n * 3)
   let srcA = Float32Array.from(alpha)
   for (let p = 0; p < n; p++) {
     for (let k = 0; k < 3; k++) {
-      srcC[p * 3 + k] = color[p * 3 + k] / (albedo[p * 3 + k] + DEMOD_EPSILON)
+      illumination[p * 3 + k] = color[p * 3 + k] / (albedo[p * 3 + k] + DEMOD_EPSILON)
     }
   }
+  let srcC = clampOutliers(illumination, alpha, width, height)
   let dstC = new Float32Array(srcC.length)
   let dstA = new Float32Array(srcA.length)
   for (let pass = 0; pass < passes; pass++) {
