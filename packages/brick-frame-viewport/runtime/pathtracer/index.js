@@ -224,7 +224,7 @@ export async function renderSnapshot(request, options = {}) {
         count,
       )
       const { color, alpha } = resolveSums(done, width, height, count, sums)
-      const denoised = budget <= 500 ? { color, alpha } : denoise(color, alpha, albedo, normal, width, height)
+      const denoised = options.skipDenoise === true ? { color, alpha } : denoise(color, alpha, albedo, normal, width, height)
       if (request.outlineEdges !== false) {
         rasterizeEdges(scene.edges, scene.camera, depthBuffer, width, height, denoised.color, {
           crop: request.crop,
@@ -253,7 +253,7 @@ export async function renderSnapshot(request, options = {}) {
         } else if (msg.type === 'progress') {
           latest[msg.index] = msg.samples
           emitProgress()
-          if (budget <= 500 && msg.samples >= 1) {
+          if (options.singleSample && msg.samples >= 1) {
             stopAll()
           }
         } else if (msg.type === 'done') {

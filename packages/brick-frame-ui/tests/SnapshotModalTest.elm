@@ -421,11 +421,11 @@ suite =
                         , \m -> SnapshotModal.effectiveFilename m |> Expect.equal "test.webp"
                         , \_ -> Expect.equal 1280 dims.width
                         , \_ -> Expect.equal 720 dims.height
-                        , \_ -> Expect.equal (Just { fps = 30, durationSeconds = 6.0 }) anim
+                        , \_ -> Expect.equal (Just { fps = 30, durationSeconds = 6.0, speedMultiplier = 0.5 }) anim
                         , \m -> SnapshotModal.isFraming m |> Expect.equal True
                         ]
                         modal
-            , test "viewFramingWithLanguage in animation mode displays animation resolution, fps, and duration pills" <|
+            , test "viewFramingWithLanguage in animation mode displays animation resolution, fps, duration, and speed pills" <|
                 \_ ->
                     SnapshotModal.initFraming { filename = "frame.png", previewUrl = Nothing }
                         |> SnapshotModal.setMode SnapshotModal.ModeAnimation
@@ -438,11 +438,14 @@ suite =
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-res-480p") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-res-360p") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-10") ] q
-                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-15") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-15") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-30") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-2s") ] q
-                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-4s") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-4s") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-6s") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-1x") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-half") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-quarter") ] q
                             , \q -> Query.hasNot [ Selector.text "Free" ] q
                             , \q -> Query.hasNot [ Selector.text "16:9" ] q
                             , \q -> Query.hasNot [ Selector.text "4:3" ] q

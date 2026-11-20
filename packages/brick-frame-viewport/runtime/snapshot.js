@@ -249,7 +249,7 @@ async function startAnimationPathTrace(ports, request) {
   const frameDurationMs = Math.max(10, Math.round(1000 / fps))
 
   const totalBudgetMs = request.timeBudgetMs || 20000
-  const frameBudgetMs = Math.max(50, Math.floor(totalBudgetMs / totalFrames))
+  const frameBudgetMs = Math.max(100, Math.floor(totalBudgetMs / totalFrames))
 
   const baseFilename = request.filename || 'palikkakehys-render.webp'
   const filename = baseFilename.replace(/\.png$/i, '.webp')

@@ -3,6 +3,7 @@ module UI.SnapshotModal exposing
     , AnimDuration(..)
     , AnimFps(..)
     , AnimResolution(..)
+    , AnimSpeed(..)
     , AspectPreset(..)
     , CropRect
     , DragState(..)
@@ -22,12 +23,14 @@ module UI.SnapshotModal exposing
     , animDimensions
     , animFpsValue
     , animSecondsValue
+    , animSpeedMultiplier
     , defaultCrop
     , effectiveDimensions
     , effectiveFilename
     , getAnimDuration
     , getAnimFps
     , getAnimResolution
+    , getAnimSpeed
     , getAnimation
     , getCrop
     , getMode
@@ -45,6 +48,7 @@ module UI.SnapshotModal exposing
     , setAnimDuration
     , setAnimFps
     , setAnimResolution
+    , setAnimSpeed
     , setAspect
     , setCrop
     , setFailed
@@ -188,6 +192,7 @@ type AnimResolution
 -}
 type AnimFps
     = Fps10
+    | Fps15
     | Fps30
 
 
@@ -195,7 +200,31 @@ type AnimFps
 -}
 type AnimDuration
     = Dur2s
+    | Dur4s
     | Dur6s
+
+
+{-| Animation speed / smoothness presets.
+-}
+type AnimSpeed
+    = Speed1x
+    | SpeedHalf
+    | SpeedQuarter
+
+
+{-| Convert speed preset to speed multiplier.
+-}
+animSpeedMultiplier : AnimSpeed -> Float
+animSpeedMultiplier speed =
+    case speed of
+        Speed1x ->
+            1.0
+
+        SpeedHalf ->
+            0.5
+
+        SpeedQuarter ->
+            0.25
 
 
 {-| Convert FPS preset to integer value.
@@ -205,6 +234,9 @@ animFpsValue fps =
     case fps of
         Fps10 ->
             10
+
+        Fps15 ->
+            15
 
         Fps30 ->
             30
@@ -217,6 +249,9 @@ animSecondsValue dur =
     case dur of
         Dur2s ->
             2.0
+
+        Dur4s ->
+            4.0
 
         Dur6s ->
             6.0
@@ -313,6 +348,7 @@ type InteractionMsg
     | SelectAnimResolution AnimResolution
     | SelectAnimFps AnimFps
     | SelectAnimDuration AnimDuration
+    | SelectAnimSpeed AnimSpeed
 
 
 {-| Snapshot modal state.
@@ -328,6 +364,7 @@ type alias Model =
     , animRes : AnimResolution
     , animFps : AnimFps
     , animDuration : AnimDuration
+    , animSpeed : AnimSpeed
     , phase : Phase
     , progress : Progress
     , gesture : Maybe GestureState
@@ -368,8 +405,9 @@ init config =
     , quality = QualityStandard
     , mode = ModeStill
     , animRes = Res480p
-    , animFps = Fps10
-    , animDuration = Dur2s
+    , animFps = Fps15
+    , animDuration = Dur4s
+    , animSpeed = SpeedHalf
     , phase = Rendering
     , progress = { fraction = 0, samples = 0 }
     , gesture = Nothing
@@ -388,8 +426,9 @@ initFraming config =
     , quality = QualityStandard
     , mode = ModeStill
     , animRes = Res480p
-    , animFps = Fps10
-    , animDuration = Dur2s
+    , animFps = Fps15
+    , animDuration = Dur4s
+    , animSpeed = SpeedHalf
     , phase =
         Framing
             { previewUrl = config.previewUrl
@@ -939,6 +978,37 @@ setAnimDuration dur model =
             updated
 
 
+{-| Get the active animation speed / smoothness preset.
+-}
+getAnimSpeed : Model -> AnimSpeed
+getAnimSpeed model =
+    model.animSpeed
+
+
+{-| Set the active animation speed / smoothness preset.
+-}
+setAnimSpeed : AnimSpeed -> Model -> Model
+setAnimSpeed speed model =
+    let
+        updated =
+            { model | animSpeed = speed }
+    in
+    case model.phase of
+        Preview _ ->
+            { updated
+                | phase =
+                    Framing
+                        { previewUrl = model.previewUrl
+                        , crop = model.crop
+                        , aspect = model.aspect
+                        }
+                , gesture = Nothing
+            }
+
+        _ ->
+            updated
+
+
 {-| Effective rendering dimensions and time budget based on current mode and settings.
 -}
 effectiveDimensions : Model -> { width : Int, height : Int, timeBudgetMs : Int }
@@ -956,7 +1026,7 @@ effectiveDimensions model =
                     round (animSecondsValue model.animDuration * toFloat (animFpsValue model.animFps))
 
                 budget =
-                    clamp 6000 35000 (totalFrames * 250)
+                    clamp 6000 60000 (totalFrames * 250)
             in
             { width = dims.width
             , height = dims.height
@@ -966,7 +1036,7 @@ effectiveDimensions model =
 
 {-| Get optional animation parameters for the render request.
 -}
-getAnimation : Model -> Maybe { fps : Int, durationSeconds : Float }
+getAnimation : Model -> Maybe { fps : Int, durationSeconds : Float, speedMultiplier : Float }
 getAnimation model =
     case model.mode of
         ModeStill ->
@@ -976,6 +1046,7 @@ getAnimation model =
             Just
                 { fps = animFpsValue model.animFps
                 , durationSeconds = animSecondsValue model.animDuration
+                , speedMultiplier = animSpeedMultiplier model.animSpeed
                 }
 
 
@@ -1030,6 +1101,9 @@ handleInteraction msg model =
                 SelectAnimDuration dur ->
                     setAnimDuration dur model
 
+                SelectAnimSpeed speed ->
+                    setAnimSpeed speed model
+
                 _ ->
                     model
 
@@ -1052,6 +1126,9 @@ handleInteraction msg model =
 
                 SelectAnimDuration dur ->
                     setAnimDuration dur model
+
+                SelectAnimSpeed speed ->
+                    setAnimSpeed speed model
 
                 Wheel deltaY pointer ->
                     if model.mode == ModeAnimation then
@@ -1407,6 +1484,9 @@ handleInteraction msg model =
 
                 SelectAnimDuration dur ->
                     setAnimDuration dur model
+
+                SelectAnimSpeed speed ->
+                    setAnimSpeed speed model
 
                 _ ->
                     model
@@ -1978,6 +2058,9 @@ viewToolbar lang actions model =
 
         activeDur =
             model.animDuration
+
+        activeSpeed =
+            model.animSpeed
     in
     div
         [ Attr.style "display" "flex"
@@ -2026,15 +2109,23 @@ viewToolbar lang actions model =
 
                             -- 3. FPS
                             , optionPill "anim-fps-10" (actions.onInteraction (SelectAnimFps Fps10)) (I18n.snapshotAnimFps10 lang) (activeFps == Fps10)
+                            , optionPill "anim-fps-15" (actions.onInteraction (SelectAnimFps Fps15)) (I18n.snapshotAnimFps15 lang) (activeFps == Fps15)
                             , optionPill "anim-fps-30" (actions.onInteraction (SelectAnimFps Fps30)) (I18n.snapshotAnimFps30 lang) (activeFps == Fps30)
                             , toolbarDivider
 
                             -- 4. Duration
                             , optionPill "anim-dur-2s" (actions.onInteraction (SelectAnimDuration Dur2s)) (I18n.snapshotAnimDur2s lang) (activeDur == Dur2s)
+                            , optionPill "anim-dur-4s" (actions.onInteraction (SelectAnimDuration Dur4s)) (I18n.snapshotAnimDur4s lang) (activeDur == Dur4s)
                             , optionPill "anim-dur-6s" (actions.onInteraction (SelectAnimDuration Dur6s)) (I18n.snapshotAnimDur6s lang) (activeDur == Dur6s)
                             , toolbarDivider
 
-                            -- 5. Shader presets
+                            -- 5. Speed / Smoothness
+                            , optionPill "anim-speed-1x" (actions.onInteraction (SelectAnimSpeed Speed1x)) (I18n.snapshotAnimSpeed1x lang) (activeSpeed == Speed1x)
+                            , optionPill "anim-speed-half" (actions.onInteraction (SelectAnimSpeed SpeedHalf)) (I18n.snapshotAnimSpeedHalf lang) (activeSpeed == SpeedHalf)
+                            , optionPill "anim-speed-quarter" (actions.onInteraction (SelectAnimSpeed SpeedQuarter)) (I18n.snapshotAnimSpeedQuarter lang) (activeSpeed == SpeedQuarter)
+                            , toolbarDivider
+
+                            -- 6. Shader presets
                             , optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
                             , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
                             ]

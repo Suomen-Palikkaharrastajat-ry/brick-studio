@@ -226,6 +226,9 @@ module I18n exposing
     , snapshotAnimRes360p
     , snapshotAnimRes480p
     , snapshotAnimRes720p
+    , snapshotAnimSpeed1x
+    , snapshotAnimSpeedHalf
+    , snapshotAnimSpeedQuarter
     , snapshotAspect16_9
     , snapshotAspect1_1
     , snapshotAspect4_3
@@ -3549,6 +3552,21 @@ snapshotAnimDur4s _ =
 snapshotAnimDur6s : Language -> String
 snapshotAnimDur6s _ =
     "6 s"
+
+
+snapshotAnimSpeed1x : Language -> String
+snapshotAnimSpeed1x _ =
+    "1×"
+
+
+snapshotAnimSpeedHalf : Language -> String
+snapshotAnimSpeedHalf _ =
+    "½×"
+
+
+snapshotAnimSpeedQuarter : Language -> String
+snapshotAnimSpeedQuarter _ =
+    "¼×"
 
 
 snapshotFormatWebp : Language -> String
