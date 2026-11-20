@@ -177,8 +177,8 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
   const nearPlane = options.nearPlane ?? 0.1
   const lineWidth = options.lineWidth ?? 1.5
   const edgeColor = options.edgeColor ?? [0.02, 0.02, 0.02]
-  const depthBias = options.depthBias ?? 0.35
-  const depthBiasFactor = options.depthBiasFactor ?? 1.012
+  const depthBias = options.depthBias ?? 0.12
+  const depthBiasFactor = options.depthBiasFactor ?? 1.002
   const crop = options.crop
 
   const radius = lineWidth * 0.5
@@ -264,17 +264,11 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
             sz - camera.origin[2],
           )
           const sceneDepth = depthBuffer[pixelIdx]
+          if (strokeDist > sceneDepth * depthBiasFactor + depthBias) {
+            continue
+          }
           if (options.physicalBevel) {
-            if (!Number.isFinite(sceneDepth)) {
-              continue
-            }
-            const maxAllowedDepth = strokeDist * (depthBiasFactor + 0.01) + depthBias + 1.2
-            const minAllowedDepth = strokeDist / (depthBiasFactor + 0.008) - (depthBias + 0.4)
-            if (sceneDepth < minAllowedDepth || sceneDepth > maxAllowedDepth) {
-              continue
-            }
-          } else {
-            if (strokeDist > sceneDepth * depthBiasFactor + depthBias) {
+            if (sceneDepth - strokeDist > 1.2 + depthBias) {
               continue
             }
           }
@@ -315,18 +309,12 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
             }
 
             const nh = Math.max(0, bn[0] * hNormX + bn[1] * hNormY + bn[2] * hNormZ)
-            let seamAo = 0.26
-            let specGlint = Math.pow(nh, 6) * 0.06
+            let seamAo = 0.28
+            let specGlint = Math.pow(nh, 8) * 0.12
 
-            if (options.shader !== 'matte') {
-              const sx = p0[0] + t * (p1[0] - p0[0])
-              const sy = p0[1] + t * (p1[1] - p0[1])
-              const sz = p0[2] + t * (p1[2] - p0[2])
-              let n = (Math.floor(sx * 2.5) * 374761393 + Math.floor(sy * 2.5) * 668265263 + Math.floor(sz * 2.5) * 1274126177) | 0
-              n = Math.imul(n ^ (n >>> 13), 1274126177)
-              const edgeNoise = 0.85 + 0.3 * (((n ^ (n >>> 16)) >>> 0) / 4294967296)
-              seamAo = 0.30 * edgeNoise
-              specGlint = Math.pow(nh, 6) * 0.08 * edgeNoise
+            if (options.shader === 'matte') {
+              seamAo = 0.24
+              specGlint = Math.pow(nh, 4) * 0.04
             }
 
             // 1. Proportional Seam Ambient Occlusion: Darken existing color proportionally

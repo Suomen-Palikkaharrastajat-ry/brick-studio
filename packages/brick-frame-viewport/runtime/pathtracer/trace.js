@@ -300,10 +300,10 @@ function valueNoise3d(x, y, z) {
 }
 
 /**
- * Deterministic, continuous 3D procedural wear & micro-scratch surface texture.
+ * Procedural injection-mold micro-grain for matte plastic preset.
  */
-export function applySurfaceTexture(shader = 'used', pos, normal, albedo) {
-  if (shader === 'glossy') return
+export function applySurfaceTexture(shader = 'glossy', pos, normal, albedo) {
+  if (shader !== 'matte') return
 
   const nx = normal[0]
   const ny = normal[1]
@@ -326,40 +326,12 @@ export function applySurfaceTexture(shader = 'used', pos, normal, albedo) {
   const py = pos[1]
   const pz = pos[2]
 
-  // Base matte micro-grain for both 'matte' and 'used'
   const grainX = (valueNoise3d(px * 1.6 + 13.1, py * 1.6 + 7.3, pz * 1.6 + 3.7) - 0.5) * 0.015
   const grainY = (valueNoise3d(px * 1.6 + 31.7, py * 1.6 + 19.3, pz * 1.6 + 11.5) - 0.5) * 0.015
 
-  let dT = grainX
-  let dB = grainY
-
-  if (shader !== 'matte') {
-    // Layer used wear and micro-scratches on top of matte base
-    const patch = valueNoise3d(px * 0.08, py * 0.08, pz * 0.08)
-    const wear = Math.max(0, Math.min(1, (patch - 0.35) / 0.4))
-
-    const q1 = (px * 0.8 + py * 0.5 - pz * 0.3) * 2.8
-    const q2 = (-px * 0.4 + py * 0.7 + pz * 0.6) * 4.2
-    const n1 = 1 - 2 * Math.abs(valueNoise3d(q1, q1 * 0.2 + py, q1 * 0.1 + pz) - 0.5)
-    const n2 = 1 - 2 * Math.abs(valueNoise3d(q2 * 0.2 + px, q2, q2 * 0.3 + pz) - 0.5)
-    const s1 = Math.max(0, (n1 - 0.7) / 0.3)
-    const s2 = Math.max(0, (n2 - 0.7) / 0.3)
-    const scratchIntensity = wear * Math.max(s1 * s1, s2 * s2) * 0.038
-
-    dT += scratchIntensity * 0.86
-    dB += scratchIntensity * 0.5
-
-    if (albedo) {
-      const albFactor = 1.0 - 0.03 * wear + 0.02 * (patch - 0.5)
-      albedo[0] = Math.max(0, Math.min(1, albedo[0] * albFactor))
-      albedo[1] = Math.max(0, Math.min(1, albedo[1] * albFactor))
-      albedo[2] = Math.max(0, Math.min(1, albedo[2] * albFactor))
-    }
-  }
-
-  let pnx = nx + dT * tx + dB * bx
-  let pny = ny + dT * ty + dB * by
-  let pnz = nz + dT * tz + dB * bz
+  let pnx = nx + grainX * tx + grainY * bx
+  let pny = ny + grainX * ty + grainY * by
+  let pnz = nz + grainX * tz + grainY * bz
   const pnl = Math.hypot(pnx, pny, pnz) || 1
   normal[0] = pnx / pnl
   normal[1] = pny / pnl
@@ -586,12 +558,12 @@ export function captureGuide(scene, y, albedo, normal, depth) {
   for (let x = 0; x < scene.width; x++) {
     primaryRay(scene, x, y, 0.5, 0.5, ray)
     const hit = intersect(bvh, ray, hitScratch)
-    if (depth) {
-      depth[x] = hit ? hit.t : Infinity
-    }
-    const o = x * 3
     const hitGround = groundDistance(scene, ray)
     const tModel = hit ? hit.t : Infinity
+    if (depth) {
+      depth[x] = Math.min(tModel, hitGround)
+    }
+    const o = x * 3
     if (tModel === Infinity && hitGround === Infinity) {
       skyRadiance(ray.dy, skyRad)
       albedo[o] = skyRad[0]

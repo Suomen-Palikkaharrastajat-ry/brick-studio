@@ -112,7 +112,7 @@ type AspectPreset
 {-| Surface finish / shader preset for the path tracer.
 -}
 type ShaderPreset
-    = ShaderUsed
+    = ShaderGlossy
     | ShaderMatte
 
 
@@ -121,8 +121,8 @@ type ShaderPreset
 shaderToString : ShaderPreset -> String
 shaderToString preset =
     case preset of
-        ShaderUsed ->
-            "used"
+        ShaderGlossy ->
+            "glossy"
 
         ShaderMatte ->
             "matte"
@@ -148,7 +148,7 @@ qualityDimensions quality =
             { width = 1920, height = 1080, timeBudgetMs = 20000 }
 
         QualityHigh ->
-            { width = 2560, height = 1440, timeBudgetMs = 45000 }
+            { width = 2560, height = 1440, timeBudgetMs = 60000 }
 
 
 {-| State for the interactive pre-render framing phase.
@@ -270,7 +270,7 @@ init config =
     , previewUrl = Nothing
     , crop = defaultCrop
     , aspect = AspectFree
-    , shader = ShaderUsed
+    , shader = ShaderGlossy
     , quality = QualityStandard
     , phase = Rendering
     , progress = { fraction = 0, samples = 0 }
@@ -286,7 +286,7 @@ initFraming config =
     , previewUrl = config.previewUrl
     , crop = defaultCrop
     , aspect = AspectFree
-    , shader = ShaderUsed
+    , shader = ShaderGlossy
     , quality = QualityStandard
     , phase =
         Framing
@@ -1643,7 +1643,7 @@ viewToolbar lang actions model =
             , -- Subtle divider
               toolbarDivider
               -- 2. Shader / surface presets
-            , optionPill "shader-preset-used" (actions.onInteraction (SelectShader ShaderUsed)) (I18n.snapshotShaderUsed lang) (activeShader == ShaderUsed)
+            , optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
             , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
             , -- Subtle divider
               toolbarDivider

@@ -107,6 +107,17 @@ test('rasterization clips occluded edges and draws visible edges', () => {
     'occluded edge behind depth buffer must be clipped/hidden',
   )
 
+  // Occluded edge slightly behind the surface (e.g. stud edge inside solid brick: depth 50.8 vs front face 50.0) with physicalBevel
+  const studEdge = [{ p0: [-10, 0, -0.8], p1: [10, 0, -0.8] }]
+  const colorBufferStud = new Float32Array(width * height * 3).fill(1.0)
+  rasterizeEdges(studEdge, camera, depthBuffer, width, height, colorBufferStud, { physicalBevel: true })
+
+  assert.equal(
+    colorBufferStud[centerIdx],
+    1.0,
+    'stud edge behind front brick face must not show through solid brick',
+  )
+
   // Edge entirely behind the camera (e.g. z = 60, camera is at z = 50 looking at z = 0)
   const behindEdge = [{ p0: [-10, 0, 60], p1: [10, 0, 60] }]
   const colorBufferBehind = new Float32Array(width * height * 3).fill(1.0)

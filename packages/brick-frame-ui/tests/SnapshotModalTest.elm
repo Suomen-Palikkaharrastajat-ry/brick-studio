@@ -357,9 +357,9 @@ suite =
                             , \q -> Query.has [ Selector.tag "button", Selector.text "16:9" ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "4:3" ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "1:1" ] q
-                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-glossy") ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-used") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-glossy") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-matte") ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-used") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "quality-preset-fast") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "quality-preset-standard") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "quality-preset-high") ] q
@@ -394,7 +394,7 @@ suite =
                         [ \m -> SnapshotModal.getQuality m |> Expect.equal SnapshotModal.QualityHigh
                         , \_ -> Expect.equal 2560 dims.width
                         , \_ -> Expect.equal 1440 dims.height
-                        , \_ -> Expect.equal 45000 dims.timeBudgetMs
+                        , \_ -> Expect.equal 60000 dims.timeBudgetMs
                         ]
                         modal
             ]

@@ -3366,7 +3366,7 @@ snapshotShaderMatte : Language -> String
 snapshotShaderMatte lang =
     case lang of
         Fi ->
-            "Matta"
+            "Himmeä"
 
         En ->
             "Matte"
