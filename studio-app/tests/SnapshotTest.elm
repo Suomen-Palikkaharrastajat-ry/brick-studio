@@ -4,6 +4,7 @@ module SnapshotTest exposing (suite)
 -}
 
 import Expect
+import Json.Encode as Encode
 import Main exposing (Model, Msg(..), init, update)
 import Studio.Workspace as Workspace
 import Test exposing (Test, describe, test)
@@ -90,7 +91,7 @@ suite =
                         init flags
 
                     ( progressed, _ ) =
-                        update (SnapshotProgress { fraction = 0.5, samples = 12 }) (withSnapshot model)
+                        update (SnapshotProgress (Encode.object [ ( "fraction", Encode.float 0.5 ), ( "samples", Encode.int 12 ) ])) (withSnapshot model)
 
                     ( failed, _ ) =
                         update (SnapshotFailed "Tracer ran out of memory") progressed
