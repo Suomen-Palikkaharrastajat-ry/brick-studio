@@ -143,6 +143,7 @@ export async function renderSnapshot(request, options = {}) {
   let width = Math.round(request.width)
   let height = Math.round(request.height)
   if (!(width > 0 && height > 0)) throw new Error('Render size must be positive')
+  const baseAspect = width / height
   if (request.crop) {
     const cw = Math.max(0.01, Math.min(1, request.crop.width || 1))
     const ch = Math.max(0.01, Math.min(1, request.crop.height || 1))
@@ -153,18 +154,20 @@ export async function renderSnapshot(request, options = {}) {
     height = Math.max(64, Math.round(rawH * scale))
   }
   const triangles = Float32Array.from(source)
-  const budget = clampBudget(request.timeBudgetMs, options.minBudgetMs)
+  const effectiveMinBudget = options.minBudgetMs ?? (request.timeBudgetMs > 0 && request.timeBudgetMs <= 1000 ? 30 : MIN_BUDGET_MS)
+  const budget = clampBudget(request.timeBudgetMs, effectiveMinBudget)
   const count = Math.min(height, options.workerCount ?? workerCountFor(globalThis.navigator?.hardwareConcurrency))
   const shared = {
     width,
     height,
+    baseAspect,
     transparent: Boolean(request.transparent),
     camera: request.camera,
     lightDirection: request.lightDirection,
     crop: request.crop,
     outlineEdges: Boolean(request.outlineEdges),
   }
-  const camera = makeCamera(request.camera, width, height)
+  const camera = makeCamera(request.camera, width, height, baseAspect)
   const edges = extractSharpEdges(triangles)
   const scene = { camera, edges }
 
@@ -217,9 +220,14 @@ export async function renderSnapshot(request, options = {}) {
         count,
       )
       const { color, alpha } = resolveSums(done, width, height, count, sums)
-      const denoised = denoise(color, alpha, albedo, normal, width, height)
-      if (request.outlineEdges) {
-        rasterizeEdges(scene.edges, scene.camera, depthBuffer, width, height, denoised.color, { crop: request.crop })
+      const denoised = budget <= 500 ? { color, alpha } : denoise(color, alpha, albedo, normal, width, height)
+      if (request.outlineEdges !== false) {
+        rasterizeEdges(scene.edges, scene.camera, depthBuffer, width, height, denoised.color, {
+          crop: request.crop,
+          physicalBevel: true,
+          keyDir: [-0.35, 0.85, 0.38],
+          lineWidth: 0.95,
+        })
       }
       const rgba = toRgba8(denoised.color, denoised.alpha, width, height)
       const dataUrl = await encode(rgba, width, height)
@@ -240,6 +248,10 @@ export async function renderSnapshot(request, options = {}) {
           guides[msg.index] = { albedo: msg.albedo, normal: msg.normal, depth: msg.depth }
         } else if (msg.type === 'progress') {
           latest[msg.index] = msg.samples
+          emitProgress()
+          if (budget <= 500 && msg.samples >= 1) {
+            stopAll()
+          }
         } else if (msg.type === 'done') {
           results[msg.index] = { index: msg.index, sums: msg.sums, counts: msg.counts }
           remaining--

@@ -56,8 +56,8 @@ const BAND_WIDTH = 0.3
  * `irradiance` over the solid angle, so a small, bright box adds little light.
  */
 const SOFTBOXES = [
-  { h: 0.9, r: -0.5, u: 1, hint: 'right', ha: 0.5, hb: 0.3, irradiance: 0.35, plasticScale: 0.08 },
-  { h: -1, r: 0, u: 0.36, hint: 'up', ha: 0.4, hb: 0.08, irradiance: 0.25, plasticScale: 0 },
+  { h: 0.9, r: -0.5, u: 1, hint: 'right', ha: 0.5, hb: 0.3, irradiance: 0.35, plasticScale: 0.18 },
+  { h: -1, r: 0, u: 0.36, hint: 'up', ha: 0.4, hb: 0.08, irradiance: 0.25, plasticScale: 0.12 },
 ]
 /** Default attenuation of softbox emitters on dielectric plastic/rubber to prevent washout while keeping full chrome reflections. */
 const SOFTBOX_PLASTIC_SCALE = 0.08
@@ -101,7 +101,7 @@ function vec3(value, name) {
  * direction, `right` and `up` are orthonormal with it. `tanHalfY` is
  * tan(fovY/2), and `aspect` is width/height of the output image.
  */
-export function makeCamera(contract, width, height) {
+export function makeCamera(contract, width, height, baseAspect) {
   const origin = vec3(contract.position, 'position')
   const target = vec3(contract.target, 'target')
   const upHint = vec3(contract.up, 'up')
@@ -117,6 +117,9 @@ export function makeCamera(contract, width, height) {
     : contract.dof
       ? 0.45
       : 0
+  const aspect = Number(baseAspect) > 0
+    ? Number(baseAspect)
+    : (Number(contract.aspect) > 0 ? Number(contract.aspect) : width / height)
   return {
     origin,
     target,
@@ -124,7 +127,7 @@ export function makeCamera(contract, width, height) {
     right,
     up,
     tanHalfY: Math.tan((fov * Math.PI) / 360) / zoom,
-    aspect: width / height,
+    aspect,
     focalDistance,
     apertureRadius,
   }
@@ -404,96 +407,6 @@ function computeVertexNormals(triangles, bvh) {
 }
 
 /**
- * Computes sharp feature edges and adjacent face normals per triangle slot
- * for procedural bevel normal rounding at brick rims and tolerance seams.
- */
-function computeBevelData(triangles, bvh) {
-  const count = bvh.count
-  const bevelData = new Float32Array(count * 12)
-  const faceNormals = new Float32Array(count * 3)
-
-  for (let slot = 0; slot < count; slot++) {
-    const o = slot * 9
-    const tris = bvh.tris
-    const e1x = tris[o + 3]
-    const e1y = tris[o + 4]
-    const e1z = tris[o + 5]
-    const e2x = tris[o + 6]
-    const e2y = tris[o + 7]
-    const e2z = tris[o + 8]
-    let nx = e1y * e2z - e1z * e2y
-    let ny = e1z * e2x - e1x * e2z
-    let nz = e1x * e2y - e1y * e2x
-    const nl = Math.hypot(nx, ny, nz) || 1
-    faceNormals[slot * 3] = nx / nl
-    faceNormals[slot * 3 + 1] = ny / nl
-    faceNormals[slot * 3 + 2] = nz / nl
-  }
-
-  const edgeMap = new Map()
-  for (let slot = 0; slot < count; slot++) {
-    const base = bvh.prims[slot] * STRIDE
-    const fnx = faceNormals[slot * 3]
-    const fny = faceNormals[slot * 3 + 1]
-    const fnz = faceNormals[slot * 3 + 2]
-    const normal = [fnx, fny, fnz]
-
-    const k0 = quantizeVertex(triangles[base], triangles[base + 1], triangles[base + 2])
-    const k1 = quantizeVertex(triangles[base + 3], triangles[base + 4], triangles[base + 5])
-    const k2 = quantizeVertex(triangles[base + 6], triangles[base + 7], triangles[base + 8])
-
-    const edges = [
-      { key: k0 < k1 ? `${k0}|${k1}` : `${k1}|${k0}`, edgeIndex: 0 },
-      { key: k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`, edgeIndex: 1 },
-      { key: k2 < k0 ? `${k2}|${k0}` : `${k0}|${k2}`, edgeIndex: 2 },
-    ]
-
-    for (const e of edges) {
-      let list = edgeMap.get(e.key)
-      if (!list) {
-        list = []
-        edgeMap.set(e.key, list)
-      }
-      list.push({ slot, edgeIndex: e.edgeIndex, normal })
-    }
-  }
-
-  for (const entries of edgeMap.values()) {
-    if (entries.length === 1) {
-      const { slot, edgeIndex, normal } = entries[0]
-      const bo = slot * 12 + edgeIndex * 4
-      bevelData[bo] = 1.0
-      bevelData[bo + 1] = normal[0]
-      bevelData[bo + 2] = normal[1]
-      bevelData[bo + 3] = normal[2]
-    } else {
-      for (let i = 0; i < entries.length; i++) {
-        for (let j = i + 1; j < entries.length; j++) {
-          const a = entries[i]
-          const b = entries[j]
-          const dot = a.normal[0] * b.normal[0] + a.normal[1] * b.normal[1] + a.normal[2] * b.normal[2]
-          if (dot < SMOOTH_COS) {
-            const boA = a.slot * 12 + a.edgeIndex * 4
-            bevelData[boA] = 1.0
-            bevelData[boA + 1] = b.normal[0]
-            bevelData[boA + 2] = b.normal[1]
-            bevelData[boA + 3] = b.normal[2]
-
-            const boB = b.slot * 12 + b.edgeIndex * 4
-            bevelData[boB] = 1.0
-            bevelData[boB + 1] = a.normal[0]
-            bevelData[boB + 2] = a.normal[1]
-            bevelData[boB + 3] = a.normal[2]
-          }
-        }
-      }
-    }
-  }
-
-  return bevelData
-}
-
-/**
  * Turns a contract request into everything the integrator reads. Throws if
  * there are no triangles. Triangle colours are converted to linear here. Per-triangle data is indexed by BVH slot, so a
  * hit's `slot` addresses `albedo` (3 floats) and `material` directly.
@@ -523,11 +436,10 @@ export function prepareScene(request) {
     material[slot] = Number.isFinite(code) && code >= 0 && code <= MATERIAL.PEARL ? code : MATERIAL.PLASTIC
   }
 
-  const camera = makeCamera(request.camera, width, height)
+  const camera = makeCamera(request.camera, width, height, request.baseAspect)
   const customLightDir = request.lightDirection ?? request.camera?.lightDirection
   const edges = extractSharpEdges(triangles)
   const vertexNormals = computeVertexNormals(triangles, bvh)
-  const bevelEdges = computeBevelData(triangles, bvh)
   return {
     width,
     height,
@@ -540,7 +452,6 @@ export function prepareScene(request) {
     albedo,
     material,
     vertexNormals,
-    bevelEdges,
     edges,
     groundY: minY - GROUND_OFFSET,
     skyIrradiance: ENV_IRRADIANCE,

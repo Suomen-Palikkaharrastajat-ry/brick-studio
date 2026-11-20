@@ -37,10 +37,9 @@ module UI.SnapshotModal exposing
 {-| Full-screen modal for framing, capturing, previewing, and saving a snapshot of
 the canvas as a PNG.
 
-The modal provides an interactive framing phase where the user can crop the scene
-or select an aspect ratio (Free, 16:9, 4:3, 1:1) before path tracing. During
-rendering, it displays a progress bar and sample count. Once ready, the preview
-allows saving the PNG or reframing.
+The modal provides a single unified dialog where the aspect ratio toolbar, the 16:9
+interactive stage, and action controls stay permanently in place across framing,
+rendering, and preview phases.
 
 -}
 
@@ -179,6 +178,8 @@ type InteractionMsg
 type alias Model =
     { filename : String
     , previewUrl : Maybe String
+    , crop : CropRect
+    , aspect : AspectPreset
     , phase : Phase
     , progress : Progress
     , gesture : Maybe GestureState
@@ -213,6 +214,8 @@ init : { filename : String } -> Model
 init config =
     { filename = config.filename
     , previewUrl = Nothing
+    , crop = defaultCrop
+    , aspect = AspectFree
     , phase = Rendering
     , progress = { fraction = 0, samples = 0 }
     , gesture = Nothing
@@ -225,6 +228,8 @@ initFraming : { filename : String, previewUrl : Maybe String } -> Model
 initFraming config =
     { filename = config.filename
     , previewUrl = config.previewUrl
+    , crop = defaultCrop
+    , aspect = AspectFree
     , phase =
         Framing
             { previewUrl = config.previewUrl
@@ -271,30 +276,32 @@ startRendering model =
 -}
 reframe : Model -> Model
 reframe model =
-    case model.phase of
-        Preview data ->
-            let
-                pUrl =
-                    case model.previewUrl of
-                        Just u ->
-                            Just u
+    let
+        pUrl =
+            case model.previewUrl of
+                Just u ->
+                    Just u
 
-                        Nothing ->
+                Nothing ->
+                    case model.phase of
+                        Preview data ->
                             Just data.dataUrl
-            in
-            { model
-                | previewUrl = pUrl
-                , phase =
-                    Framing
-                        { previewUrl = pUrl
-                        , crop = defaultCrop
-                        , aspect = AspectFree
-                        }
-                , gesture = Nothing
-            }
 
-        _ ->
-            model
+                        _ ->
+                            Nothing
+    in
+    { model
+        | previewUrl = pUrl
+        , phase =
+            Framing
+                { previewUrl = pUrl
+                , crop = defaultCrop
+                , aspect = AspectFree
+                }
+        , crop = defaultCrop
+        , aspect = AspectFree
+        , gesture = Nothing
+    }
 
 
 {-| Get the current crop bounds.
@@ -306,43 +313,55 @@ getCrop model =
             data.crop
 
         _ ->
-            defaultCrop
+            model.crop
 
 
 {-| Set the crop bounds, clamping within [0, 1].
 -}
 setCrop : CropRect -> Model -> Model
 setCrop crop model =
+    let
+        clampedX =
+            clamp 0.0 0.92 crop.x
+
+        clampedY =
+            clamp 0.0 0.92 crop.y
+
+        clampedW =
+            clamp 0.08 (1.0 - clampedX) crop.width
+
+        clampedH =
+            clamp 0.08 (1.0 - clampedY) crop.height
+
+        clamped =
+            { x = clampedX
+            , y = clampedY
+            , width = clampedW
+            , height = clampedH
+            }
+    in
     case model.phase of
         Framing data ->
-            let
-                clampedX =
-                    clamp 0.0 0.92 crop.x
-
-                clampedY =
-                    clamp 0.0 0.92 crop.y
-
-                clampedW =
-                    clamp 0.08 (1.0 - clampedX) crop.width
-
-                clampedH =
-                    clamp 0.08 (1.0 - clampedY) crop.height
-            in
             { model
-                | phase =
+                | crop = clamped
+                , phase = Framing { data | crop = clamped }
+            }
+
+        Preview _ ->
+            { model
+                | crop = clamped
+                , aspect = AspectFree
+                , phase =
                     Framing
-                        { data
-                            | crop =
-                                { x = clampedX
-                                , y = clampedY
-                                , width = clampedW
-                                , height = clampedH
-                                }
+                        { previewUrl = model.previewUrl
+                        , crop = clamped
+                        , aspect = AspectFree
                         }
+                , gesture = Nothing
             }
 
         _ ->
-            model
+            { model | crop = clamped }
 
 
 {-| Aspect ratio width-to-height ratio in normalized coordinates on a 16:9 canvas.
@@ -375,7 +394,6 @@ cropForAspect aspect current =
             defaultCrop
 
         Aspect4_3 ->
-            -- In a 16:9 canvas, 4:3 width ratio = (4/3) / (16/9) = 0.75
             let
                 w =
                     0.75
@@ -389,7 +407,6 @@ cropForAspect aspect current =
             { x = x, y = 0.0, width = w, height = h }
 
         Aspect1_1 ->
-            -- In a 16:9 canvas, 1:1 width ratio = 1.0 / (16/9) = 0.5625
             let
                 w =
                     9.0 / 16.0
@@ -414,7 +431,9 @@ setAspect aspect model =
                     cropForAspect aspect data.crop
             in
             { model
-                | phase =
+                | crop = newCrop
+                , aspect = aspect
+                , phase =
                     Framing
                         { data
                             | aspect = aspect
@@ -422,8 +441,25 @@ setAspect aspect model =
                         }
             }
 
+        Preview _ ->
+            let
+                newCrop =
+                    cropForAspect aspect defaultCrop
+            in
+            { model
+                | crop = newCrop
+                , aspect = aspect
+                , phase =
+                    Framing
+                        { previewUrl = model.previewUrl
+                        , aspect = aspect
+                        , crop = newCrop
+                        }
+                , gesture = Nothing
+            }
+
         _ ->
-            model
+            { model | aspect = aspect }
 
 
 {-| Reset crop to the full viewport frame.
@@ -433,7 +469,9 @@ resetCrop model =
     case model.phase of
         Framing data ->
             { model
-                | phase =
+                | crop = defaultCrop
+                , aspect = AspectFree
+                , phase =
                     Framing
                         { data
                             | crop = defaultCrop
@@ -441,8 +479,21 @@ resetCrop model =
                         }
             }
 
+        Preview _ ->
+            { model
+                | crop = defaultCrop
+                , aspect = AspectFree
+                , phase =
+                    Framing
+                        { previewUrl = model.previewUrl
+                        , crop = defaultCrop
+                        , aspect = AspectFree
+                        }
+                , gesture = Nothing
+            }
+
         _ ->
-            model
+            { model | crop = defaultCrop, aspect = AspectFree }
 
 
 {-| Record the path tracer's progress.
@@ -545,6 +596,41 @@ markSaved model =
 handleInteraction : InteractionMsg -> Model -> Model
 handleInteraction msg model =
     case model.phase of
+        Preview _ ->
+            case msg of
+                PointerDown _ _ ->
+                    let
+                        framingModel =
+                            { model
+                                | phase =
+                                    Framing
+                                        { previewUrl = model.previewUrl
+                                        , crop = model.crop
+                                        , aspect = model.aspect
+                                        }
+                                , gesture = Nothing
+                            }
+                    in
+                    handleInteraction msg framingModel
+
+                Wheel _ _ ->
+                    let
+                        framingModel =
+                            { model
+                                | phase =
+                                    Framing
+                                        { previewUrl = model.previewUrl
+                                        , crop = model.crop
+                                        , aspect = model.aspect
+                                        }
+                                , gesture = Nothing
+                            }
+                    in
+                    handleInteraction msg framingModel
+
+                _ ->
+                    model
+
         Framing data ->
             case msg of
                 Wheel deltaY pointer ->
@@ -591,13 +677,15 @@ handleInteraction msg model =
                         newCrop =
                             { x = newX, y = newY, width = targetW, height = targetH }
                     in
-                    { model | phase = Framing { data | crop = newCrop } }
+                    { model
+                        | crop = newCrop
+                        , phase = Framing { data | crop = newCrop }
+                    }
 
                 PointerDown pointerId point ->
                     case model.gesture of
                         Just (SinglePointer id1 _) ->
                             if pointerId /= id1 then
-                                -- Second touch down: start two-pointer pinch/pan
                                 let
                                     p1 =
                                         pointFromCrop data.crop point
@@ -658,14 +746,20 @@ handleInteraction msg model =
                                             newCrop =
                                                 { initCrop | x = newX, y = newY }
                                         in
-                                        { model | phase = Framing { data | crop = newCrop } }
+                                        { model
+                                            | crop = newCrop
+                                            , phase = Framing { data | crop = newCrop }
+                                        }
 
                                     HandleDrag handle _ initCrop ->
                                         let
                                             newCrop =
                                                 resizeCrop handle data.aspect initCrop point
                                         in
-                                        { model | phase = Framing { data | crop = newCrop } }
+                                        { model
+                                            | crop = newCrop
+                                            , phase = Framing { data | crop = newCrop }
+                                        }
 
                                     DrawDrag startPoint ->
                                         let
@@ -722,7 +816,10 @@ handleInteraction msg model =
                                                             , height = clamp 0.08 (1.0 - minY) finalH
                                                             }
                                             in
-                                            { model | phase = Framing { data | crop = newCrop } }
+                                            { model
+                                                | crop = newCrop
+                                                , phase = Framing { data | crop = newCrop }
+                                            }
 
                                         else
                                             model
@@ -802,7 +899,8 @@ handleInteraction msg model =
                                         TwoPointer { two | p1 = updatedP1, p2 = updatedP2 }
                                 in
                                 { model
-                                    | phase = Framing { data | crop = newCrop }
+                                    | crop = newCrop
+                                    , phase = Framing { data | crop = newCrop }
                                     , gesture = Just updatedTwo
                                 }
 
@@ -1353,199 +1451,337 @@ viewBody lang actions model =
         , Attr.style "overflow-y" "auto"
         , Attr.style "display" "flex"
         , Attr.style "flex-direction" "column"
-        , Attr.style "gap" "16px"
+        , Attr.style "gap" "14px"
         ]
-        (case model.phase of
-            Framing data ->
-                [ viewFraming lang actions data model.gesture ]
+        [ -- 1. Top Aspect Ratio & Reset Toolbar: ALWAYS present across all phases!
+          viewToolbar lang actions model
+        , -- 2. Unified 16:9 Interactive Stage: ALWAYS stays at the center across all phases!
+          viewStage lang actions model
+        , -- Details row for Preview
+          case model.phase of
+              Preview data ->
+                  viewPreviewDetails lang data
 
-            Rendering ->
-                [ viewRendering lang model.progress ]
+              _ ->
+                  text ""
+        , -- Failure message if Failed
+          case model.phase of
+              Failed message ->
+                  viewFailed message
 
-            Preview data ->
-                [ viewPreview lang data ]
-
-            Failed message ->
-                [ viewFailed message ]
-        )
+              _ ->
+                  text ""
+        ]
 
 
-viewFraming : Language -> FramingActions msg -> FramingData -> Maybe GestureState -> Html msg
-viewFraming lang actions data maybeGesture =
+viewToolbar : Language -> FramingActions msg -> Model -> Html msg
+viewToolbar lang actions model =
     let
-        cursorStyle =
-            case maybeGesture of
-                Just (SinglePointer _ (PanDrag _ _)) ->
-                    "move"
-
-                Just (SinglePointer _ (HandleDrag _ _ _)) ->
-                    "grabbing"
-
-                _ ->
-                    "crosshair"
+        activeAspect =
+            model.aspect
     in
     div
         [ Attr.style "display" "flex"
-        , Attr.style "flex-direction" "column"
-        , Attr.style "gap" "14px"
+        , Attr.style "align-items" "center"
+        , Attr.style "justify-content" "space-between"
+        , Attr.style "flex-wrap" "wrap"
+        , Attr.style "gap" "8px"
         ]
-        [ -- Toolbar for aspect ratio presets and reset button
-          div
+        [ div
             [ Attr.style "display" "flex"
             , Attr.style "align-items" "center"
-            , Attr.style "justify-content" "space-between"
-            , Attr.style "flex-wrap" "wrap"
-            , Attr.style "gap" "8px"
+            , Attr.style "gap" "6px"
             ]
-            [ div
-                [ Attr.style "display" "flex"
-                , Attr.style "align-items" "center"
-                , Attr.style "gap" "6px"
-                ]
-                [ aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectFree lang) (data.aspect == AspectFree)
-                , aspectPill (actions.onSetAspect Aspect16_9) (I18n.snapshotAspect16_9 lang) (data.aspect == Aspect16_9)
-                , aspectPill (actions.onSetAspect Aspect4_3) (I18n.snapshotAspect4_3 lang) (data.aspect == Aspect4_3)
-                , aspectPill (actions.onSetAspect Aspect1_1) (I18n.snapshotAspect1_1 lang) (data.aspect == Aspect1_1)
-                ]
-            , div
-                [ Attr.style "display" "flex"
-                , Attr.style "align-items" "center"
-                , Attr.style "gap" "6px"
-                ]
-                [ button
-                    [ Attr.type_ "button"
-                    , Html.Events.onClick actions.onResetCrop
-                    , Attr.class "ui-button"
-                    , Attr.style "padding" "4px 10px"
-                    , Attr.style "font-size" "12px"
-                    , Attr.style "font-weight" "500"
-                    , Attr.style "background" Theme.panelSubtleBackground
-                    , Attr.style "color" Theme.textPrimary
-                    , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
-                    , Attr.style "border-radius" "6px"
-                    , Attr.style "cursor" "pointer"
-                    ]
-                    [ text (I18n.snapshotResetCrop lang) ]
-                ]
+            [ aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectFree lang) (activeAspect == AspectFree)
+            , aspectPill (actions.onSetAspect Aspect16_9) (I18n.snapshotAspect16_9 lang) (activeAspect == Aspect16_9)
+            , aspectPill (actions.onSetAspect Aspect4_3) (I18n.snapshotAspect4_3 lang) (activeAspect == Aspect4_3)
+            , aspectPill (actions.onSetAspect Aspect1_1) (I18n.snapshotAspect1_1 lang) (activeAspect == Aspect1_1)
             ]
-        , -- Interactive framing canvas / viewport display
-          div
-            [ Attr.style "position" "relative"
-            , Attr.style "width" "100%"
-            , Attr.style "aspect-ratio" "16 / 9"
-            , Attr.style "background" previewBackground
-            , Attr.style "background-image" "radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)"
-            , Attr.style "background-size" "16px 16px"
-            , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
-            , Attr.style "border-radius" "8px"
-            , Attr.style "overflow" "hidden"
-            , Attr.style "user-select" "none"
-            , Attr.style "touch-action" "none"
-            , Attr.style "cursor" cursorStyle
-            , Html.Events.on "pointerdown" (Decode.map actions.onInteraction pointerDownDecoder)
-            , Html.Events.on "pointermove" (Decode.map actions.onInteraction pointerMoveDecoder)
-            , Html.Events.on "pointerup" (Decode.map actions.onInteraction (pointerIdDecoder PointerUp))
-            , Html.Events.on "pointercancel" (Decode.map actions.onInteraction (pointerIdDecoder PointerCancel))
-            , Html.Events.on "pointerleave" (Decode.map actions.onInteraction (pointerIdDecoder PointerUp))
-            , Html.Events.preventDefaultOn "wheel" (Decode.map (\( msg, stop ) -> ( actions.onInteraction msg, stop )) wheelDecoder)
+        , div
+            [ Attr.style "display" "flex"
+            , Attr.style "align-items" "center"
+            , Attr.style "gap" "6px"
             ]
-            [ case data.previewUrl of
-                Just url ->
-                    img
-                        [ Attr.src url
-                        , Attr.alt "Framing preview"
-                        , Attr.style "width" "100%"
-                        , Attr.style "height" "100%"
-                        , Attr.style "object-fit" "contain"
-                        , Attr.style "display" "block"
-                        , Attr.style "pointer-events" "none"
-                        ]
-                        []
+            [ button
+                [ Attr.type_ "button"
+                , Html.Events.onClick actions.onResetCrop
+                , Attr.class "ui-button"
+                , Attr.style "padding" "4px 10px"
+                , Attr.style "font-size" "12px"
+                , Attr.style "font-weight" "500"
+                , Attr.style "background" Theme.panelSubtleBackground
+                , Attr.style "color" Theme.textPrimary
+                , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+                , Attr.style "border-radius" "6px"
+                , Attr.style "cursor" "pointer"
+                ]
+                [ text (I18n.snapshotResetCrop lang) ]
+            ]
+        ]
 
-                Nothing ->
-                    div
-                        [ Attr.style "width" "100%"
-                        , Attr.style "height" "100%"
-                        , Attr.style "display" "flex"
-                        , Attr.style "flex-direction" "column"
-                        , Attr.style "align-items" "center"
-                        , Attr.style "justify-content" "center"
-                        , Attr.style "gap" "10px"
-                        , Attr.style "color" Theme.textMuted
-                        , Attr.style "font-size" "13px"
-                        , Attr.style "pointer-events" "none"
-                        ]
-                        [ div
-                            [ Attr.style "animation" "snapshotSpinAnim 1.2s linear infinite"
-                            , Attr.style "display" "flex"
-                            , Attr.style "color" Theme.brandYellow
-                            ]
-                            [ Icon.featherSized 22 "loader" ]
-                        , text (I18n.snapshotFramingLoading lang)
-                        ]
-            , -- Crop box with rule-of-thirds grid, outer shadow scrim, and 8 handles
-              div
-                [ Attr.style "position" "absolute"
-                , Attr.style "left" (String.fromFloat (data.crop.x * 100.0) ++ "%")
-                , Attr.style "top" (String.fromFloat (data.crop.y * 100.0) ++ "%")
-                , Attr.style "width" (String.fromFloat (data.crop.width * 100.0) ++ "%")
-                , Attr.style "height" (String.fromFloat (data.crop.height * 100.0) ++ "%")
-                , Attr.style "box-sizing" "border-box"
-                , Attr.style "border" ("2px solid " ++ Theme.brandYellow)
-                , Attr.style "box-shadow" "0 0 0 9999px rgba(0, 0, 0, 0.55)"
+
+viewStage : Language -> FramingActions msg -> Model -> Html msg
+viewStage lang actions model =
+    let
+        cursorStyle =
+            case model.phase of
+                Preview _ ->
+                    "default"
+
+                Rendering ->
+                    "wait"
+
+                _ ->
+                    case model.gesture of
+                        Just (SinglePointer _ (PanDrag _ _)) ->
+                            "move"
+
+                        Just (SinglePointer _ (HandleDrag _ _ _)) ->
+                            "grabbing"
+
+                        _ ->
+                            "crosshair"
+    in
+    div
+        [ Attr.style "position" "relative"
+        , Attr.style "width" "100%"
+        , Attr.style "aspect-ratio" "16 / 9"
+        , Attr.style "background" previewBackground
+        , Attr.style "background-image" "radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)"
+        , Attr.style "background-size" "16px 16px"
+        , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+        , Attr.style "border-radius" "8px"
+        , Attr.style "overflow" "hidden"
+        , Attr.style "user-select" "none"
+        , Attr.style "touch-action" "none"
+        , Attr.style "cursor" cursorStyle
+        , Html.Events.on "pointerdown" (Decode.map actions.onInteraction pointerDownDecoder)
+        , Html.Events.on "pointermove" (Decode.map actions.onInteraction pointerMoveDecoder)
+        , Html.Events.on "pointerup" (Decode.map actions.onInteraction (pointerIdDecoder PointerUp))
+        , Html.Events.on "pointercancel" (Decode.map actions.onInteraction (pointerIdDecoder PointerCancel))
+        , Html.Events.on "pointerleave" (Decode.map actions.onInteraction (pointerIdDecoder PointerUp))
+        , Html.Events.preventDefaultOn "wheel" (Decode.map (\( msg, stop ) -> ( actions.onInteraction msg, stop )) wheelDecoder)
+        ]
+        (case model.phase of
+            Preview data ->
+                [ img
+                    [ Attr.src data.dataUrl
+                    , Attr.alt "Snapshot preview"
+                    , Attr.style "width" "100%"
+                    , Attr.style "height" "100%"
+                    , Attr.style "object-fit" "contain"
+                    , Attr.style "display" "block"
+                    , Attr.style "pointer-events" "none"
+                    ]
+                    []
+                ]
+
+            Rendering ->
+                [ viewRoughPreview model.previewUrl lang
+                , viewCropBox model.crop
+                , viewProgressOverlay lang model.progress
+                ]
+
+            _ ->
+                [ viewRoughPreview model.previewUrl lang
+                , viewCropBox model.crop
+                ]
+        )
+
+
+viewRoughPreview : Maybe String -> Language -> Html msg
+viewRoughPreview maybeUrl lang =
+    case maybeUrl of
+        Just url ->
+            img
+                [ Attr.src url
+                , Attr.alt "Framing preview"
+                , Attr.style "width" "100%"
+                , Attr.style "height" "100%"
+                , Attr.style "object-fit" "contain"
+                , Attr.style "display" "block"
                 , Attr.style "pointer-events" "none"
                 ]
-                [ -- Grid line 1/3 horizontal
-                  div
-                    [ Attr.style "position" "absolute"
-                    , Attr.style "left" "0"
-                    , Attr.style "right" "0"
-                    , Attr.style "top" "33.33%"
-                    , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
-                    , Attr.style "pointer-events" "none"
-                    ]
-                    []
-                , -- Grid line 2/3 horizontal
-                  div
-                    [ Attr.style "position" "absolute"
-                    , Attr.style "left" "0"
-                    , Attr.style "right" "0"
-                    , Attr.style "top" "66.66%"
-                    , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
-                    , Attr.style "pointer-events" "none"
-                    ]
-                    []
-                , -- Grid line 1/3 vertical
-                  div
-                    [ Attr.style "position" "absolute"
-                    , Attr.style "top" "0"
-                    , Attr.style "bottom" "0"
-                    , Attr.style "left" "33.33%"
-                    , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
-                    , Attr.style "pointer-events" "none"
-                    ]
-                    []
-                , -- Grid line 2/3 vertical
-                  div
-                    [ Attr.style "position" "absolute"
-                    , Attr.style "top" "0"
-                    , Attr.style "bottom" "0"
-                    , Attr.style "left" "66.66%"
-                    , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
-                    , Attr.style "pointer-events" "none"
-                    ]
-                    []
-                , -- 8 handles (4 corners + 4 edge centers)
-                  viewHandle "top: -5px; left: -5px;"
-                , viewHandle "top: -5px; right: -5px;"
-                , viewHandle "bottom: -5px; left: -5px;"
-                , viewHandle "bottom: -5px; right: -5px;"
-                , viewHandle "top: -5px; left: calc(50% - 5px);"
-                , viewHandle "bottom: -5px; left: calc(50% - 5px);"
-                , viewHandle "top: calc(50% - 5px); left: -5px;"
-                , viewHandle "top: calc(50% - 5px); right: -5px;"
+                []
+
+        Nothing ->
+            div
+                [ Attr.style "width" "100%"
+                , Attr.style "height" "100%"
+                , Attr.style "display" "flex"
+                , Attr.style "flex-direction" "column"
+                , Attr.style "align-items" "center"
+                , Attr.style "justify-content" "center"
+                , Attr.style "gap" "10px"
+                , Attr.style "color" Theme.textMuted
+                , Attr.style "font-size" "13px"
+                , Attr.style "pointer-events" "none"
                 ]
+                [ div
+                    [ Attr.style "animation" "snapshotSpinAnim 1.2s linear infinite"
+                    , Attr.style "display" "flex"
+                    , Attr.style "color" Theme.brandYellow
+                    ]
+                    [ Icon.featherSized 22 "loader" ]
+                , text (I18n.snapshotFramingLoading lang)
+                ]
+
+
+viewCropBox : CropRect -> Html msg
+viewCropBox crop =
+    div
+        [ Attr.style "position" "absolute"
+        , Attr.style "left" (String.fromFloat (crop.x * 100.0) ++ "%")
+        , Attr.style "top" (String.fromFloat (crop.y * 100.0) ++ "%")
+        , Attr.style "width" (String.fromFloat (crop.width * 100.0) ++ "%")
+        , Attr.style "height" (String.fromFloat (crop.height * 100.0) ++ "%")
+        , Attr.style "box-sizing" "border-box"
+        , Attr.style "border" ("2px solid " ++ Theme.brandYellow)
+        , Attr.style "box-shadow" "0 0 0 9999px rgba(0, 0, 0, 0.55)"
+        , Attr.style "pointer-events" "none"
+        ]
+        [ -- Grid line 1/3 horizontal
+          div
+            [ Attr.style "position" "absolute"
+            , Attr.style "left" "0"
+            , Attr.style "right" "0"
+            , Attr.style "top" "33.33%"
+            , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
+            , Attr.style "pointer-events" "none"
             ]
+            []
+        , -- Grid line 2/3 horizontal
+          div
+            [ Attr.style "position" "absolute"
+            , Attr.style "left" "0"
+            , Attr.style "right" "0"
+            , Attr.style "top" "66.66%"
+            , Attr.style "border-top" "1px dashed rgba(255, 255, 255, 0.3)"
+            , Attr.style "pointer-events" "none"
+            ]
+            []
+        , -- Grid line 1/3 vertical
+          div
+            [ Attr.style "position" "absolute"
+            , Attr.style "top" "0"
+            , Attr.style "bottom" "0"
+            , Attr.style "left" "33.33%"
+            , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
+            , Attr.style "pointer-events" "none"
+            ]
+            []
+        , -- Grid line 2/3 vertical
+          div
+            [ Attr.style "position" "absolute"
+            , Attr.style "top" "0"
+            , Attr.style "bottom" "0"
+            , Attr.style "left" "66.66%"
+            , Attr.style "border-left" "1px dashed rgba(255, 255, 255, 0.3)"
+            , Attr.style "pointer-events" "none"
+            ]
+            []
+        , -- 8 handles (4 corners + 4 edge centers)
+          viewHandle "top: -5px; left: -5px;"
+        , viewHandle "top: -5px; right: -5px;"
+        , viewHandle "bottom: -5px; left: -5px;"
+        , viewHandle "bottom: -5px; right: -5px;"
+        , viewHandle "top: -5px; left: calc(50% - 5px);"
+        , viewHandle "bottom: -5px; left: calc(50% - 5px);"
+        , viewHandle "top: calc(50% - 5px); left: -5px;"
+        , viewHandle "top: calc(50% - 5px); right: -5px;"
+        ]
+
+
+viewProgressOverlay : Language -> Progress -> Html msg
+viewProgressOverlay lang progress =
+    let
+        percent =
+            round (progress.fraction * 100)
+    in
+    div
+        [ Attr.style "position" "absolute"
+        , Attr.style "inset" "0"
+        , Attr.style "background" "rgba(0, 0, 0, 0.5)"
+        , Attr.style "backdrop-filter" "blur(3px)"
+        , Attr.style "-webkit-backdrop-filter" "blur(3px)"
+        , Attr.style "display" "flex"
+        , Attr.style "flex-direction" "column"
+        , Attr.style "align-items" "center"
+        , Attr.style "justify-content" "center"
+        , Attr.style "gap" "12px"
+        , Attr.style "padding" "20px"
+        , Attr.style "z-index" "20"
+        , Attr.style "pointer-events" "none"
+        ]
+        [ div
+            [ Attr.style "animation" "snapshotSpinAnim 1.2s linear infinite"
+            , Attr.style "display" "flex"
+            , Attr.style "color" Theme.brandYellow
+            , Attr.attribute "aria-hidden" "true"
+            ]
+            [ Icon.featherSized 32 "loader" ]
+        , div
+            [ Attr.style "font-size" "15px"
+            , Attr.style "font-weight" "600"
+            , Attr.style "color" "#FFFFFF"
+            ]
+            [ text (I18n.snapshotPathTracing lang progress.samples) ]
+        , div
+            [ Attr.attribute "role" "progressbar"
+            , Attr.attribute "aria-label" "Path tracing progress"
+            , Attr.attribute "aria-valuemin" "0"
+            , Attr.attribute "aria-valuemax" "100"
+            , Attr.attribute "aria-valuenow" (String.fromInt percent)
+            , Attr.style "width" "100%"
+            , Attr.style "max-width" "420px"
+            , Attr.style "height" "8px"
+            , Attr.style "background" "rgba(255, 255, 255, 0.25)"
+            , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+            , Attr.style "border-radius" "9999px"
+            , Attr.style "overflow" "hidden"
+            ]
+            [ div
+                [ Attr.style "width" (String.fromInt percent ++ "%")
+                , Attr.style "height" "100%"
+                , Attr.style "background" Theme.brandYellow
+                , Attr.style "transition" "width 0.3s linear"
+                ]
+                []
+            ]
+        , p
+            [ Attr.style "margin" "0"
+            , Attr.style "font-size" "12px"
+            , Attr.style "color" "rgba(255, 255, 255, 0.85)"
+            ]
+            [ text (I18n.snapshotRenderNotice lang) ]
+        ]
+
+
+viewPreviewDetails : Language -> PreviewData -> Html msg
+viewPreviewDetails lang data =
+    div
+        [ Attr.style "display" "flex"
+        , Attr.style "align-items" "center"
+        , Attr.style "justify-content" "space-between"
+        , Attr.style "font-size" "12px"
+        , Attr.style "color" Theme.textMuted
+        ]
+        [ div []
+            [ text (data.filename ++ " • PNG") ]
+        , if data.hasSaved then
+            div
+                [ Attr.style "display" "inline-flex"
+                , Attr.style "align-items" "center"
+                , Attr.style "gap" "6px"
+                , Attr.style "color" Theme.brandYellow
+                , Attr.style "font-weight" "500"
+                ]
+                [ Icon.featherSized 14 "check"
+                , text (I18n.snapshotSavedNotice lang)
+                ]
+
+          else
+            div [] [ text (I18n.snapshotReadyToSave lang) ]
         ]
 
 
@@ -1648,64 +1884,6 @@ aspectPill msg label active =
         [ text label ]
 
 
-viewRendering : Language -> Progress -> Html msg
-viewRendering lang progress =
-    let
-        percent =
-            round (progress.fraction * 100)
-    in
-    div
-        [ Attr.style "display" "flex"
-        , Attr.style "flex-direction" "column"
-        , Attr.style "align-items" "center"
-        , Attr.style "justify-content" "center"
-        , Attr.style "padding" "32px 16px"
-        , Attr.style "gap" "16px"
-        , Attr.style "text-align" "center"
-        ]
-        [ div
-            [ Attr.style "animation" "snapshotSpinAnim 1.2s linear infinite"
-            , Attr.style "display" "flex"
-            , Attr.style "color" Theme.brandYellow
-            , Attr.attribute "aria-hidden" "true"
-            ]
-            [ Icon.featherSized 32 "loader" ]
-        , div
-            [ Attr.style "font-size" "15px"
-            , Attr.style "font-weight" "600"
-            ]
-            [ text (I18n.snapshotPathTracing lang progress.samples) ]
-        , div
-            [ Attr.attribute "role" "progressbar"
-            , Attr.attribute "aria-label" "Path tracing progress"
-            , Attr.attribute "aria-valuemin" "0"
-            , Attr.attribute "aria-valuemax" "100"
-            , Attr.attribute "aria-valuenow" (String.fromInt percent)
-            , Attr.style "width" "100%"
-            , Attr.style "max-width" "420px"
-            , Attr.style "height" "8px"
-            , Attr.style "background" Theme.panelSubtleBackground
-            , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
-            , Attr.style "border-radius" "9999px"
-            , Attr.style "overflow" "hidden"
-            ]
-            [ div
-                [ Attr.style "width" (String.fromInt percent ++ "%")
-                , Attr.style "height" "100%"
-                , Attr.style "background" Theme.brandYellow
-                , Attr.style "transition" "width 0.3s linear"
-                ]
-                []
-            ]
-        , p
-            [ Attr.style "margin" "0"
-            , Attr.style "font-size" "13px"
-            , Attr.style "color" Theme.textMuted
-            ]
-            [ text (I18n.snapshotRenderNotice lang) ]
-        ]
-
-
 viewFailed : String -> Html msg
 viewFailed message =
     div
@@ -1713,8 +1891,8 @@ viewFailed message =
         , Attr.style "flex-direction" "column"
         , Attr.style "align-items" "center"
         , Attr.style "justify-content" "center"
-        , Attr.style "padding" "32px 16px"
-        , Attr.style "gap" "12px"
+        , Attr.style "padding" "16px"
+        , Attr.style "gap" "8px"
         , Attr.style "text-align" "center"
         ]
         [ div
@@ -1732,60 +1910,6 @@ viewFailed message =
         ]
 
 
-viewPreview : Language -> PreviewData -> Html msg
-viewPreview lang data =
-    div
-        [ Attr.style "display" "flex"
-        , Attr.style "flex-direction" "column"
-        , Attr.style "gap" "12px"
-        ]
-        [ div
-            [ Attr.style "display" "flex"
-            , Attr.style "justify-content" "center"
-            , Attr.style "background" previewBackground
-            , Attr.style "background-image" "radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)"
-            , Attr.style "background-size" "16px 16px"
-            , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
-            , Attr.style "border-radius" "8px"
-            , Attr.style "overflow" "hidden"
-            ]
-            [ img
-                [ Attr.src data.dataUrl
-                , Attr.alt "Snapshot preview"
-                , Attr.style "max-height" "460px"
-                , Attr.style "width" "100%"
-                , Attr.style "object-fit" "contain"
-                , Attr.style "display" "block"
-                ]
-                []
-            ]
-        , div
-            [ Attr.style "display" "flex"
-            , Attr.style "align-items" "center"
-            , Attr.style "justify-content" "space-between"
-            , Attr.style "font-size" "12px"
-            , Attr.style "color" Theme.textMuted
-            ]
-            [ div []
-                [ text (data.filename ++ " • PNG") ]
-            , if data.hasSaved then
-                div
-                    [ Attr.style "display" "inline-flex"
-                    , Attr.style "align-items" "center"
-                    , Attr.style "gap" "6px"
-                    , Attr.style "color" Theme.brandYellow
-                    , Attr.style "font-weight" "500"
-                    ]
-                    [ Icon.featherSized 14 "check"
-                    , text (I18n.snapshotSavedNotice lang)
-                    ]
-
-              else
-                div [] [ text (I18n.snapshotReadyToSave lang) ]
-            ]
-        ]
-
-
 viewFooter : Language -> FramingActions msg -> Model -> Html msg
 viewFooter lang actions model =
     div
@@ -1799,38 +1923,47 @@ viewFooter lang actions model =
         , Attr.style "flex-wrap" "wrap"
         ]
         (case model.phase of
-            Framing data ->
-                [ Button.secondary actions.onClose (I18n.snapshotClose lang)
-                , renderButton lang actions data.crop
+            Framing _ ->
+                [ renderButton lang actions model.crop
+                , Button.secondary actions.onClose (I18n.snapshotClose lang)
                 ]
 
             Rendering ->
                 [ div
                     [ Attr.style "font-size" "13px"
                     , Attr.style "color" Theme.textMuted
+                    , Attr.style "display" "flex"
+                    , Attr.style "align-items" "center"
+                    , Attr.style "gap" "8px"
                     ]
-                    [ text
+                    [ div
+                        [ Attr.style "animation" "snapshotSpinAnim 1.2s linear infinite"
+                        , Attr.style "display" "flex"
+                        , Attr.style "color" Theme.brandYellow
+                        ]
+                        [ Icon.featherSized 16 "loader" ]
+                    , text
                         (case lang of
                             Fi ->
-                                "Kuva tulee näkyviin tähän, kun se on valmis."
+                                "Renderöidään tilannekuvaa…"
 
                             En ->
-                                "The image will appear here when it is ready."
+                                "Rendering snapshot…"
                         )
                     ]
                 , Button.secondary actions.onClose (I18n.snapshotClose lang)
                 ]
 
             Preview data ->
-                [ Button.secondary actions.onReframe (I18n.snapshotReframe lang)
-                , div
+                [ div
                     [ Attr.style "display" "flex"
                     , Attr.style "align-items" "center"
                     , Attr.style "gap" "10px"
                     ]
                     [ saveButton lang actions data
-                    , Button.secondary actions.onClose (I18n.snapshotClose lang)
+                    , Button.secondary actions.onReframe (I18n.snapshotReframe lang)
                     ]
+                , Button.secondary actions.onClose (I18n.snapshotClose lang)
                 ]
 
             Failed _ ->

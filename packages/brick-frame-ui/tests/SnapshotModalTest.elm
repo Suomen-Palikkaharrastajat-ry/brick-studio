@@ -267,6 +267,31 @@ suite =
                     in
                     SnapshotModal.isFraming modal
                         |> Expect.equal True
+            , test "setAspect while in Preview transitions back to Framing with updated aspect crop" <|
+                \_ ->
+                    let
+                        modal =
+                            readyModel
+                                |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
+                    in
+                    Expect.all
+                        [ \m -> SnapshotModal.isFraming m |> Expect.equal True
+                        , \m -> SnapshotModal.getCrop m |> Expect.equal { x = (1.0 - 9.0 / 16.0) / 2.0, y = 0.0, width = 9.0 / 16.0, height = 1.0 }
+                        ]
+                        modal
+            , test "resetCrop while in Preview transitions back to Framing with defaultCrop" <|
+                \_ ->
+                    let
+                        modal =
+                            readyModel
+                                |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
+                                |> SnapshotModal.resetCrop
+                    in
+                    Expect.all
+                        [ \m -> SnapshotModal.isFraming m |> Expect.equal True
+                        , \m -> SnapshotModal.getCrop m |> Expect.equal SnapshotModal.defaultCrop
+                        ]
+                        modal
             , test "setReady in Framing updates previewUrl without transitioning to Preview" <|
                 \_ ->
                     let

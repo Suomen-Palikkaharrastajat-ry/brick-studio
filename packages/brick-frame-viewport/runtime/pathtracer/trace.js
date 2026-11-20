@@ -201,26 +201,8 @@ function groundLitFraction(scene, rng, p) {
   return den > 0 ? num / den : 1
 }
 
-function distToSegment(px, py, pz, ax, ay, az, bx, by, bz) {
-  const vx = bx - ax
-  const vy = by - ay
-  const vz = bz - az
-  const wx = px - ax
-  const wy = py - ay
-  const wz = pz - az
-  const c1 = wx * vx + wy * vy + wz * vz
-  if (c1 <= 0) return Math.hypot(wx, wy, wz)
-  const c2 = vx * vx + vy * vy + vz * vz
-  if (c2 <= c1) return Math.hypot(px - bx, py - by, pz - bz)
-  const b = c1 / c2
-  return Math.hypot(wx - b * vx, wy - b * vy, wz - b * vz)
-}
-
-const BEVEL_RADIUS = 0.35 // LDU, ~0.14 mm physical fillet
-
 /**
- * Interpolates the smoothed vertex normal at `hit`, aligned to face incoming ray `r`,
- * with procedural bevel normal rounding near sharp edges.
+ * Interpolates the smoothed vertex normal at `hit`, aligned to face incoming ray `r`.
  */
 function shadingNormal(scene, hit, r, out) {
   const slot = hit.slot
@@ -267,76 +249,6 @@ function shadingNormal(scene, hit, r, out) {
       nx = snx
       ny = sny
       nz = snz
-    }
-  }
-
-  const bevel = scene.bevelEdges
-  if (bevel) {
-    const bx = ax + e1x
-    const by = ay + e1y
-    const bz = az + e1z
-    const cx = ax + e2x
-    const cy = ay + e2y
-    const cz = az + e2z
-    const px = r.ox + r.dx * hit.t
-    const py = r.oy + r.dy * hit.t
-    const pz = r.oz + r.dz * hit.t
-
-    const bo = slot * 12
-    let minDist = BEVEL_RADIUS
-    let bestNx = 0
-    let bestNy = 0
-    let bestNz = 0
-    let found = false
-
-    if (bevel[bo] > 0.5) {
-      const d0 = distToSegment(px, py, pz, ax, ay, az, bx, by, bz)
-      if (d0 < minDist) {
-        minDist = d0
-        bestNx = bevel[bo + 1]
-        bestNy = bevel[bo + 2]
-        bestNz = bevel[bo + 3]
-        found = true
-      }
-    }
-    if (bevel[bo + 4] > 0.5) {
-      const d1 = distToSegment(px, py, pz, bx, by, bz, cx, cy, cz)
-      if (d1 < minDist) {
-        minDist = d1
-        bestNx = bevel[bo + 5]
-        bestNy = bevel[bo + 6]
-        bestNz = bevel[bo + 7]
-        found = true
-      }
-    }
-    if (bevel[bo + 8] > 0.5) {
-      const d2 = distToSegment(px, py, pz, cx, cy, cz, ax, ay, az)
-      if (d2 < minDist) {
-        minDist = d2
-        bestNx = bevel[bo + 9]
-        bestNy = bevel[bo + 10]
-        bestNz = bevel[bo + 11]
-        found = true
-      }
-    }
-
-    if (found) {
-      const t = minDist / BEVEL_RADIUS
-      const s = 0.5 + 0.5 * t
-      let bnx = s * nx + (1 - s) * (bestNx * sign)
-      let bny = s * ny + (1 - s) * (bestNy * sign)
-      let bnz = s * nz + (1 - s) * (bestNz * sign)
-      const bnl = Math.hypot(bnx, bny, bnz)
-      if (bnl > 1e-6) {
-        bnx /= bnl
-        bny /= bnl
-        bnz /= bnl
-        if (bnx * r.dx + bny * r.dy + bnz * r.dz < -1e-5) {
-          nx = bnx
-          ny = bny
-          nz = bnz
-        }
-      }
     }
   }
 

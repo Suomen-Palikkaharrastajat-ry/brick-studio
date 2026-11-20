@@ -66,21 +66,21 @@ timeBudgetMs =
 -}
 previewWidth : Int
 previewWidth =
-    640
+    320
 
 
 {-| Rough preview output height in pixels.
 -}
 previewHeight : Int
 previewHeight =
-    360
+    180
 
 
 {-| How long the quick preview path tracer may run, in milliseconds.
 -}
 previewBudgetMs : Int
 previewBudgetMs =
-    350
+    80
 
 
 {-| Every visible triangle of the viewport's scene, flattened for the path tracer.

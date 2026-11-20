@@ -163,6 +163,11 @@ canvas:focus-visible {
 
 /* Buttons share one hover/press feel; transitions respect reduced motion via
    the rule above. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
 button:not(:disabled) {
   transition: background-color var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),

@@ -30,13 +30,13 @@ export const MATERIAL = Object.freeze({
 })
 
 /** Index of refraction of the clear coat / ABS plastic. */
-const COAT_IOR = 1.53
+const COAT_IOR = 1.535
 /** Index of refraction of transparent LEGO plastic (polycarbonate / MABS). */
 export const TRANSPARENT_IOR = 1.49
 const COAT_F0 = ((COAT_IOR - 1) / (COAT_IOR + 1)) ** 2
 const RUBBER_F0 = 0.02
 const PEARL_TINT = 0.35
-const PLASTIC_ROUGHNESS = 0.045
+const PLASTIC_ROUGHNESS = 0.038
 const PLASTIC_SHOULDER_ROUGHNESS = 0.18
 const PLASTIC_CORE_WEIGHT = 0.72
 const PLASTIC_SHOULDER_WEIGHT = 1 - PLASTIC_CORE_WEIGHT
@@ -46,7 +46,7 @@ const PEARL_ROUGHNESS = 0.3
 const RUBBER_ROUGHNESS = 0.6
 const CHROME_ROUGHNESS = 0.08
 /** Clamp for the coat selection probability, keeps both lobes reachable. */
-const COAT_PROB_MIN = 0.02
+const COAT_PROB_MIN = 0.25
 const COAT_PROB_MAX = 0.95
 const INV_PI = 1 / Math.PI
 

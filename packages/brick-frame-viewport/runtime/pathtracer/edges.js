@@ -97,8 +97,8 @@ export function extractSharpEdges(triangles, minAngleDegrees = 30, options = {})
         edgeMap.set(edgeKey, entry)
       }
 
-      // Record normal if not nearly identical to an already recorded normal on this edge
-      if (!entry.normals.some((n) => dot3(n, normal) > 0.9999)) {
+      // Record normal if not nearly identical to an already recorded normal on this edge (or opposite-winding coplanar)
+      if (!entry.normals.some((n) => Math.abs(dot3(n, normal)) > 0.9999)) {
         entry.normals.push(normal)
       }
     }
@@ -111,7 +111,7 @@ export function extractSharpEdges(triangles, minAngleDegrees = 30, options = {})
 
     if (normals.length === 1) {
       if (includeBoundaries) {
-        sharpEdges.push({ p0: entry.p0, p1: entry.p1 })
+        sharpEdges.push({ p0: entry.p0, p1: entry.p1, n0: normals[0], n1: normals[0], bevelNormal: normals[0] })
       }
       continue
     }
@@ -120,7 +120,7 @@ export function extractSharpEdges(triangles, minAngleDegrees = 30, options = {})
     let isCrease = false
     for (let i = 0; i < normals.length; i++) {
       for (let j = i + 1; j < normals.length; j++) {
-        if (dot3(normals[i], normals[j]) < thresholdCos) {
+        if (Math.abs(dot3(normals[i], normals[j])) < thresholdCos) {
           isCrease = true
           break
         }
@@ -129,7 +129,15 @@ export function extractSharpEdges(triangles, minAngleDegrees = 30, options = {})
     }
 
     if (isCrease) {
-      sharpEdges.push({ p0: entry.p0, p1: entry.p1 })
+      const n0 = normals[0]
+      const n1 = normals[1] || normals[0]
+      const s1 = dot3(n0, n1) < 0 ? -1 : 1
+      const bx = n0[0] + n1[0] * s1
+      const by = n0[1] + n1[1] * s1
+      const bz = n0[2] + n1[2] * s1
+      const blen = Math.hypot(bx, by, bz)
+      const bevelNormal = blen > 1e-6 ? [bx / blen, by / blen, bz / blen] : n0
+      sharpEdges.push({ p0: entry.p0, p1: entry.p1, n0, n1, bevelNormal })
     }
   }
 
@@ -263,9 +271,48 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
           const deltaAlpha = (coverage - prev) / Math.max(1e-6, 1 - prev)
           maxCoverage[pixelIdx] = coverage
           const cIdx = pixelIdx * 3
-          colorBuffer[cIdx] = colorBuffer[cIdx] * (1 - deltaAlpha) + edgeColor[0] * deltaAlpha
-          colorBuffer[cIdx + 1] = colorBuffer[cIdx + 1] * (1 - deltaAlpha) + edgeColor[1] * deltaAlpha
-          colorBuffer[cIdx + 2] = colorBuffer[cIdx + 2] * (1 - deltaAlpha) + edgeColor[2] * deltaAlpha
+
+          if (options.physicalBevel) {
+            const keyDir = options.keyDir || [-0.35, 0.85, 0.38]
+            const kLen = Math.hypot(keyDir[0], keyDir[1], keyDir[2]) || 1
+            const kx = keyDir[0] / kLen
+            const ky = keyDir[1] / kLen
+            const kz = keyDir[2] / kLen
+
+            const vx = (p0[0] + t * (p1[0] - p0[0])) - camera.origin[0]
+            const vy = (p0[1] + t * (p1[1] - p0[1])) - camera.origin[1]
+            const vz = (p0[2] + t * (p1[2] - p0[2])) - camera.origin[2]
+            const vDist = Math.hypot(vx, vy, vz) || 1
+            const toCamX = -vx / vDist
+            const toCamY = -vy / vDist
+            const toCamZ = -vz / vDist
+
+            const hx = kx + toCamX
+            const hy = ky + toCamY
+            const hz = kz + toCamZ
+            const hLen = Math.hypot(hx, hy, hz) || 1
+            const hNormX = hx / hLen
+            const hNormY = hy / hLen
+            const hNormZ = hz / hLen
+
+            let bn = edge.bevelNormal || [0, 1, 0]
+            if (bn[0] * toCamX + bn[1] * toCamY + bn[2] * toCamZ < 0) {
+              bn = [-bn[0], -bn[1], -bn[2]]
+            }
+
+            const nh = Math.max(0, bn[0] * hNormX + bn[1] * hNormY + bn[2] * hNormZ)
+            const specGlint = Math.pow(nh, 32) * 0.45
+
+            // 1. Proportional Seam Ambient Occlusion: Darken existing color proportionally
+            // 2. 3D Bevel Specular Highlight Glint
+            colorBuffer[cIdx] = colorBuffer[cIdx] * (1 - 0.32 * deltaAlpha) + specGlint * deltaAlpha
+            colorBuffer[cIdx + 1] = colorBuffer[cIdx + 1] * (1 - 0.32 * deltaAlpha) + specGlint * deltaAlpha
+            colorBuffer[cIdx + 2] = colorBuffer[cIdx + 2] * (1 - 0.32 * deltaAlpha) + specGlint * deltaAlpha
+          } else {
+            colorBuffer[cIdx] = colorBuffer[cIdx] * (1 - deltaAlpha) + edgeColor[0] * deltaAlpha
+            colorBuffer[cIdx + 1] = colorBuffer[cIdx + 1] * (1 - deltaAlpha) + edgeColor[1] * deltaAlpha
+            colorBuffer[cIdx + 2] = colorBuffer[cIdx + 2] * (1 - deltaAlpha) + edgeColor[2] * deltaAlpha
+          }
         }
       }
     }
