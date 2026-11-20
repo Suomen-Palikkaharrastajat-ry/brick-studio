@@ -357,10 +357,45 @@ suite =
                             , \q -> Query.has [ Selector.tag "button", Selector.text "16:9" ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "4:3" ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "1:1" ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-glossy") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-used") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-matte") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "quality-preset-fast") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "quality-preset-standard") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "quality-preset-high") ] q
                             , \q -> Query.has [ Selector.tag "button", Selector.text "Render" ] q
                             , \q -> Query.hasNot [ Selector.text "80%" ] q
                             , \q -> Query.hasNot [ Selector.text "60%" ] q
                             , \q -> Query.hasNot [ Selector.text "←" ] q
                             ]
+            , test "selecting shader preset updates shader and re-enters framing from preview" <|
+                \_ ->
+                    let
+                        modal =
+                            readyModel
+                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectShader SnapshotModal.ShaderUsed)
+                    in
+                    Expect.all
+                        [ \m -> SnapshotModal.getShader m |> Expect.equal SnapshotModal.ShaderUsed
+                        , \m -> SnapshotModal.isFraming m |> Expect.equal True
+                        ]
+                        modal
+            , test "selecting quality preset updates quality and dimensions" <|
+                \_ ->
+                    let
+                        modal =
+                            readyModel
+                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectQuality SnapshotModal.QualityHigh)
+
+                        dims =
+                            SnapshotModal.qualityDimensions (SnapshotModal.getQuality modal)
+                    in
+                    Expect.all
+                        [ \m -> SnapshotModal.getQuality m |> Expect.equal SnapshotModal.QualityHigh
+                        , \_ -> Expect.equal 2560 dims.width
+                        , \_ -> Expect.equal 1440 dims.height
+                        , \_ -> Expect.equal 45000 dims.timeBudgetMs
+                        ]
+                        modal
             ]
         ]

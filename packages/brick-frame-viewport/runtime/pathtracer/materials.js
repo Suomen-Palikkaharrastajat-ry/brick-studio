@@ -29,22 +29,46 @@ export const MATERIAL = Object.freeze({
   MATTE: 5,
 })
 
+export const SHADER_PARAMS = Object.freeze({
+  glossy: {
+    coreRoughness: 0.038,
+    shoulderRoughness: 0.18,
+    coatIor: 1.535,
+    coatF0: ((1.535 - 1) / (1.535 + 1)) ** 2,
+  },
+  used: {
+    coreRoughness: 0.17,
+    shoulderRoughness: 0.38,
+    coatIor: 1.47,
+    coatF0: ((1.47 - 1) / (1.47 + 1)) ** 2,
+  },
+  matte: {
+    coreRoughness: 0.32,
+    shoulderRoughness: 0.52,
+    coatIor: 1.43,
+    coatF0: ((1.43 - 1) / (1.43 + 1)) ** 2,
+  },
+})
+
 /** Index of refraction of the clear coat / ABS plastic. */
 const COAT_IOR = 1.535
 /** Index of refraction of transparent LEGO plastic (polycarbonate / MABS). */
 export const TRANSPARENT_IOR = 1.49
 const COAT_F0 = ((COAT_IOR - 1) / (COAT_IOR + 1)) ** 2
 const RUBBER_F0 = 0.02
-const PEARL_TINT = 0.35
+const PEARL_TINT = 0.70
+const PEARL_ROUGHNESS = 0.16
 const PLASTIC_ROUGHNESS = 0.038
 const PLASTIC_SHOULDER_ROUGHNESS = 0.18
 const PLASTIC_CORE_WEIGHT = 0.72
 const PLASTIC_SHOULDER_WEIGHT = 1 - PLASTIC_CORE_WEIGHT
 const SSS_WRAP = 0.18
 const SSS_CHROMA_BOOST = 0.15
-const PEARL_ROUGHNESS = 0.3
 const RUBBER_ROUGHNESS = 0.6
-const CHROME_ROUGHNESS = 0.08
+const CHROME_CORE_ROUGHNESS = 0.045
+const CHROME_SHOULDER_ROUGHNESS = 0.20
+const CHROME_CORE_WEIGHT = 0.70
+const CHROME_SHOULDER_WEIGHT = 0.30
 /** Clamp for the coat selection probability, keeps both lobes reachable. */
 const COAT_PROB_MIN = 0.25
 const COAT_PROB_MAX = 0.95
@@ -135,13 +159,13 @@ function coatProbability(nv, f0avg) {
  * Sets the coat F0 per channel in `f0v` for the material and returns its
  * specular roughness.
  */
-function materialParams(material, albedo) {
+function materialParams(material, albedo, shader = 'glossy') {
   switch (material) {
     case MATERIAL.CHROME:
       f0v[0] = albedo[0]
       f0v[1] = albedo[1]
       f0v[2] = albedo[2]
-      return CHROME_ROUGHNESS
+      return CHROME_CORE_ROUGHNESS
     case MATERIAL.RUBBER:
       f0v[0] = f0v[1] = f0v[2] = RUBBER_F0
       return RUBBER_ROUGHNESS
@@ -150,9 +174,11 @@ function materialParams(material, albedo) {
         f0v[i] = COAT_F0 + (albedo[i] - COAT_F0) * PEARL_TINT
       }
       return PEARL_ROUGHNESS
-    default:
-      f0v[0] = f0v[1] = f0v[2] = COAT_F0
-      return PLASTIC_ROUGHNESS
+    default: {
+      const sp = SHADER_PARAMS[shader] || SHADER_PARAMS.glossy
+      f0v[0] = f0v[1] = f0v[2] = sp.coatF0
+      return sp.coreRoughness
+    }
   }
 }
 
@@ -162,7 +188,7 @@ function materialParams(material, albedo) {
  * `sampleSurface` choosing `wi` into `out.pdf`. Only valid for non-delta
  * materials (everything except TRANSPARENT).
  */
-export function evalSurface(material, albedo, frame, wo, wi, out) {
+export function evalSurface(material, albedo, frame, wo, wi, out, shader = 'glossy') {
   toLocal(frame, wo, lo)
   toLocal(frame, wi, li)
   const nv = lo[2]
@@ -179,7 +205,7 @@ export function evalSurface(material, albedo, frame, wo, wi, out) {
     return out
   }
 
-  const roughness = materialParams(material, albedo)
+  const roughness = materialParams(material, albedo, shader)
   // Half vector in local space.
   let hx = lo[0] + li[0]
   let hy = lo[1] + li[1]
@@ -197,16 +223,28 @@ export function evalSurface(material, albedo, frame, wo, wi, out) {
   let specScale
   let specPdf
   if (material === MATERIAL.PLASTIC) {
-    const aCore = PLASTIC_ROUGHNESS * PLASTIC_ROUGHNESS
+    const sp = SHADER_PARAMS[shader] || SHADER_PARAMS.glossy
+    const aCore = sp.coreRoughness * sp.coreRoughness
     const a2Core = aCore * aCore
     const dCore = ggxD(a2Core, nh)
     const gCore = ggxG1(a2Core, nv) * ggxG1(a2Core, nl)
-    const aShoulder = PLASTIC_SHOULDER_ROUGHNESS * PLASTIC_SHOULDER_ROUGHNESS
+    const aShoulder = sp.shoulderRoughness * sp.shoulderRoughness
     const a2Shoulder = aShoulder * aShoulder
     const dShoulder = ggxD(a2Shoulder, nh)
     const gShoulder = ggxG1(a2Shoulder, nv) * ggxG1(a2Shoulder, nl)
     specScale = (PLASTIC_CORE_WEIGHT * dCore * gCore + PLASTIC_SHOULDER_WEIGHT * dShoulder * gShoulder) / (4 * nv * nl)
     specPdf = ((PLASTIC_CORE_WEIGHT * dCore + PLASTIC_SHOULDER_WEIGHT * dShoulder) * nh) / (4 * vh)
+  } else if (material === MATERIAL.CHROME) {
+    const aCore = CHROME_CORE_ROUGHNESS * CHROME_CORE_ROUGHNESS
+    const a2Core = aCore * aCore
+    const dCore = ggxD(a2Core, nh)
+    const gCore = ggxG1(a2Core, nv) * ggxG1(a2Core, nl)
+    const aShoulder = CHROME_SHOULDER_ROUGHNESS * CHROME_SHOULDER_ROUGHNESS
+    const a2Shoulder = aShoulder * aShoulder
+    const dShoulder = ggxD(a2Shoulder, nh)
+    const gShoulder = ggxG1(a2Shoulder, nv) * ggxG1(a2Shoulder, nl)
+    specScale = (CHROME_CORE_WEIGHT * dCore * gCore + CHROME_SHOULDER_WEIGHT * dShoulder * gShoulder) / (4 * nv * nl)
+    specPdf = ((CHROME_CORE_WEIGHT * dCore + CHROME_SHOULDER_WEIGHT * dShoulder) * nh) / (4 * vh)
   } else {
     const alpha = roughness * roughness
     const a2 = alpha * alpha
@@ -221,7 +259,8 @@ export function evalSurface(material, albedo, frame, wo, wi, out) {
   }
 
   if (material === MATERIAL.CHROME) {
-    for (let i = 0; i < 3; i++) out.f[i] = specScale * fcol[i]
+    const flakeBase = 0.015 * INV_PI
+    for (let i = 0; i < 3; i++) out.f[i] = specScale * fcol[i] + flakeBase * albedo[i]
     out.pdf = specPdf
     return out
   }
@@ -254,11 +293,11 @@ export function evalSurface(material, albedo, frame, wo, wi, out) {
  * `out.pdf` and `out.weight` = f·cos/pdf. Returns false if the sample is
  * below the surface (the caller should terminate the path).
  */
-export function sampleSurface(material, albedo, frame, wo, rng, out) {
+export function sampleSurface(material, albedo, frame, wo, rng, out, shader = 'glossy') {
   toLocal(frame, wo, lo)
   const nv = lo[2]
   if (nv <= 0) return false
-  const roughness = materialParams(material, albedo)
+  const roughness = materialParams(material, albedo, shader)
   const f0avg = (f0v[0] + f0v[1] + f0v[2]) / 3
   const pCoat = material === MATERIAL.CHROME ? 1 : material === MATERIAL.MATTE ? 0 : coatProbability(nv, f0avg)
 
@@ -276,12 +315,21 @@ export function sampleSurface(material, albedo, frame, wo, rng, out) {
     let lobeRoughness = roughness
     let uLobe = u1
     if (material === MATERIAL.PLASTIC) {
+      const sp = SHADER_PARAMS[shader] || SHADER_PARAMS.glossy
       if (u1 < PLASTIC_CORE_WEIGHT) {
-        lobeRoughness = PLASTIC_ROUGHNESS
+        lobeRoughness = sp.coreRoughness
         uLobe = u1 / PLASTIC_CORE_WEIGHT
       } else {
-        lobeRoughness = PLASTIC_SHOULDER_ROUGHNESS
+        lobeRoughness = sp.shoulderRoughness
         uLobe = (u1 - PLASTIC_CORE_WEIGHT) / PLASTIC_SHOULDER_WEIGHT
+      }
+    } else if (material === MATERIAL.CHROME) {
+      if (u1 < CHROME_CORE_WEIGHT) {
+        lobeRoughness = CHROME_CORE_ROUGHNESS
+        uLobe = u1 / CHROME_CORE_WEIGHT
+      } else {
+        lobeRoughness = CHROME_SHOULDER_ROUGHNESS
+        uLobe = (u1 - CHROME_CORE_WEIGHT) / CHROME_SHOULDER_WEIGHT
       }
     }
     const alpha = lobeRoughness * lobeRoughness
@@ -299,7 +347,7 @@ export function sampleSurface(material, albedo, frame, wo, rng, out) {
   }
   if (sampleLocal[2] <= 0) return false
   toWorld(frame, sampleLocal, out.wi)
-  evalSurface(material, albedo, frame, wo, out.wi, evalOut)
+  evalSurface(material, albedo, frame, wo, out.wi, evalOut, shader)
   if (!(evalOut.pdf > 0)) return false
   const nl = sampleLocal[2]
   for (let i = 0; i < 3; i++) out.weight[i] = (evalOut.f[i] * nl) / evalOut.pdf

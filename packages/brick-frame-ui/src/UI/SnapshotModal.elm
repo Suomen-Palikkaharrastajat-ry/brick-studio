@@ -13,21 +13,29 @@ module UI.SnapshotModal exposing
     , Point
     , PreviewData
     , Progress
+    , QualityPreset(..)
+    , ShaderPreset(..)
     , defaultCrop
     , getCrop
+    , getQuality
+    , getShader
     , handleInteraction
     , init
     , initFraming
     , isFraming
     , isRendering
     , markSaved
+    , qualityDimensions
     , reframe
     , resetCrop
     , setAspect
     , setCrop
     , setFailed
     , setProgress
+    , setQuality
     , setReady
+    , setShader
+    , shaderToString
     , startRendering
     , view
     , viewFramingWithLanguage
@@ -101,6 +109,52 @@ type AspectPreset
     | Aspect1_1
 
 
+{-| Surface finish / shader preset for the path tracer.
+-}
+type ShaderPreset
+    = ShaderGlossy
+    | ShaderUsed
+    | ShaderMatte
+
+
+{-| Convert shader preset to contract identifier string.
+-}
+shaderToString : ShaderPreset -> String
+shaderToString preset =
+    case preset of
+        ShaderGlossy ->
+            "glossy"
+
+        ShaderUsed ->
+            "used"
+
+        ShaderMatte ->
+            "matte"
+
+
+{-| Quality / resolution preset for rendering.
+-}
+type QualityPreset
+    = QualityFast
+    | QualityStandard
+    | QualityHigh
+
+
+{-| Dimensions and time budget in ms for quality presets.
+-}
+qualityDimensions : QualityPreset -> { width : Int, height : Int, timeBudgetMs : Int }
+qualityDimensions quality =
+    case quality of
+        QualityFast ->
+            { width = 1280, height = 720, timeBudgetMs = 8000 }
+
+        QualityStandard ->
+            { width = 1920, height = 1080, timeBudgetMs = 20000 }
+
+        QualityHigh ->
+            { width = 2560, height = 1440, timeBudgetMs = 45000 }
+
+
 {-| State for the interactive pre-render framing phase.
 -}
 type alias FramingData =
@@ -171,6 +225,8 @@ type InteractionMsg
     | PointerUp Int
     | PointerCancel Int
     | Wheel Float Point
+    | SelectShader ShaderPreset
+    | SelectQuality QualityPreset
 
 
 {-| Snapshot modal state.
@@ -180,6 +236,8 @@ type alias Model =
     , previewUrl : Maybe String
     , crop : CropRect
     , aspect : AspectPreset
+    , shader : ShaderPreset
+    , quality : QualityPreset
     , phase : Phase
     , progress : Progress
     , gesture : Maybe GestureState
@@ -216,6 +274,8 @@ init config =
     , previewUrl = Nothing
     , crop = defaultCrop
     , aspect = AspectFree
+    , shader = ShaderGlossy
+    , quality = QualityStandard
     , phase = Rendering
     , progress = { fraction = 0, samples = 0 }
     , gesture = Nothing
@@ -230,6 +290,8 @@ initFraming config =
     , previewUrl = config.previewUrl
     , crop = defaultCrop
     , aspect = AspectFree
+    , shader = ShaderGlossy
+    , quality = QualityStandard
     , phase =
         Framing
             { previewUrl = config.previewUrl
@@ -591,6 +653,64 @@ markSaved model =
             model
 
 
+{-| Set the active shader / surface finish preset.
+If in the preview phase, switches back to framing so the user can re-render.
+-}
+setShader : ShaderPreset -> Model -> Model
+setShader preset model =
+    case model.phase of
+        Preview _ ->
+            { model
+                | shader = preset
+                , phase =
+                    Framing
+                        { previewUrl = model.previewUrl
+                        , crop = model.crop
+                        , aspect = model.aspect
+                        }
+                , gesture = Nothing
+            }
+
+        _ ->
+            { model | shader = preset }
+
+
+{-| Get the currently selected shader preset.
+-}
+getShader : Model -> ShaderPreset
+getShader model =
+    model.shader
+
+
+{-| Set the active quality / resolution preset.
+If in the preview phase, switches back to framing so the user can re-render.
+-}
+setQuality : QualityPreset -> Model -> Model
+setQuality preset model =
+    case model.phase of
+        Preview _ ->
+            { model
+                | quality = preset
+                , phase =
+                    Framing
+                        { previewUrl = model.previewUrl
+                        , crop = model.crop
+                        , aspect = model.aspect
+                        }
+                , gesture = Nothing
+            }
+
+        _ ->
+            { model | quality = preset }
+
+
+{-| Get the currently selected quality preset.
+-}
+getQuality : Model -> QualityPreset
+getQuality model =
+    model.quality
+
+
 {-| Handle interactive gesture, drag, resize, pinch, and wheel zoom on the framing canvas.
 -}
 handleInteraction : InteractionMsg -> Model -> Model
@@ -598,6 +718,12 @@ handleInteraction msg model =
     case model.phase of
         Preview _ ->
             case msg of
+                SelectShader preset ->
+                    setShader preset model
+
+                SelectQuality preset ->
+                    setQuality preset model
+
                 PointerDown _ _ ->
                     let
                         framingModel =
@@ -633,6 +759,12 @@ handleInteraction msg model =
 
         Framing data ->
             case msg of
+                SelectShader preset ->
+                    setShader preset model
+
+                SelectQuality preset ->
+                    setQuality preset model
+
                 Wheel deltaY pointer ->
                     let
                         scale =
@@ -936,7 +1068,15 @@ handleInteraction msg model =
                     handleInteraction (PointerUp pointerId) model
 
         _ ->
-            model
+            case msg of
+                SelectShader preset ->
+                    setShader preset model
+
+                SelectQuality preset ->
+                    setQuality preset model
+
+                _ ->
+                    model
 
 
 pointDistance : Point -> Point -> Float
@@ -1479,6 +1619,12 @@ viewToolbar lang actions model =
     let
         activeAspect =
             model.aspect
+
+        activeShader =
+            model.shader
+
+        activeQuality =
+            model.quality
     in
     div
         [ Attr.style "display" "flex"
@@ -1490,12 +1636,26 @@ viewToolbar lang actions model =
         [ div
             [ Attr.style "display" "flex"
             , Attr.style "align-items" "center"
+            , Attr.style "flex-wrap" "wrap"
             , Attr.style "gap" "6px"
             ]
-            [ aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectFree lang) (activeAspect == AspectFree)
+            [ -- 1. Aspect Ratio presets
+              aspectPill (actions.onSetAspect AspectFree) (I18n.snapshotAspectFree lang) (activeAspect == AspectFree)
             , aspectPill (actions.onSetAspect Aspect16_9) (I18n.snapshotAspect16_9 lang) (activeAspect == Aspect16_9)
             , aspectPill (actions.onSetAspect Aspect4_3) (I18n.snapshotAspect4_3 lang) (activeAspect == Aspect4_3)
             , aspectPill (actions.onSetAspect Aspect1_1) (I18n.snapshotAspect1_1 lang) (activeAspect == Aspect1_1)
+            , -- Subtle divider
+              toolbarDivider
+              -- 2. Shader / surface presets
+            , optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
+            , optionPill "shader-preset-used" (actions.onInteraction (SelectShader ShaderUsed)) (I18n.snapshotShaderUsed lang) (activeShader == ShaderUsed)
+            , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
+            , -- Subtle divider
+              toolbarDivider
+              -- 3. Quality / resolution presets
+            , optionPill "quality-preset-fast" (actions.onInteraction (SelectQuality QualityFast)) (I18n.snapshotQualityFast lang) (activeQuality == QualityFast)
+            , optionPill "quality-preset-standard" (actions.onInteraction (SelectQuality QualityStandard)) (I18n.snapshotQualityStandard lang) (activeQuality == QualityStandard)
+            , optionPill "quality-preset-high" (actions.onInteraction (SelectQuality QualityHigh)) (I18n.snapshotQualityHigh lang) (activeQuality == QualityHigh)
             ]
         , div
             [ Attr.style "display" "flex"
@@ -1518,6 +1678,48 @@ viewToolbar lang actions model =
                 [ text (I18n.snapshotResetCrop lang) ]
             ]
         ]
+
+
+toolbarDivider : Html msg
+toolbarDivider =
+    div
+        [ Attr.style "width" "1px"
+        , Attr.style "height" "16px"
+        , Attr.style "background" Theme.borderDefault
+        , Attr.style "margin" "0 2px"
+        ]
+        []
+
+
+optionPill : String -> msg -> String -> Bool -> Html msg
+optionPill testId msg label active =
+    button
+        [ Attr.type_ "button"
+        , Attr.attribute "data-testid" testId
+        , Html.Events.onClick msg
+        , Attr.class "ui-button"
+        , Attr.style "padding" "4px 10px"
+        , Attr.style "font-size" "12px"
+        , Attr.style "font-weight" "600"
+        , Attr.style "border-radius" "6px"
+        , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+        , Attr.style "cursor" "pointer"
+        , Attr.style "background"
+            (if active then
+                Theme.brandYellow
+
+             else
+                Theme.panelSubtleBackground
+            )
+        , Attr.style "color"
+            (if active then
+                Theme.brand
+
+             else
+                Theme.textPrimary
+            )
+        ]
+        [ text label ]
 
 
 viewStage : Language -> FramingActions msg -> Model -> Html msg

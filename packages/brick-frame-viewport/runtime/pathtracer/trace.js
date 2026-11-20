@@ -262,6 +262,119 @@ function lightScaleForMaterial(light, mat) {
   return mat === MATERIAL.PLASTIC || mat === MATERIAL.RUBBER ? (light.plasticScale ?? 1) : 1
 }
 
+function hash3d(i, j, k) {
+  let n = (i * 374761393 + j * 668265263 + k * 1274126177) | 0
+  n = Math.imul(n ^ (n >>> 13), 1274126177)
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967296
+}
+
+function valueNoise3d(x, y, z) {
+  const ix = Math.floor(x) | 0
+  const iy = Math.floor(y) | 0
+  const iz = Math.floor(z) | 0
+  const fx = x - ix
+  const fy = y - iy
+  const fz = z - iz
+  const wx = fx * fx * fx * (fx * (fx * 6 - 15) + 10)
+  const wy = fy * fy * fy * (fy * (fy * 6 - 15) + 10)
+  const wz = fz * fz * fz * (fz * (fz * 6 - 15) + 10)
+
+  const c000 = hash3d(ix, iy, iz)
+  const c100 = hash3d(ix + 1, iy, iz)
+  const c010 = hash3d(ix, iy + 1, iz)
+  const c110 = hash3d(ix + 1, iy + 1, iz)
+  const c001 = hash3d(ix, iy, iz + 1)
+  const c101 = hash3d(ix + 1, iy, iz + 1)
+  const c011 = hash3d(ix, iy + 1, iz + 1)
+  const c111 = hash3d(ix + 1, iy + 1, iz + 1)
+
+  const x00 = c000 + wx * (c100 - c000)
+  const x10 = c010 + wx * (c110 - c010)
+  const x01 = c001 + wx * (c101 - c001)
+  const x11 = c011 + wx * (c111 - c011)
+
+  const y0 = x00 + wy * (x10 - x00)
+  const y1 = x01 + wy * (x11 - x01)
+
+  return y0 + wz * (y1 - y0)
+}
+
+/**
+ * Deterministic, continuous 3D procedural wear & micro-scratch surface texture.
+ */
+export function applySurfaceTexture(shader, pos, normal, albedo) {
+  if (!shader || shader === 'glossy') return
+
+  const nx = normal[0]
+  const ny = normal[1]
+  const nz = normal[2]
+
+  const helperY = Math.abs(ny) < 0.9 ? 1 : 0
+  const helperX = helperY === 1 ? 0 : 1
+  let tx = ny * 0 - nz * helperY
+  let ty = nz * helperX - nx * 0
+  let tz = nx * helperY - ny * helperX
+  const tlen = Math.hypot(tx, ty, tz) || 1
+  tx /= tlen
+  ty /= tlen
+  tz /= tlen
+  const bx = ny * tz - nz * ty
+  const by = nz * tx - nx * tz
+  const bz = nx * ty - ny * tx
+
+  const px = pos[0]
+  const py = pos[1]
+  const pz = pos[2]
+
+  if (shader === 'used') {
+    // 1. Low-frequency wear patches (scale 0.08 / LDU)
+    const patch = valueNoise3d(px * 0.08, py * 0.08, pz * 0.08)
+    const wear = Math.max(0, Math.min(1, (patch - 0.35) / 0.4))
+
+    // 2. Anisotropic micro-scratches (scale 2.8 and 4.2 / LDU)
+    const q1 = (px * 0.8 + py * 0.5 - pz * 0.3) * 2.8
+    const q2 = (-px * 0.4 + py * 0.7 + pz * 0.6) * 4.2
+    const n1 = 1 - 2 * Math.abs(valueNoise3d(q1, q1 * 0.2 + py, q1 * 0.1 + pz) - 0.5)
+    const n2 = 1 - 2 * Math.abs(valueNoise3d(q2 * 0.2 + px, q2, q2 * 0.3 + pz) - 0.5)
+    const s1 = Math.max(0, (n1 - 0.7) / 0.3)
+    const s2 = Math.max(0, (n2 - 0.7) / 0.3)
+    const scratchIntensity = wear * Math.max(s1 * s1, s2 * s2) * 0.038
+
+    // 3. Fine injection-mold micro-grain (scale 1.6 / LDU, strength ~ 0.018)
+    const grainX = (valueNoise3d(px * 1.6 + 13.1, py * 1.6 + 7.3, pz * 1.6 + 3.7) - 0.5) * 0.018
+    const grainY = (valueNoise3d(px * 1.6 + 31.7, py * 1.6 + 19.3, pz * 1.6 + 11.5) - 0.5) * 0.018
+
+    const dT = grainX + scratchIntensity * 0.86
+    const dB = grainY + scratchIntensity * 0.5
+
+    let pnx = nx + dT * tx + dB * bx
+    let pny = ny + dT * ty + dB * by
+    let pnz = nz + dT * tz + dB * bz
+    const pnl = Math.hypot(pnx, pny, pnz) || 1
+    normal[0] = pnx / pnl
+    normal[1] = pny / pnl
+    normal[2] = pnz / pnl
+
+    if (albedo) {
+      const albFactor = 1.0 - 0.03 * wear + 0.02 * (patch - 0.5)
+      albedo[0] = Math.max(0, Math.min(1, albedo[0] * albFactor))
+      albedo[1] = Math.max(0, Math.min(1, albedo[1] * albFactor))
+      albedo[2] = Math.max(0, Math.min(1, albedo[2] * albFactor))
+    }
+  } else if (shader === 'matte') {
+    const grainX = (valueNoise3d(px * 1.6 + 13.1, py * 1.6 + 7.3, pz * 1.6 + 3.7) - 0.5) * 0.012
+    const grainY = (valueNoise3d(px * 1.6 + 31.7, py * 1.6 + 19.3, pz * 1.6 + 11.5) - 0.5) * 0.012
+
+    let pnx = nx + grainX * tx + grainY * bx
+    let pny = ny + grainX * ty + grainY * by
+    let pnz = nz + grainX * tz + grainY * bz
+    const pnl = Math.hypot(pnx, pny, pnz) || 1
+    normal[0] = pnx / pnl
+    normal[1] = pny / pnl
+    normal[2] = pnz / pnl
+  }
+}
+
 /**
  * Accumulates one path for primary ray `primary` into `out` (premultiplied
  * RGBA). Returns `out`.
@@ -345,14 +458,18 @@ export function tracePath(scene, rng, primary, out) {
       pos[1] = ray.oy + ray.dy * tHit
       pos[2] = ray.oz + ray.dz * tHit
       shadingNormal(scene, hit, ray, surfNormal)
-      const nx = surfNormal[0]
-      const ny = surfNormal[1]
-      const nz = surfNormal[2]
       mat = scene.material[slot]
       albedoRow[0] = scene.albedo[slot * 3]
       albedoRow[1] = scene.albedo[slot * 3 + 1]
       albedoRow[2] = scene.albedo[slot * 3 + 2]
       alb = albedoRow
+
+      if (mat === MATERIAL.PLASTIC && scene.shader && scene.shader !== 'glossy') {
+        applySurfaceTexture(scene.shader, pos, surfNormal, alb)
+      }
+      const nx = surfNormal[0]
+      const ny = surfNormal[1]
+      const nz = surfNormal[2]
 
       if (mat === MATERIAL.TRANSPARENT) {
         // Delta dielectric: track the medium so exiting rays take the tint.
@@ -395,7 +512,7 @@ export function tracePath(scene, rng, primary, out) {
       const cosL = frame.n[0] * lightDir[0] + frame.n[1] * lightDir[1] + frame.n[2] * lightDir[2]
       if (cosL <= 0) continue
       if (occluded(bvh, setShadowRay(offsetAlong(pos, surfNormal), lightDir))) continue
-      evalSurface(mat, alb, frame, wo, lightDir, evalOut)
+      evalSurface(mat, alb, frame, wo, lightDir, evalOut, scene.shader)
       if (!(evalOut.pdf > 0)) continue
       const w = (pl * pl) / (pl * pl + evalOut.pdf * evalOut.pdf)
       // f · L · cos · w / pdf, with L = E / solid angle.
@@ -404,7 +521,7 @@ export function tracePath(scene, rng, primary, out) {
     }
 
     // BSDF sampling for the continuation.
-    if (!sampleSurface(mat, alb, frame, wo, rng, sampleOut)) break
+    if (!sampleSurface(mat, alb, frame, wo, rng, sampleOut, scene.shader)) break
     beta[0] *= sampleOut.weight[0]
     beta[1] *= sampleOut.weight[1]
     beta[2] *= sampleOut.weight[2]
@@ -500,10 +617,17 @@ export function captureGuide(scene, y, albedo, normal, depth) {
       normal[o + 1] = ray.dy < 0 ? 1 : -1
       normal[o + 2] = 0
     } else {
-      albedo[o] = scene.albedo[hit.slot * 3]
-      albedo[o + 1] = scene.albedo[hit.slot * 3 + 1]
-      albedo[o + 2] = scene.albedo[hit.slot * 3 + 2]
+      albedoRow[0] = scene.albedo[hit.slot * 3]
+      albedoRow[1] = scene.albedo[hit.slot * 3 + 1]
+      albedoRow[2] = scene.albedo[hit.slot * 3 + 2]
       shadingNormal(scene, hit, ray, surfNormal)
+      if (scene.shader && scene.shader !== 'glossy' && scene.material[hit.slot] === MATERIAL.PLASTIC) {
+        const hPos = [ray.ox + ray.dx * tModel, ray.oy + ray.dy * tModel, ray.oz + ray.dz * tModel]
+        applySurfaceTexture(scene.shader, hPos, surfNormal, albedoRow)
+      }
+      albedo[o] = albedoRow[0]
+      albedo[o + 1] = albedoRow[1]
+      albedo[o + 2] = albedoRow[2]
       normal[o] = surfNormal[0]
       normal[o + 1] = surfNormal[1]
       normal[o + 2] = surfNormal[2]

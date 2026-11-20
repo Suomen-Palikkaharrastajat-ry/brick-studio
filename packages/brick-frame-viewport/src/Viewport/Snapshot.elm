@@ -208,10 +208,15 @@ encodeRequestWithCrop config =
         , triangles = config.triangles
         , crop = config.crop
         , outlineEdges = Nothing
+        , shader = Nothing
+        , width = Nothing
+        , height = Nothing
+        , timeBudgetMs = Nothing
         }
 
 
-{-| Full configuration for `captureRender`, including optional outline edge rasterization.
+{-| Full configuration for `captureRender`, including optional outline edge rasterization,
+shader preset, and custom width/height/budget.
 -}
 encodeRequestWithOptions :
     { filename : String
@@ -220,10 +225,23 @@ encodeRequestWithOptions :
     , triangles : List Float
     , crop : Maybe CropRect
     , outlineEdges : Maybe Bool
+    , shader : Maybe String
+    , width : Maybe Int
+    , height : Maybe Int
+    , timeBudgetMs : Maybe Int
     }
     -> Encode.Value
 encodeRequestWithOptions config =
     let
+        targetWidth =
+            Maybe.withDefault imageWidth config.width
+
+        targetHeight =
+            Maybe.withDefault imageHeight config.height
+
+        targetBudget =
+            Maybe.withDefault timeBudgetMs config.timeBudgetMs
+
         lightFields =
             case config.lightDirection of
                 Just dir ->
@@ -255,13 +273,21 @@ encodeRequestWithOptions config =
 
                 Nothing ->
                     []
+
+        shaderFields =
+            case config.shader of
+                Just s ->
+                    [ ( "shader", Encode.string s ) ]
+
+                Nothing ->
+                    []
     in
     Encode.object
-        ([ ( "width", Encode.int imageWidth )
-         , ( "height", Encode.int imageHeight )
+        ([ ( "width", Encode.int targetWidth )
+         , ( "height", Encode.int targetHeight )
          , ( "transparent", Encode.bool True )
          , ( "filename", Encode.string config.filename )
-         , ( "timeBudgetMs", Encode.int timeBudgetMs )
+         , ( "timeBudgetMs", Encode.int targetBudget )
          , ( "camera"
            , Encode.object
                 [ ( "position", encodeVec3 (Camera.position config.camera) )
@@ -276,11 +302,13 @@ encodeRequestWithOptions config =
             ++ lightFields
             ++ cropFields
             ++ outlineFields
+            ++ shaderFields
             ++ [ ( "triangles", Encode.list Encode.float config.triangles ) ]
         )
 
 
-{-| Encode a fast low-res render request for framing preview.
+{-| Encode a fast WebGL modeler canvas copy request for framing preview.
+Omitting "triangles" tells snapshot.js to capture the live 3D canvas instantly (0ms).
 -}
 encodePreviewRequest :
     { filename : String
@@ -290,33 +318,12 @@ encodePreviewRequest :
     }
     -> Encode.Value
 encodePreviewRequest config =
-    let
-        lightFields =
-            case config.lightDirection of
-                Just dir ->
-                    [ ( "lightDirection", encodeVec3 dir ) ]
-
-                Nothing ->
-                    []
-    in
     Encode.object
-        ([ ( "width", Encode.int previewWidth )
-         , ( "height", Encode.int previewHeight )
-         , ( "transparent", Encode.bool True )
-         , ( "filename", Encode.string config.filename )
-         , ( "timeBudgetMs", Encode.int previewBudgetMs )
-         , ( "camera"
-           , Encode.object
-                [ ( "position", encodeVec3 (Camera.position config.camera) )
-                , ( "target", encodeVec3 (Camera.lookTarget config.camera) )
-                , ( "up", encodeVec3 (Vec3.vec3 0 1 0) )
-                , ( "fovYDegrees", Encode.float Camera.fovYDegrees )
-                ]
-           )
-         ]
-            ++ lightFields
-            ++ [ ( "triangles", Encode.list Encode.float config.triangles ) ]
-        )
+        [ ( "width", Encode.int imageWidth )
+        , ( "height", Encode.int imageHeight )
+        , ( "transparent", Encode.bool True )
+        , ( "filename", Encode.string config.filename )
+        ]
 
 
 encodeVec3 : Vec3 -> Encode.Value

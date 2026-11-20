@@ -1035,7 +1035,22 @@ renderWithGhost config scene =
                 Nothing ->
                     False
 
-        triangleUniforms modelMat instanceColor ghost =
+        triangleUniforms modelMat instanceColor finish ghost =
+            let
+                metallic =
+                    case finish of
+                        ColorData.Chrome ->
+                            1.0
+
+                        ColorData.Metal ->
+                            0.85
+
+                        ColorData.Pearl ->
+                            0.50
+
+                        _ ->
+                            0.0
+            in
             { modelMatrix = modelMat
             , viewMatrix = viewMat
             , projectionMatrix = projMat
@@ -1049,6 +1064,7 @@ renderWithGhost config scene =
             , rimStrength = style.rimStrength
             , rimPower = style.rimPower
             , vibrance = style.vibrance
+            , metallic = metallic
             , u_ghostMode =
                 if ghost then
                     1.0
@@ -1102,7 +1118,7 @@ renderWithGhost config scene =
                 Set.empty
                 visible
     in
-    proxyEntities frustum resolvedCells (triangleUniforms Mat4.identity Shader.noInstanceColor proxyGhost) proxyGhost scene
+    proxyEntities frustum resolvedCells (triangleUniforms Mat4.identity Shader.noInstanceColor ColorData.Solid proxyGhost) proxyGhost scene
         ++ List.concatMap (placementEntities isGhost resolvedCells scene triangleUniforms edgeUniforms conditionalUniforms) visible
 
 
@@ -1152,7 +1168,7 @@ placementEntities :
     (Placement -> Bool)
     -> Set ( Int, Int, Int )
     -> InstancedScene
-    -> (Mat4 -> Vec4 -> Bool -> Shader.Uniforms)
+    -> (Mat4 -> Vec4 -> ColorData.Finish -> Bool -> Shader.Uniforms)
     -> (Mat4 -> EdgeShader.Uniforms)
     -> (Mat4 -> EdgeShader.ConditionalUniforms)
     -> ( Placement, Detail )
@@ -1180,7 +1196,7 @@ placementEntities isGhost resolvedCells scene triangleUniforms edgeUniforms cond
                         Shader.vertexShader
                         Shader.fragmentShader
                         mesh.triangles
-                        (triangleUniforms placement.matrix placement.color ghost)
+                        (triangleUniforms placement.matrix placement.color placement.finish ghost)
 
                 lineEntity =
                     WebGL.entityWith

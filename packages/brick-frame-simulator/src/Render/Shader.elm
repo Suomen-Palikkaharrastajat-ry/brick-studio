@@ -31,6 +31,7 @@ type alias Uniforms =
     , rimStrength : Float
     , rimPower : Float
     , vibrance : Float
+    , metallic : Float
     , u_ghostMode : Float
     , u_ghostAlpha : Float
     }
@@ -104,6 +105,7 @@ fragmentShader =
         uniform float rimStrength;
         uniform float rimPower;
         uniform float vibrance;
+        uniform float metallic;
         uniform float u_ghostMode;
         uniform float u_ghostAlpha;
 
@@ -131,15 +133,28 @@ fragmentShader =
             vec3 lightColor = ambColor + sunColor * (lightStrength * diffuse);
 
             float specular = 0.0;
+            vec3 specTint = vec3(1.0);
             if (specularStrength > 0.0001) {
                 vec3 halfDir = normalize(lightDir + viewDir);
                 float NdotH = max(dot(norm, halfDir), 0.0);
                 float VdotH = max(dot(viewDir, halfDir), 0.0);
-                float fresnel = 0.04 + 0.96 * pow(1.0 - VdotH, 5.0);
-                // Dual-lobe ABS plastic specular: sharp core highlight + soft glossy shoulder
-                float sharpSpec = pow(NdotH, specularPower * 1.5) * 0.75;
+                float fresnel = mix(0.04 + 0.96 * pow(1.0 - VdotH, 5.0), 1.0, metallic * 0.6);
+                // Dual-lobe specular: sharp core highlight + soft glossy shoulder
+                float sharpSpec = pow(NdotH, specularPower * (1.5 + metallic * 1.5)) * 0.75;
                 float broadSpec = pow(NdotH, max(4.0, specularPower * 0.25)) * 0.25;
-                specular = (sharpSpec + broadSpec) * specularStrength * fresnel;
+                float specBoost = 1.0 + metallic * 1.4;
+                specular = (sharpSpec + broadSpec) * specularStrength * fresnel * specBoost;
+                specTint = mix(vec3(1.0), vColor.rgb, metallic * 0.85);
+            }
+
+            // Metallic studio reflection from sky/horizon
+            vec3 metalReflect = vec3(0.0);
+            if (metallic > 0.01) {
+                vec3 refVec = reflect(-viewDir, norm);
+                float horizonRef = smoothstep(-0.2, 0.4, refVec.y);
+                vec3 reflSky = mix(vec3(0.35, 0.38, 0.45), vec3(0.95, 0.98, 1.10), horizonRef);
+                float specFacing = pow(1.0 - max(dot(norm, viewDir), 0.0), 3.0);
+                metalReflect = vColor.rgb * reflSky * (metallic * (0.35 + 0.45 * specFacing));
             }
 
             float rim = 0.0;
@@ -148,7 +163,8 @@ fragmentShader =
                 rim = pow(1.0 - max(dot(norm, viewDir), 0.0), rimPower) * rimStrength * facingLight;
             }
 
-            vec3 litColor = vColor.rgb * (lightColor * (1.0 - specular)) + vec3(specular + rim);
+            vec3 baseDiffuse = vColor.rgb * lightColor * (1.0 - specular * (0.6 + metallic * 0.4));
+            vec3 litColor = baseDiffuse + specTint * specular + vec3(rim) + metalReflect;
             if (abs(vibrance) > 0.0001) {
                 float luma = dot(litColor, vec3(0.2126, 0.7152, 0.0722));
                 litColor = mix(vec3(luma), litColor, 1.0 + clamp(vibrance, -0.5, 0.5));

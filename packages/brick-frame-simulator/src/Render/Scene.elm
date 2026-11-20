@@ -135,6 +135,7 @@ renderSceneWithStyle scene camera styleInput width height =
             , rimStrength = style.rimStrength
             , rimPower = style.rimPower
             , vibrance = style.vibrance
+            , metallic = 0.0
             , u_ghostMode = 0.0
             , u_ghostAlpha = 1.0
             }

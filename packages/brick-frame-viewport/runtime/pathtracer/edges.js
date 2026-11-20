@@ -177,8 +177,8 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
   const nearPlane = options.nearPlane ?? 0.1
   const lineWidth = options.lineWidth ?? 1.5
   const edgeColor = options.edgeColor ?? [0.02, 0.02, 0.02]
-  const depthBias = options.depthBias ?? 0.05
-  const depthBiasFactor = options.depthBiasFactor ?? 1.005
+  const depthBias = options.depthBias ?? 0.35
+  const depthBiasFactor = options.depthBiasFactor ?? 1.012
   const crop = options.crop
 
   const radius = lineWidth * 0.5
@@ -250,7 +250,10 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
 
         const pixelIdx = py * width + px
 
-        // Depth occlusion check against depthBuffer (euclidean ray distance)
+        // Depth occlusion check against depthBuffer (euclidean ray distance).
+        // For physical bevels, check a two-sided depth window so edge strokes only shade
+        // surface pixels that belong to the edge at strokeDist, avoiding halo bleeding
+        // across depth discontinuities (e.g. stud silhouette onto background brick face or sky).
         if (depthBuffer) {
           const sx = p0[0] + t * (p1[0] - p0[0])
           const sy = p0[1] + t * (p1[1] - p0[1])
@@ -261,8 +264,19 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
             sz - camera.origin[2],
           )
           const sceneDepth = depthBuffer[pixelIdx]
-          if (strokeDist > sceneDepth * depthBiasFactor + depthBias) {
-            continue
+          if (options.physicalBevel) {
+            if (!Number.isFinite(sceneDepth)) {
+              continue
+            }
+            const maxAllowedDepth = strokeDist * (depthBiasFactor + 0.01) + depthBias + 1.2
+            const minAllowedDepth = strokeDist / (depthBiasFactor + 0.008) - (depthBias + 0.4)
+            if (sceneDepth < minAllowedDepth || sceneDepth > maxAllowedDepth) {
+              continue
+            }
+          } else {
+            if (strokeDist > sceneDepth * depthBiasFactor + depthBias) {
+              continue
+            }
           }
         }
 
@@ -301,13 +315,28 @@ export function rasterizeEdges(edges, camera, depthBuffer, width, height, colorB
             }
 
             const nh = Math.max(0, bn[0] * hNormX + bn[1] * hNormY + bn[2] * hNormZ)
-            const specGlint = Math.pow(nh, 32) * 0.45
+            let seamAo = 0.22
+            let specGlint = Math.pow(nh, 12) * 0.28
+
+            if (options.shader === 'used') {
+              const sx = p0[0] + t * (p1[0] - p0[0])
+              const sy = p0[1] + t * (p1[1] - p0[1])
+              const sz = p0[2] + t * (p1[2] - p0[2])
+              let n = (Math.floor(sx * 2.5) * 374761393 + Math.floor(sy * 2.5) * 668265263 + Math.floor(sz * 2.5) * 1274126177) | 0
+              n = Math.imul(n ^ (n >>> 13), 1274126177)
+              const edgeNoise = 0.85 + 0.3 * (((n ^ (n >>> 16)) >>> 0) / 4294967296)
+              seamAo = 0.34 * edgeNoise
+              specGlint = Math.pow(nh, 8) * 0.14
+            } else if (options.shader === 'matte') {
+              seamAo = 0.26
+              specGlint = Math.pow(nh, 6) * 0.06
+            }
 
             // 1. Proportional Seam Ambient Occlusion: Darken existing color proportionally
             // 2. 3D Bevel Specular Highlight Glint
-            colorBuffer[cIdx] = colorBuffer[cIdx] * (1 - 0.32 * deltaAlpha) + specGlint * deltaAlpha
-            colorBuffer[cIdx + 1] = colorBuffer[cIdx + 1] * (1 - 0.32 * deltaAlpha) + specGlint * deltaAlpha
-            colorBuffer[cIdx + 2] = colorBuffer[cIdx + 2] * (1 - 0.32 * deltaAlpha) + specGlint * deltaAlpha
+            colorBuffer[cIdx] = colorBuffer[cIdx] * (1 - seamAo * deltaAlpha) + specGlint * deltaAlpha
+            colorBuffer[cIdx + 1] = colorBuffer[cIdx + 1] * (1 - seamAo * deltaAlpha) + specGlint * deltaAlpha
+            colorBuffer[cIdx + 2] = colorBuffer[cIdx + 2] * (1 - seamAo * deltaAlpha) + specGlint * deltaAlpha
           } else {
             colorBuffer[cIdx] = colorBuffer[cIdx] * (1 - deltaAlpha) + edgeColor[0] * deltaAlpha
             colorBuffer[cIdx + 1] = colorBuffer[cIdx + 1] * (1 - deltaAlpha) + edgeColor[1] * deltaAlpha

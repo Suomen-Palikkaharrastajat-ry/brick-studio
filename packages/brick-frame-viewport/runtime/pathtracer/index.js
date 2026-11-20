@@ -144,12 +144,14 @@ export async function renderSnapshot(request, options = {}) {
   let height = Math.round(request.height)
   if (!(width > 0 && height > 0)) throw new Error('Render size must be positive')
   const baseAspect = width / height
+  const maxWidth = width
+  const maxHeight = height
   if (request.crop) {
     const cw = Math.max(0.01, Math.min(1, request.crop.width || 1))
     const ch = Math.max(0.01, Math.min(1, request.crop.height || 1))
     const rawW = Math.round(width * cw)
     const rawH = Math.round(height * ch)
-    const scale = Math.min(1920 / rawW, 1080 / rawH)
+    const scale = Math.min(maxWidth / rawW, maxHeight / rawH)
     width = Math.max(64, Math.round(rawW * scale))
     height = Math.max(64, Math.round(rawH * scale))
   }
@@ -166,6 +168,7 @@ export async function renderSnapshot(request, options = {}) {
     lightDirection: request.lightDirection,
     crop: request.crop,
     outlineEdges: Boolean(request.outlineEdges),
+    shader: request.shader || 'glossy',
   }
   const camera = makeCamera(request.camera, width, height, baseAspect)
   const edges = extractSharpEdges(triangles)
@@ -226,7 +229,8 @@ export async function renderSnapshot(request, options = {}) {
           crop: request.crop,
           physicalBevel: true,
           keyDir: [-0.35, 0.85, 0.38],
-          lineWidth: 0.95,
+          lineWidth: 0.85,
+          shader: request.shader || 'glossy',
         })
       }
       const rgba = toRgba8(denoised.color, denoised.alpha, width, height)

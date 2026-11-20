@@ -25,6 +25,17 @@
  */
 import { renderSnapshot } from './pathtracer/index.js'
 
+if (typeof HTMLCanvasElement !== 'undefined' && HTMLCanvasElement.prototype?.getContext && !HTMLCanvasElement.prototype.__preservePatched) {
+  const origGetContext = HTMLCanvasElement.prototype.getContext
+  HTMLCanvasElement.prototype.getContext = function (type, attrs) {
+    if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
+      attrs = Object.assign({}, attrs, { preserveDrawingBuffer: true })
+    }
+    return origGetContext.call(this, type, attrs)
+  }
+  HTMLCanvasElement.prototype.__preservePatched = true
+}
+
 const DEFAULT_FILENAME = 'palikkakehys-render.png'
 const REVOKE_DELAY_MS = 60000
 
@@ -72,6 +83,7 @@ function fillBackground(ctx, width, height) {
 
 /** Fallback: copies the on-screen WebGL canvas. */
 function captureCanvasCopy(ports, { width, height, transparent = true, filename }) {
+  cancelRender()
   const canvas = largestVisibleCanvas(document)
   if (!canvas) return
 

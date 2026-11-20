@@ -447,6 +447,7 @@ export function prepareScene(request) {
     camera,
     crop: request.crop,
     outlineEdges: Boolean(request.outlineEdges),
+    shader: request.shader || 'glossy',
     lights: studioLights(camera, customLightDir),
     bvh,
     albedo,

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { GROUND_ALBEDO, prepareScene } from './scene.js'
-import { createRay, captureGuide, primaryRay, renderRowSample, tracePath } from './trace.js'
+import { createRay, captureGuide, primaryRay, renderRowSample, tracePath, applySurfaceTexture } from './trace.js'
 import { createRng } from './rng.js'
 import { createHit, intersect } from './bvh.js'
 import { denoise } from './denoise.js'
@@ -389,4 +389,48 @@ test('primaryRay with apertureRadius jitters origin and focuses on target', () =
   const yFocus = r.oy + r.dy * tFocus
   assert.ok(Math.abs(xFocus) < 0.05, `xFocus ${xFocus} should be near 0`)
   assert.ok(Math.abs(yFocus) < 0.05, `yFocus ${yFocus} should be near 0`)
+})
+
+test('shader presets (glossy, used, matte) produce distinct surface characteristics and run cleanly', () => {
+  const h = 40
+  const y = 0
+  const a = [-h, y, -h]
+  const b = [h, y, -h]
+  const c = [h, y, h]
+  const d = [-h, y, h]
+  const triangles = Float32Array.from([
+    ...a, ...b, ...c, 0.7, 0.1, 0.1, 1, 0,
+    ...a, ...c, ...d, 0.7, 0.1, 0.1, 1, 0,
+  ])
+  const camera = { position: [0, 80, 100], target: [0, 0, 0], up: [0, 1, 0], fovYDegrees: 45 }
+
+  const sceneGlossy = prepareScene({ width: 16, height: 16, camera, triangles, shader: 'glossy' })
+  const sceneUsed = prepareScene({ width: 16, height: 16, camera, triangles, shader: 'used' })
+  const sceneMatte = prepareScene({ width: 16, height: 16, camera, triangles, shader: 'matte' })
+
+  assert.equal(sceneGlossy.shader, 'glossy')
+  assert.equal(sceneUsed.shader, 'used')
+  assert.equal(sceneMatte.shader, 'matte')
+
+  const normalGlossy = new Float32Array([0, 1, 0])
+  const normalUsed = new Float32Array([0, 1, 0])
+  applySurfaceTexture('glossy', [10, 0, 15], normalGlossy, null)
+  applySurfaceTexture('used', [10, 0, 15], normalUsed, null)
+  // Used surface texture perturbs normal away from unperturbed normal
+  assert.ok(normalUsed[0] !== normalGlossy[0] || normalUsed[2] !== normalGlossy[2])
+
+  const rng = createRng(42)
+  const ray = createRay()
+  const outGlossy = new Float64Array(4)
+  const outUsed = new Float64Array(4)
+  const outMatte = new Float64Array(4)
+
+  primaryRay(sceneGlossy, 8, 8, 0.5, 0.5, ray)
+  tracePath(sceneGlossy, rng, ray, outGlossy)
+  tracePath(sceneUsed, rng, ray, outUsed)
+  tracePath(sceneMatte, rng, ray, outMatte)
+
+  assert.ok(outGlossy[3] > 0)
+  assert.ok(outUsed[3] > 0)
+  assert.ok(outMatte[3] > 0)
 })

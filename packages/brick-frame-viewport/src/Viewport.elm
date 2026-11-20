@@ -38,6 +38,7 @@ module Viewport exposing
     , snapshotPreviewRequest
     , snapshotRequest
     , snapshotRequestWithCrop
+    , snapshotRequestWithOptions
     , subscriptions
     , update
     , view
@@ -3407,7 +3408,33 @@ snapshotRequestWithCrop :
     -> Model
     -> Encode.Value
 snapshotRequestWithCrop config model =
-    Snapshot.encodeRequestWithCrop
+    snapshotRequestWithOptions
+        { filename = config.filename
+        , extraTriangles = config.extraTriangles
+        , crop = config.crop
+        , shader = Nothing
+        , width = Nothing
+        , height = Nothing
+        , timeBudgetMs = Nothing
+        }
+        model
+
+
+{-| Build a `captureRender` request with crop, shader preset, and quality options.
+-}
+snapshotRequestWithOptions :
+    { filename : String
+    , extraTriangles : List Float
+    , crop : Maybe Snapshot.CropRect
+    , shader : Maybe String
+    , width : Maybe Int
+    , height : Maybe Int
+    , timeBudgetMs : Maybe Int
+    }
+    -> Model
+    -> Encode.Value
+snapshotRequestWithOptions config model =
+    Snapshot.encodeRequestWithOptions
         { filename = config.filename
         , camera = model.camera
         , lightDirection = lightDirection model
@@ -3420,6 +3447,11 @@ snapshotRequestWithCrop config model =
                 }
                 ++ config.extraTriangles
         , crop = config.crop
+        , outlineEdges = Nothing
+        , shader = config.shader
+        , width = config.width
+        , height = config.height
+        , timeBudgetMs = config.timeBudgetMs
         }
 
 

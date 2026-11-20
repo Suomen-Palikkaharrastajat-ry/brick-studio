@@ -227,12 +227,18 @@ module I18n exposing
     , snapshotFramingLoading
     , snapshotFramingTitle
     , snapshotPathTracing
+    , snapshotQualityFast
+    , snapshotQualityHigh
+    , snapshotQualityStandard
     , snapshotReadyToSave
     , snapshotReframe
     , snapshotRenderAction
     , snapshotRenderNotice
     , snapshotResetCrop
     , snapshotSaveImage
+    , snapshotShaderGlossy
+    , snapshotShaderMatte
+    , snapshotShaderUsed
     , snapshotSavedImage
     , snapshotSavedNotice
     , snapshotSubtitle
@@ -3334,6 +3340,66 @@ snapshotAspect4_3 _ =
 snapshotAspect1_1 : Language -> String
 snapshotAspect1_1 _ =
     "1:1"
+
+
+snapshotShaderGlossy : Language -> String
+snapshotShaderGlossy lang =
+    case lang of
+        Fi ->
+            "Kiiltävä"
+
+        En ->
+            "Glossy"
+
+
+snapshotShaderUsed : Language -> String
+snapshotShaderUsed lang =
+    case lang of
+        Fi ->
+            "Kulunut"
+
+        En ->
+            "Used"
+
+
+snapshotShaderMatte : Language -> String
+snapshotShaderMatte lang =
+    case lang of
+        Fi ->
+            "Matta"
+
+        En ->
+            "Matte"
+
+
+snapshotQualityFast : Language -> String
+snapshotQualityFast lang =
+    case lang of
+        Fi ->
+            "Nopea"
+
+        En ->
+            "Fast"
+
+
+snapshotQualityStandard : Language -> String
+snapshotQualityStandard lang =
+    case lang of
+        Fi ->
+            "Normaali"
+
+        En ->
+            "Normal"
+
+
+snapshotQualityHigh : Language -> String
+snapshotQualityHigh lang =
+    case lang of
+        Fi ->
+            "Tarkka"
+
+        En ->
+            "High"
 
 
 snapshotPathTracing : Language -> Int -> String

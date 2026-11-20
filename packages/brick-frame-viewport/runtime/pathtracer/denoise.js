@@ -35,6 +35,58 @@ const SIGMA_ALBEDO = 0.02
 const NORMAL_POWER = 8
 
 /**
+ * Computes an interior surface mask in [0, 1] from 3x3 local neighborhood similarity.
+ *
+ * Geometric silhouettes, stud outlines, and color edges are boundary pixels where
+ * the single-sample center guide ray differs from the multi-sample antialiased pixel
+ * average. Preserving the true path-traced antialiased color and alpha along these
+ * boundaries avoids stair-stepped aliasing artifacts from demodulation.
+ */
+function computeInteriorMask(albedo, normal, width, height) {
+  const n = width * height
+  const mask = new Float32Array(n)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const p = y * width + x
+      const pc = p * 3
+      const nx = normal[pc]
+      const ny = normal[pc + 1]
+      const nz = normal[pc + 2]
+      const nlen = Math.hypot(nx, ny, nz)
+      const ar = albedo[pc]
+      const ag = albedo[pc + 1]
+      const ab = albedo[pc + 2]
+      let isInterior = 1.0
+      for (let dy = -1; dy <= 1; dy++) {
+        const qy = Math.max(0, Math.min(height - 1, y + dy))
+        for (let dx = -1; dx <= 1; dx++) {
+          const qx = Math.max(0, Math.min(width - 1, x + dx))
+          if (dx === 0 && dy === 0) continue
+          const qc = (qy * width + qx) * 3
+          if (nlen > 0.5) {
+            const dn = nx * normal[qc] + ny * normal[qc + 1] + nz * normal[qc + 2]
+            if (dn < 0.90) {
+              isInterior = 0.0
+              break
+            }
+          }
+          const dr = ar - albedo[qc]
+          const dg = ag - albedo[qc + 1]
+          const db = ab - albedo[qc + 2]
+          if (dr * dr + dg * dg + db * db > 0.04) {
+            isInterior = 0.0
+            break
+          }
+        }
+        if (isInterior === 0.0) break
+      }
+      mask[p] = isInterior
+    }
+  }
+  return mask
+}
+
+/**
  * Denoises `color` (3 floats per pixel), `alpha` (1 float per pixel), guided
  * by `albedo` and `normal` (3 floats per pixel each). Returns new buffers
  * `{ color, alpha }`.
@@ -55,10 +107,14 @@ export function denoise(color, alpha, albedo, normal, width, height, passes = PA
     ;[srcC, dstC] = [dstC, srcC]
     ;[srcA, dstA] = [dstA, srcA]
   }
+  const interior = computeInteriorMask(albedo, normal, width, height)
   for (let p = 0; p < n; p++) {
+    const m = interior[p]
     for (let k = 0; k < 3; k++) {
-      srcC[p * 3 + k] *= albedo[p * 3 + k] + DEMOD_EPSILON
+      const denoisedVal = srcC[p * 3 + k] * (albedo[p * 3 + k] + DEMOD_EPSILON)
+      srcC[p * 3 + k] = denoisedVal * m + color[p * 3 + k] * (1 - m)
     }
+    srcA[p] = srcA[p] * m + alpha[p] * (1 - m)
   }
   return { color: srcC, alpha: srcA }
 }
