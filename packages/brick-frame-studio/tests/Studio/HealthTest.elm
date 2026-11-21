@@ -292,16 +292,27 @@ overlapTests =
                         Health.plan noParts doc Set.empty issues
                 in
                 Expect.all
-                    [ \_ -> Expect.equal [ Misaligned { placement = 5 } ] issues
-                    , \_ -> Expect.equal [ 5 ] (List.map .placement fixes)
-                    , \_ -> Expect.equal [ SnapToStud ] (List.map .reason fixes)
+                    [ \_ ->
+                        Expect.equal
+                            [ Misaligned { placement = 3 }
+                            , Misaligned { placement = 5 }
+                            , Misaligned { placement = 12 }
+                            ]
+                            issues
+                    , \_ -> Expect.equal [ 3, 5, 12 ] (List.map .placement fixes)
+                    , \_ -> Expect.equal [ SnapToStud, SnapToStud, SnapToStud ] (List.map .reason fixes)
                     , \_ ->
                         case fixes of
-                            [ fix ] ->
-                                Expect.equal ( 80, 80 ) ( round (originX fix.to), round (originZ fix.to) )
+                            [ fix3, fix5, fix12 ] ->
+                                Expect.equal
+                                    [ ( 47, 120 ), ( 80, 80 ), ( 47, 40 ) ]
+                                    [ ( round (originX fix3.to), round (originZ fix3.to) )
+                                    , ( round (originX fix5.to), round (originZ fix5.to) )
+                                    , ( round (originX fix12.to), round (originZ fix12.to) )
+                                    ]
 
                             _ ->
-                                Expect.fail "expected one fix"
+                                Expect.fail "expected three fixes"
                     ]
                     ()
         , test "two overlapping 2 x 4 bricks give one overlap issue" <|

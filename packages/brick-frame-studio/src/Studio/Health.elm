@@ -652,7 +652,7 @@ inFootprint box point =
 
 isMisaligned : Item -> List Item -> Bool
 isMisaligned item others =
-    item.studRuled
+    (item.studRuled
         && Connectivity.isUpright item.conn item.matrix
         && not (connects item others)
         && (if restsOnGround item then
@@ -661,6 +661,8 @@ isMisaligned item others =
             else
                 not (List.isEmpty (supportStuds item others))
            )
+    )
+        || (wheelTireSnap item others /= Nothing)
 
 
 {-| The planned matrix that snaps a misaligned part, or `Nothing` when no
@@ -668,11 +670,100 @@ better place is known.
 -}
 snapTarget : Item -> List Item -> Maybe Mat4
 snapTarget item others =
-    if restsOnGround item then
-        groundSnap item
+    case wheelTireSnap item others of
+        Just mat ->
+            Just mat
+
+        Nothing ->
+            if restsOnGround item then
+                groundSnap item
+
+            else
+                supportSnap item others
+
+
+{-| If a tire is slightly off-center (between 0.5 and 8 LDU) from a compatible
+wheel rim with aligned axle normals, snap it concentrically onto the rim.
+-}
+wheelTireSnap : Item -> List Item -> Maybe Mat4
+wheelTireSnap item others =
+    let
+        tires =
+            wheelPoints item
+                |> List.filter
+                    (\p ->
+                        case p.connType of
+                            Connectivity.WheelTire _ ->
+                                True
+
+                            _ ->
+                                False
+                    )
+    in
+    if List.isEmpty tires then
+        Nothing
 
     else
-        supportSnap item others
+        let
+            otherRims =
+                List.concatMap wheelPoints others
+                    |> List.filter
+                        (\p ->
+                            case p.connType of
+                                Connectivity.WheelRim _ ->
+                                    True
+
+                                _ ->
+                                    False
+                        )
+
+            alreadyMounted =
+                List.any
+                    (\t ->
+                        List.any
+                            (\r ->
+                                Connectivity.isCompatible t.connType r.connType
+                                    && distance t.position r.position
+                                    <= coincideTolerance
+                            )
+                            otherRims
+                    )
+                    tires
+        in
+        if alreadyMounted then
+            Nothing
+
+        else
+            tires
+                |> List.concatMap
+                    (\t ->
+                        otherRims
+                            |> List.filterMap
+                                (\r ->
+                                    let
+                                        d =
+                                            distance t.position r.position
+                                    in
+                                    if
+                                        Connectivity.isCompatible t.connType r.connType
+                                            && (d > coincideTolerance)
+                                            && (d <= 8.0)
+                                            && (abs (Vec3.dot t.normal r.normal) > 0.9)
+                                    then
+                                        Just ( d, Vec3.sub r.position t.position )
+
+                                    else
+                                        Nothing
+                                )
+                    )
+                |> List.sortBy Tuple.first
+                |> List.head
+                |> Maybe.map
+                    (\( _, delta ) ->
+                        Mat4.mul
+                            (Mat4.makeTranslate3 (Vec3.getX delta) (Vec3.getY delta) (Vec3.getZ delta))
+                            item.matrix
+                    )
 
 
 groundSnap : Item -> Maybe Mat4
