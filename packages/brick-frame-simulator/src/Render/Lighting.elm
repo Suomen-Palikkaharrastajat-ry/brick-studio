@@ -21,7 +21,7 @@ type alias LightUniforms =
 {-| Default light: a directional source coming from slightly above and to the
 right, giving a gentle top-right highlight on most LEGO geometry.
 
-  - `lightDirection` — world-space direction *toward* the light (not away).
+  - `lightDirection` — world-space direction _toward_ the light (not away).
     Normalised before use in the shader via `normalize(lightDirection)`.
   - `ambientStrength = 0.55` — brighter matte fill for more LEGO-like color
     readability and less harsh contrast.

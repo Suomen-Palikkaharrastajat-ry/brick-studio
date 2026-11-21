@@ -5,10 +5,10 @@ module Render.SnapshotTest exposing (suite)
 -}
 
 import Expect
+import LDraw.ColorData exposing (Finish(..))
 import Math.Matrix4 as Mat4
 import Math.Vector3 as Vec3
 import Math.Vector4 as Vec4 exposing (Vec4)
-import LDraw.ColorData exposing (Finish(..))
 import Render.Mesh exposing (Vertex)
 import Render.Snapshot as Snapshot exposing (Placed)
 import Test exposing (Test, describe, test)

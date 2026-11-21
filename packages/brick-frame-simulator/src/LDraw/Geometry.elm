@@ -55,6 +55,7 @@ import Render.Mesh exposing (Vertex)
 import String
 
 
+
 -- ── Types ─────────────────────────────────────────────────────────────────────
 
 
@@ -154,6 +155,7 @@ flattenWith options lines cache parentColor worldTransform =
                 { triangles = [], lines = [], conditionalLines = [], bfcCertified = False }
     in
     { result | bfcCertified = bfc }
+
 
 
 -- ── Internal ──────────────────────────────────────────────────────────────────

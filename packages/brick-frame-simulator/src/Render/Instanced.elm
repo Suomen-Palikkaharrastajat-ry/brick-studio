@@ -6,8 +6,8 @@ module Render.Instanced exposing
     , render, visiblePlacements, detailFor
     , Frustum, frustumFromMatrix, sphereInFrustum, projectedRadiusPx
     , triangleBudgetExceeded
-    , renderWithGhost
     , renderMatrix, retarget
+    , renderWithGhost
     )
 
 {-| Instanced rendering of large LDraw models.
@@ -1046,7 +1046,7 @@ renderWithGhost config scene =
                             0.85
 
                         ColorData.Pearl ->
-                            0.50
+                            0.5
 
                         _ ->
                             0.0

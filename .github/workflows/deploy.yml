@@ -51,6 +51,9 @@ jobs:
           key: elm-${{ runner.os }}-${{ hashFiles('studio-app/elm.json', 'packages/*/elm.json') }}
           restore-keys: elm-${{ runner.os }}-
 
+      - name: Check Elm formatting
+        run: devenv shell --profile ci -- make elm-check
+
       - name: Run shared package unit tests
         run: devenv shell --profile ci -- make test-lib
 

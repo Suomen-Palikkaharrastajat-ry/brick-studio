@@ -4,7 +4,7 @@ module LDraw.ColorsTest exposing (suite)
 
 Exact RGB values come from the generated `LDraw.ColorData` table, which is
 derived from the official `LDConfig.ldr`. These tests therefore assert
-*coverage* and *special-code behavior* rather than pinning every channel, so
+_coverage_ and _special-code behavior_ rather than pinning every channel, so
 that a future LDraw colour revision does not break the suite.
 
 -}

@@ -830,7 +830,8 @@ wheelJoined a b =
             List.any
                 (\q ->
                     Connectivity.isCompatible p.connType q.connType
-                        && distance p.position q.position <= 2.0
+                        && distance p.position q.position
+                        <= 2.0
                 )
                 pointsB
         )

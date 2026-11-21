@@ -3,8 +3,8 @@ module Render.GuideShader exposing (Uniforms, fragmentShader, vertexShader)
 {-| Shader for helper guide lines (e.g. axle rotation arrows).
 -}
 
-import Render.EdgeShader exposing (EdgeVertex)
 import Math.Matrix4 exposing (Mat4)
+import Render.EdgeShader exposing (EdgeVertex)
 import WebGL exposing (Shader)
 
 

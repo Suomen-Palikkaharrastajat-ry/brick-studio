@@ -13,6 +13,7 @@ import Gear.Physics as Physics
 import Gear.Types exposing (GearGraph, GearId)
 
 
+
 -- ── Types ─────────────────────────────────────────────────────────────────────
 
 
@@ -29,6 +30,7 @@ type alias MotorState =
     , speedRadPerSec : Float
     , running : Bool
     }
+
 
 
 -- ── Public API ────────────────────────────────────────────────────────────────
