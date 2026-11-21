@@ -290,7 +290,6 @@ overlapTests =
 
                     fixes =
                         Health.plan noParts doc Set.empty issues
-
                 in
                 Expect.all
                     [ \_ -> Expect.equal [ Misaligned { placement = 5 } ] issues
