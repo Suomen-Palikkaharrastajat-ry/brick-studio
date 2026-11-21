@@ -225,6 +225,13 @@ An animation is encoded with an explicit `"motion"`: `"motor"` when
 gears as that frame's extra triangles; a frame may be empty), otherwise
 `"turntable"` (the camera makes one full turn around its target).
 
+`frames` is sent as `"frameCount"`: the runtime renders exactly that many
+frames (a motor animation renders one per `framesExtraTriangles` entry) and
+spreads `durationSeconds` over them with whole-millisecond frame durations.
+`"fps"` is also sent, as `max 1 (round (frames / durationSeconds))`, for older
+runtimes and logs only. `samplesPerPixel`, when given, overrides the runtime's
+per-resolution sample count for every frame.
+
 `viewAspect`, when given, is the aspect of the live view the camera was framed
 in: the camera keeps that aspect, `crop` is the frame within the view, and
 `width` × `height` is the exact output size.
@@ -241,7 +248,7 @@ encodeRequestWithOptions :
     , width : Maybe Int
     , height : Maybe Int
     , timeBudgetMs : Maybe Int
-    , animation : Maybe { fps : Int, durationSeconds : Float, framesExtraTriangles : Maybe (List (List Float)) }
+    , animation : Maybe { frames : Int, durationSeconds : Float, samplesPerPixel : Maybe Int, framesExtraTriangles : Maybe (List (List Float)) }
     , viewAspect : Maybe Float
     }
     -> Encode.Value
@@ -308,6 +315,14 @@ encodeRequestWithOptions config =
             case config.animation of
                 Just anim ->
                     let
+                        samplesField =
+                            case anim.samplesPerPixel of
+                                Just spp ->
+                                    [ ( "samplesPerPixel", Encode.int spp ) ]
+
+                                Nothing ->
+                                    []
+
                         framesField =
                             case anim.framesExtraTriangles of
                                 Just frames ->
@@ -322,9 +337,11 @@ encodeRequestWithOptions config =
                     in
                     [ ( "animation"
                       , Encode.object
-                            ([ ( "fps", Encode.int anim.fps )
+                            ([ ( "frameCount", Encode.int anim.frames )
+                             , ( "fps", Encode.int (animationFps anim) )
                              , ( "durationSeconds", Encode.float anim.durationSeconds )
                              ]
+                                ++ samplesField
                                 ++ framesField
                             )
                       )
@@ -383,3 +400,14 @@ encodeVec3 : Vec3 -> Encode.Value
 encodeVec3 v =
     Encode.list Encode.float
         [ Vec3.getX v, Vec3.getY v, Vec3.getZ v ]
+
+
+{-| The informational frame rate sent next to `frameCount`.
+-}
+animationFps : { a | frames : Int, durationSeconds : Float } -> Int
+animationFps anim =
+    if anim.durationSeconds <= 0 then
+        1
+
+    else
+        max 1 (round (toFloat anim.frames / anim.durationSeconds))

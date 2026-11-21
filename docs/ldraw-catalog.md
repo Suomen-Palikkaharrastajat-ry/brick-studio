@@ -245,6 +245,15 @@ allPending =
 4. **Binary Blob Storage in IndexedDB:**
    Store images as WebP/PNG `Blob` objects rather than `data:` URL strings to reduce IndexedDB memory footprint by 33%.
 
+### 4.5 Connectivity Coverage of the Curated Parts
+
+Every visible curated part (what Brick Play's search reaches) needs a hand-made `Connectivity.knownCatalogPart` entry; the primitive fallback gives parts without connector primitives no connections and a default 1 × 1 brick box. `packages/brick-frame-simulator/tests/LDraw/CuratedCoverageTest.elm` checks this against the committed, generated `tests/LDraw/CuratedParts.elm` (an allow-list names the parts that keep the fallback, with the reason). After a catalog curation change:
+
+```bash
+make curated-parts && make test-lib   # CATALOG=../brick-catalog/data/curated-parts.json by default, else the live index
+make check-curated-parts              # diffs CuratedParts.elm against CATALOG; skips when the catalog is absent
+```
+
 ---
 
 ## 5. Mobile Performance Benchmark Targets

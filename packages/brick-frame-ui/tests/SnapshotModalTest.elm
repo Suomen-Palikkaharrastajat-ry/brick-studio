@@ -11,6 +11,7 @@ import Test exposing (Test, describe, test)
 import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import Test.Runner
 import UI.SnapshotModal as SnapshotModal
 
 
@@ -244,13 +245,243 @@ suite =
                             , "About 2 min 10 s left"
                             , "About 13 min left"
                             ]
-            , test "the animation subtitle names the size and frame count" <|
+            , test "the animation subtitle names the size, frame count, length and loop" <|
                 \_ ->
                     SnapshotModal.init { filename = "render.webp" }
                         |> SnapshotModal.setMode SnapshotModal.ModeAnimation
                         |> SnapshotModal.view testActions
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "854 × 480 WebP animation, 20 frames" ]
+                        |> Query.has [ Selector.text "854 × 480 WebP animation, 48 frames, 6 s, seamless loop" ]
+            , test "the Finnish animation subtitle uses a decimal comma and leaves out the loop when not seamless" <|
+                \_ ->
+                    SnapshotModal.init { filename = "render.webp" }
+                        |> SnapshotModal.setMode SnapshotModal.ModeAnimation
+                        |> SnapshotModal.setAnimMotion (motor (Just 24) 60 60)
+                        |> SnapshotModal.viewWithLanguage Fi testActions
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "854 × 480 WebP-animaatio, 48 kuvaa, 6 s" ]
+            , test "snapshotAnimationSubtitle rounds seconds to a tenth in both languages" <|
+                \_ ->
+                    [ I18n.snapshotAnimationSubtitle Fi { width = 854, height = 480 } { frames = 72, seconds = 6, loop = True }
+                    , I18n.snapshotAnimationSubtitle En { width = 854, height = 480 } { frames = 72, seconds = 6, loop = True }
+                    , I18n.snapshotAnimationSubtitle Fi { width = 1280, height = 720 } { frames = 48, seconds = 2.5, loop = False }
+                    , I18n.snapshotAnimationSubtitle En { width = 1280, height = 720 } { frames = 48, seconds = 7.2000001, loop = False }
+                    ]
+                        |> Expect.equal
+                            [ "854 × 480 WebP-animaatio, 72 kuvaa, 6 s, saumaton silmukka"
+                            , "854 × 480 WebP animation, 72 frames, 6 s, seamless loop"
+                            , "1280 × 720 WebP-animaatio, 48 kuvaa, 2,5 s"
+                            , "1280 × 720 WebP animation, 48 frames, 7.2 s"
+                            ]
+            ]
+        , describe "Animation options"
+            [ test "init and initFraming default to Normal, a 6 s turn, 480p, 1× and a turntable" <|
+                \_ ->
+                    [ SnapshotModal.init { filename = "a.webp" }, SnapshotModal.initFraming { filename = "a.png" } ]
+                        |> List.map
+                            (\m ->
+                                ( ( SnapshotModal.getAnimSmoothness m, SnapshotModal.getAnimTurnTime m )
+                                , ( SnapshotModal.getAnimResolution m, SnapshotModal.getAnimSpeed m )
+                                , SnapshotModal.getAnimMotion m
+                                )
+                            )
+                        |> Expect.equal
+                            (List.repeat 2
+                                ( ( SnapshotModal.SmoothNormal, SnapshotModal.Turn6s )
+                                , ( SnapshotModal.Res480p, SnapshotModal.Speed1x )
+                                , SnapshotModal.AnimTurntable
+                                )
+                            )
+            , test "a still has no animation request" <|
+                \_ ->
+                    SnapshotModal.initFraming { filename = "a.png" }
+                        |> SnapshotModal.getAnimation
+                        |> Expect.equal Nothing
+            , test "a turntable has the smoothness level's frames over one seamless turn" <|
+                \_ ->
+                    [ ( SnapshotModal.SmoothQuick, SnapshotModal.Turn6s )
+                    , ( SnapshotModal.SmoothNormal, SnapshotModal.Turn6s )
+                    , ( SnapshotModal.SmoothSmooth, SnapshotModal.Turn10s )
+                    ]
+                        |> List.map (\( smooth, turn ) -> clipOf (animModel |> SnapshotModal.setAnimSmoothness smooth |> SnapshotModal.setAnimTurnTime turn))
+                        |> Expect.equal
+                            [ { frames = 36, playbackSeconds = 6, simulatedSeconds = 6, seamless = True }
+                            , { frames = 48, playbackSeconds = 6, simulatedSeconds = 6, seamless = True }
+                            , { frames = 96, playbackSeconds = 10, simulatedSeconds = 10, seamless = True }
+                            ]
+            , test "the turn time does not change a motor clip" <|
+                \_ ->
+                    animModel
+                        |> SnapshotModal.setAnimMotion (motor (Just 6) 30 30)
+                        |> SnapshotModal.setAnimTurnTime SnapshotModal.Turn10s
+                        |> clipOf
+                        |> Expect.equal { frames = 48, playbackSeconds = 6, simulatedSeconds = 6, seamless = True }
+            , test "8T→24T at 30 RPM loops its 6 s cycle seamlessly, capped by the smoothness level" <|
+                \_ ->
+                    [ SnapshotModal.SmoothQuick, SnapshotModal.SmoothNormal, SnapshotModal.SmoothSmooth ]
+                        |> List.map (\smooth -> clipOf (animModel |> SnapshotModal.setAnimMotion (motor (Just 6) 30 30) |> SnapshotModal.setAnimSmoothness smooth))
+                        |> Expect.equal
+                            [ { frames = 36, playbackSeconds = 6, simulatedSeconds = 6, seamless = True }
+                            , { frames = 48, playbackSeconds = 6, simulatedSeconds = 6, seamless = True }
+                            , { frames = 96, playbackSeconds = 6, simulatedSeconds = 6, seamless = True }
+                            ]
+            , test "a short cycle plays at most 30 frames a second" <|
+                \_ ->
+                    animModel
+                        |> SnapshotModal.setAnimMotion (motor (Just 2) 30 30)
+                        |> SnapshotModal.setAnimSmoothness SnapshotModal.SmoothSmooth
+                        |> clipOf
+                        |> Expect.equal { frames = 60, playbackSeconds = 2, simulatedSeconds = 2, seamless = True }
+            , test "a cycle under 1 s is repeated until it lasts at least 1 s" <|
+                \_ ->
+                    [ 0.4, 1 / 3, 0.5 ]
+                        |> List.map (\c -> clipOf (animModel |> SnapshotModal.setAnimMotion (motor (Just c) 30 30)))
+                        |> List.map (\clip -> ( clip.frames, round (clip.simulatedSeconds * 1000), clip.seamless ))
+                        |> Expect.equal [ ( 36, 1200, True ), ( 30, 1000, True ), ( 30, 1000, True ) ]
+            , test "a cycle over 10 s or an unknown one falls back to about 6 s of whole motor turns, not seamless" <|
+                \_ ->
+                    [ motor (Just 12) 30 30, motor Nothing 30 30, motor (Just 24) 60 60, motor (Just 57.6) 25 25 ]
+                        |> List.map (\m -> clipOf (animModel |> SnapshotModal.setAnimMotion m))
+                        |> List.map (\clip -> ( clip.frames, round (clip.playbackSeconds * 1000), ( round (clip.simulatedSeconds * 1000), clip.seamless ) ))
+                        |> Expect.equal
+                            [ ( 48, 6000, ( 6000, False ) )
+                            , ( 48, 6000, ( 6000, False ) )
+                            , ( 48, 6000, ( 6000, False ) )
+                            , ( 48, 7200, ( 7200, False ) )
+                            ]
+            , test "an unknown cycle still makes a motor animation with the motor's whole turns" <|
+                \_ ->
+                    animModel
+                        |> SnapshotModal.setAnimMotion (motor Nothing 150 5)
+                        |> Expect.all
+                            [ \m -> SnapshotModal.slowMotionOffered m |> Expect.equal False
+                            , \m -> clipOf m |> Expect.equal { frames = 48, playbackSeconds = 12, simulatedSeconds = 12, seamless = False }
+                            ]
+            , test "slow motion is hidden for a turntable and for slow parts" <|
+                \_ ->
+                    [ animModel
+                    , animModel |> SnapshotModal.setAnimMotion (motor (Just 6) 30 30)
+                    , animModel |> SnapshotModal.setAnimMotion (motor (Just 2) 30 30) |> SnapshotModal.setAnimSmoothness SnapshotModal.SmoothSmooth
+                    ]
+                        |> List.map SnapshotModal.slowMotionOffered
+                        |> Expect.equal [ False, False, False ]
+            , test "slow motion is hidden when the frames are already capped by the smoothness level" <|
+                \_ ->
+                    -- 8T→24T at 90 RPM: a 2 s cycle, the 8T at 90 RPM; Normal caps at 48 frames.
+                    animModel
+                        |> SnapshotModal.setAnimMotion (motor (Just 2) 90 90)
+                        |> SnapshotModal.slowMotionOffered
+                        |> Expect.equal False
+            , test "slow motion is offered at 90 RPM with Smooth and slows the same cycle down" <|
+                \_ ->
+                    animModel
+                        |> SnapshotModal.setAnimMotion (motor (Just 2) 90 90)
+                        |> SnapshotModal.setAnimSmoothness SnapshotModal.SmoothSmooth
+                        |> Expect.all
+                            [ \m -> SnapshotModal.slowMotionOffered m |> Expect.equal True
+                            , \m -> clipOf m |> Expect.equal { frames = 60, playbackSeconds = 2, simulatedSeconds = 2, seamless = True }
+                            , \m ->
+                                clipOf (SnapshotModal.setAnimSpeed SnapshotModal.SpeedHalf m)
+                                    |> Expect.equal { frames = 96, playbackSeconds = 4, simulatedSeconds = 2, seamless = True }
+                            , \m ->
+                                SnapshotModal.getAnimation (SnapshotModal.setAnimSpeed SnapshotModal.SpeedHalf m)
+                                    |> Expect.equal (Just { frames = 96, durationSeconds = 4, simulatedSeconds = 2, samplesPerPixel = Nothing })
+                            ]
+            , test "¼× is not offered when ½× already fills the frames, and a ¼× choice then acts as ½×" <|
+                \_ ->
+                    -- 40T→8T at 30 RPM: a 2 s cycle, the 8T at 150 RPM.
+                    animModel
+                        |> SnapshotModal.setAnimMotion (motor (Just 2) 150 30)
+                        |> SnapshotModal.setAnimSmoothness SnapshotModal.SmoothSmooth
+                        |> SnapshotModal.setAnimSpeed SnapshotModal.SpeedQuarter
+                        |> Expect.all
+                            [ \m -> clipOf m |> Expect.equal { frames = 96, playbackSeconds = 4, simulatedSeconds = 2, seamless = True }
+                            , \m -> hasTestId "anim-speed-half" m |> Expect.equal True
+                            , \m -> hasTestId "anim-speed-quarter" m |> Expect.equal False
+                            ]
+            , test "¼× is offered when the ½× clip still has fewer frames than allowed" <|
+                \_ ->
+                    -- 40T→8T at 60 RPM: a 1 s cycle, the 8T at 300 RPM.
+                    animModel
+                        |> SnapshotModal.setAnimMotion (motor (Just 1) 300 60)
+                        |> SnapshotModal.setAnimSmoothness SnapshotModal.SmoothSmooth
+                        |> Expect.all
+                            [ \m -> clipOf m |> Expect.equal { frames = 30, playbackSeconds = 1, simulatedSeconds = 1, seamless = True }
+                            , \m -> clipOf (SnapshotModal.setAnimSpeed SnapshotModal.SpeedHalf m) |> Expect.equal { frames = 60, playbackSeconds = 2, simulatedSeconds = 1, seamless = True }
+                            , \m -> clipOf (SnapshotModal.setAnimSpeed SnapshotModal.SpeedQuarter m) |> Expect.equal { frames = 96, playbackSeconds = 4, simulatedSeconds = 1, seamless = True }
+                            , \m -> List.map (\id -> hasTestId id m) [ "anim-speed-1x", "anim-speed-half", "anim-speed-quarter" ] |> Expect.equal [ True, True, True ]
+                            ]
+            , test "slowing a repeated short cycle keeps the 1× simulated time" <|
+                \_ ->
+                    -- A 0.4 s cycle (motor gear not animated, output 5× faster) repeats to 1.2 s.
+                    animModel
+                        |> SnapshotModal.setAnimMotion (motor (Just 0.4) 150 30)
+                        |> SnapshotModal.setAnimSpeed SnapshotModal.SpeedHalf
+                        |> clipOf
+                        |> (\clip -> ( clip.frames, round (clip.playbackSeconds * 1000), ( round (clip.simulatedSeconds * 1000), clip.seamless ) ))
+                        |> Expect.equal ( 48, 2400, ( 1200, True ) )
+            , test "a ½× choice has no effect when slow motion is not offered" <|
+                \_ ->
+                    animModel
+                        |> SnapshotModal.setAnimMotion (motor (Just 6) 30 30)
+                        |> SnapshotModal.setAnimSpeed SnapshotModal.SpeedHalf
+                        |> clipOf
+                        |> Expect.equal { frames = 48, playbackSeconds = 6, simulatedSeconds = 6, seamless = True }
+            , test "a motor animation without slow motion shows neither turn-time nor speed pills" <|
+                \_ ->
+                    animModel
+                        |> SnapshotModal.setAnimMotion (motor (Just 6) 30 30)
+                        |> (\m -> List.map (\id -> hasTestId id m) [ "anim-smooth-normal", "anim-turn-6s", "anim-speed-1x", "anim-speed-half" ])
+                        |> Expect.equal [ True, False, False, False ]
+            , test "720p asks for 10 samples per pixel, 480p leaves it to the renderer" <|
+                \_ ->
+                    [ SnapshotModal.Res720p, SnapshotModal.Res480p ]
+                        |> List.map (\res -> animModel |> SnapshotModal.setAnimResolution res |> SnapshotModal.getAnimation |> Maybe.andThen .samplesPerPixel)
+                        |> Expect.equal [ Just 10, Nothing ]
+            , test "setAnimMotion keeps a finished animation on screen" <|
+                \_ ->
+                    readyModel
+                        |> SnapshotModal.setAnimMotion (motor (Just 6) 30 30)
+                        |> SnapshotModal.isFraming
+                        |> Expect.equal False
+            , test "choosing a smoothness or turn time on a finished animation goes back to framing" <|
+                \_ ->
+                    [ readyModel |> SnapshotModal.handleInteraction (SnapshotModal.SelectAnimSmoothness SnapshotModal.SmoothQuick)
+                    , readyModel |> SnapshotModal.handleInteraction (SnapshotModal.SelectAnimTurnTime SnapshotModal.Turn10s)
+                    ]
+                        |> List.map SnapshotModal.isFraming
+                        |> Expect.equal [ True, True ]
+            , test "the camera overlay shows the clip's frame count" <|
+                \_ ->
+                    animModel
+                        |> SnapshotModal.setAnimSmoothness SnapshotModal.SmoothQuick
+                        |> SnapshotModal.viewCameraOverlay En cameraActions { width = 1280, height = 800 }
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "854 × 480 WebP animation, 36 frames, 6 s, seamless loop" ]
+            , test "motorCycle converts turns, ratio and signed RPM into a MotorCycle" <|
+                \_ ->
+                    [ SnapshotModal.motorCycle 30 { motorTurns = Just 3, maxSpeedRatio = 2 }
+                    , SnapshotModal.motorCycle -15 { motorTurns = Just 3, maxSpeedRatio = 2 }
+                    , SnapshotModal.motorCycle 0 { motorTurns = Just 3, maxSpeedRatio = 2 }
+                    , SnapshotModal.motorCycle 30 { motorTurns = Nothing, maxSpeedRatio = 0.5 }
+                    ]
+                        |> Expect.equal
+                            [ { cycleSeconds = Just 6, fastestRpm = 60, motorRpm = 30 }
+                            , { cycleSeconds = Just 12, fastestRpm = 30, motorRpm = 15 }
+                            , { cycleSeconds = Nothing, fastestRpm = 0, motorRpm = 0 }
+                            , { cycleSeconds = Nothing, fastestRpm = 15, motorRpm = 30 }
+                            ]
+            , test "frameTime advances evenly from startTime across simulatedSeconds" <|
+                \_ ->
+                    let
+                        clip =
+                            { frames = 20, simulatedSeconds = 1.0 }
+                    in
+                    Expect.all
+                        [ \_ -> List.map (SnapshotModal.frameTime 1.5 clip) [ 0, 10, 20 ] |> Expect.equal [ 1.5, 2.0, 2.5 ]
+                        , \_ -> SnapshotModal.frameTime 2.0 { frames = 0, simulatedSeconds = 3.0 } 1 |> Expect.equal 5.0
+                        ]
+                        ()
             ]
         , describe "Failed view"
             [ test "shows the error and a Close button, without Save" <|
@@ -424,8 +655,8 @@ suite =
                             readyModel
                                 |> SnapshotModal.handleInteraction (SnapshotModal.SelectOutputMode SnapshotModal.ModeAnimation)
                                 |> SnapshotModal.handleInteraction (SnapshotModal.SelectAnimResolution SnapshotModal.Res720p)
-                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectAnimFps SnapshotModal.Fps30)
-                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectAnimDuration SnapshotModal.Dur6s)
+                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectAnimSmoothness SnapshotModal.SmoothSmooth)
+                                |> SnapshotModal.handleInteraction (SnapshotModal.SelectAnimTurnTime SnapshotModal.Turn10s)
 
                         dims =
                             SnapshotModal.effectiveDimensions modal
@@ -436,16 +667,17 @@ suite =
                     Expect.all
                         [ \m -> SnapshotModal.getMode m |> Expect.equal SnapshotModal.ModeAnimation
                         , \m -> SnapshotModal.getAnimResolution m |> Expect.equal SnapshotModal.Res720p
-                        , \m -> SnapshotModal.getAnimFps m |> Expect.equal SnapshotModal.Fps30
-                        , \m -> SnapshotModal.getAnimDuration m |> Expect.equal SnapshotModal.Dur6s
+                        , \m -> SnapshotModal.getAnimSmoothness m |> Expect.equal SnapshotModal.SmoothSmooth
+                        , \m -> SnapshotModal.getAnimTurnTime m |> Expect.equal SnapshotModal.Turn10s
                         , \m -> SnapshotModal.effectiveFilename m |> Expect.equal "test.webp"
                         , \_ -> Expect.equal 1280 dims.width
                         , \_ -> Expect.equal 720 dims.height
-                        , \_ -> Expect.equal (Just { fps = 30, durationSeconds = 6.0, speedMultiplier = 0.5 }) anim
+                        , \_ -> Expect.equal 60000 dims.timeBudgetMs
+                        , \_ -> Expect.equal (Just { frames = 96, durationSeconds = 10, simulatedSeconds = 10, samplesPerPixel = Just 10 }) anim
                         , \m -> SnapshotModal.isFraming m |> Expect.equal True
                         ]
                         modal
-            , test "viewFramingWithLanguage in animation mode displays animation resolution, fps, duration, and speed pills" <|
+            , test "viewFramingWithLanguage in animation mode shows resolution, smoothness and turn-time pills for a turntable" <|
                 \_ ->
                     SnapshotModal.initFraming { filename = "frame.png" }
                         |> SnapshotModal.setMode SnapshotModal.ModeAnimation
@@ -456,16 +688,21 @@ suite =
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "mode-anim") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-res-720p") ] q
                             , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-res-480p") ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-res-360p") ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-10") ] q
-                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-15") ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-30") ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-2s") ] q
-                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-4s") ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-6s") ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-1x") ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-half") ] q
-                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-quarter") ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-res-360p") ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-10") ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-fps-30") ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-2s") ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-dur-6s") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-smooth-quick") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-smooth-normal") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-smooth-smooth") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-turn-6s") ] q
+                            , \q -> Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-turn-10s") ] q
+                            , \q -> Query.has [ Selector.text "6 s turn" ] q
+                            , \q -> Query.has [ Selector.text "Normal" ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-1x") ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-half") ] q
+                            , \q -> Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "anim-speed-quarter") ] q
                             , \q -> Query.hasNot [ Selector.text "View" ] q
                             , \q -> Query.hasNot [ Selector.text "16:9" ] q
                             , \q -> Query.hasNot [ Selector.text "4:3" ] q
@@ -581,6 +818,47 @@ suite =
                         |> Expect.equal { width = 1920, height = 1920 }
             ]
         ]
+
+
+{-| A framing modal in animation mode.
+-}
+animModel : SnapshotModal.Model
+animModel =
+    SnapshotModal.initFraming { filename = "a.png" }
+        |> SnapshotModal.setMode SnapshotModal.ModeAnimation
+
+
+motor : Maybe Float -> Float -> Float -> SnapshotModal.AnimMotion
+motor cycleSeconds fastestRpm motorRpm =
+    SnapshotModal.AnimMotor { cycleSeconds = cycleSeconds, fastestRpm = fastestRpm, motorRpm = motorRpm }
+
+
+{-| The clip, with its times rounded to the millisecond so float noise does not matter.
+-}
+clipOf : SnapshotModal.Model -> SnapshotModal.AnimClip
+clipOf modal =
+    let
+        clip =
+            SnapshotModal.animationClip modal
+
+        ms x =
+            toFloat (round (x * 1000)) / 1000
+    in
+    { clip | playbackSeconds = ms clip.playbackSeconds, simulatedSeconds = ms clip.simulatedSeconds }
+
+
+hasTestId : String -> SnapshotModal.Model -> Bool
+hasTestId testId modal =
+    let
+        html =
+            SnapshotModal.viewFramingWithLanguage En testFramingActions modal
+    in
+    case Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" testId) ] (Query.fromHtml html) |> Test.Runner.getFailureReason of
+        Nothing ->
+            True
+
+        Just _ ->
+            False
 
 
 cameraActions : SnapshotModal.CameraActions TestMsg

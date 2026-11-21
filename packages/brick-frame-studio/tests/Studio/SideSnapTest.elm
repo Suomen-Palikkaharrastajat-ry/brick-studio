@@ -29,6 +29,7 @@ suite =
         , multiAntiStudSelectionTests
         , fourStepRotationTests
         , solveSideSnapTests
+        , clipAndBarSideTargetTests
         ]
 
 
@@ -530,4 +531,77 @@ solveSideSnapTests =
 
                     _ ->
                         Expect.fail "3070b.dat or 87087.dat not found in catalog"
+        ]
+
+
+{-| The clip-point fix makes a clip's normal the held bar's axis: a vertical clip
+(4085c) is no longer a side target, while a horizontal clip (61252) and a lying bar are.
+-}
+clipAndBarSideTargetTests : Test
+clipAndBarSideTargetTests =
+    let
+        worldPoints file matrix placementId =
+            knownCatalogPart file
+                |> Maybe.map (.connections >> List.map (Connectivity.transformPoint matrix placementId))
+                |> Maybe.withDefault []
+
+        -- a ray along +Z through the clip of a 1 x 1 clip plate at the origin
+        rayAt position =
+            { origin = Vec3.add position (vec3 0 0 -100), direction = vec3 0 0 1 }
+
+        isClip t =
+            t.connType == ClipMale { width = 4.0 }
+    in
+    describe "clips and bars as side targets"
+        [ test "4085c's vertical clip is not a side target" <|
+            \_ ->
+                SideSnap.targetsNearRay (rayAt (vec3 0 4 -20)) 16.0 (worldPoints "4085c.dat" Mat4.identity 1)
+                    |> List.filter isClip
+                    |> Expect.equal []
+        , test "61252's horizontal clip is a side target" <|
+            \_ ->
+                SideSnap.targetsNearRay (rayAt (vec3 0 2 -20)) 16.0 (worldPoints "61252.dat" Mat4.identity 1)
+                    |> List.filter isClip
+                    |> List.map .pointId
+                    |> Expect.equal [ 20 ]
+        , test "a lying bar's points are side targets" <|
+            \_ ->
+                let
+                    lying =
+                        Mat4.makeRotate (pi / 2) (vec3 0 0 1)
+                in
+                SideSnap.targetsNearRay { origin = vec3 -30 0 -100, direction = vec3 0 0 1 } 40.0 (worldPoints "87994.dat" lying 1)
+                    |> List.isEmpty
+                    |> Expect.equal False
+        , test "dragging 87994 near a 61252 seats a bar point on the clip point" <|
+            \_ ->
+                case knownCatalogPart "87994.dat" of
+                    Just bar ->
+                        let
+                            clipPoint =
+                                vec3 0 2 -20
+
+                            maybeSnap =
+                                SideSnap.solveSideSnap
+                                    (\_ -> True)
+                                    24.0
+                                    0
+                                    20.0
+                                    (rayAt clipPoint)
+                                    (Mat4.makeTranslate3 4 -30 -26)
+                                    bar.connections
+                                    (worldPoints "61252.dat" Mat4.identity 1)
+                        in
+                        case maybeSnap of
+                            Just snap ->
+                                bar.connections
+                                    |> List.map (\c -> Mat4.transform snap.snapMatrix c.localPosition)
+                                    |> List.any (\p -> Vec3.distance p clipPoint < 0.01)
+                                    |> Expect.equal True
+
+                            Nothing ->
+                                Expect.fail "solveSideSnap found no seat on the 61252 clip"
+
+                    Nothing ->
+                        Expect.fail "87994.dat not found in catalog"
         ]

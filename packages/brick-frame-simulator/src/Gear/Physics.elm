@@ -1,12 +1,15 @@
 module Gear.Physics exposing
     ( KinematicLinkage
     , LinkageState
+    , Ratio
     , angleAt
     , crankSliderPosition
     , crankSliderRodAngle
+    , cycleMotorTurns
     , defaultMotorGearId
     , fourBarAngles
     , propagate
+    , propagateRatios
     , propagateWithLinkages
     )
 
@@ -55,6 +58,15 @@ axis or moving the wheel to the opposite side reverses the sign.
 For non-worm meshes, degenerate geometry (coincident centres, no pitch point)
 falls back to the same-orientation rule `−teeth1/teeth2`.
 
+
+## Exact cycles
+
+`propagateRatios` walks the same BFS tree as `propagate` but keeps each gear's
+speed ratio magnitude as a reduced fraction. `cycleMotorTurns` turns a list of
+such ratios into the smallest number of motor turns after which every one of
+those gears has made a whole number of revolutions, so an animation of that
+length loops seamlessly.
+
 -}
 
 import Array
@@ -74,6 +86,15 @@ type alias KinematicLinkage =
     , crankRadius : Float
     , rodLength : Float
     , crankOffset : Float
+    }
+
+
+{-| An exact, non-negative gear speed ratio `num / den` (turns of a gear per
+motor turn), always reduced.
+-}
+type alias Ratio =
+    { num : Int
+    , den : Int
     }
 
 
@@ -104,7 +125,18 @@ propagate graph motorId motorAngle =
     case gearInstance graph motorId of
         Just motor ->
             if motor.spec.rotates && motor.spec.motorCapable then
-                bfsStep graph
+                bfsWith
+                    { mesh = \g1 g2 angle -> angle * meshRatio g1 g2
+                    , rigid =
+                        \pair angle ->
+                            case pair of
+                                Just ( g1, g2 ) ->
+                                    angle * rigidSign g1 g2
+
+                                Nothing ->
+                                    angle
+                    }
+                    graph
                     [ ( motorId, motorAngle ) ]
                     (Set.singleton motorId)
                     (Dict.singleton motorId motorAngle)
@@ -114,6 +146,110 @@ propagate graph motorId motorAngle =
 
         Nothing ->
             Dict.empty
+
+
+{-| Exact speed ratio magnitudes from the motor gear to every reachable gear.
+
+    propagateRatios graph motorId
+
+Uses the same BFS tree (and the same fallbacks) as `propagate`, so for every
+gear `g` in the result `toFloat num / toFloat den == abs (angle g / motorAngle)`
+for `propagate graph motorId motorAngle`. A mesh edge multiplies by
+`teeth1 / teeth2` (a worm's `teeth` holds its start count); a rigid coaxial
+edge keeps the ratio. The motor gear maps to `1 / 1`.
+
+-}
+propagateRatios : GearGraph -> GearId -> Dict GearId Ratio
+propagateRatios graph motorId =
+    case gearInstance graph motorId of
+        Just motor ->
+            if motor.spec.rotates && motor.spec.motorCapable then
+                let
+                    one =
+                        { num = 1, den = 1 }
+                in
+                bfsWith
+                    { mesh =
+                        \g1 g2 ratio ->
+                            reduceRatio
+                                { num = ratio.num * abs g1.spec.teeth
+                                , den = ratio.den * abs g2.spec.teeth
+                                }
+                    , rigid = \_ ratio -> ratio
+                    }
+                    graph
+                    [ ( motorId, one ) ]
+                    (Set.singleton motorId)
+                    (Dict.singleton motorId one)
+
+            else
+                Dict.empty
+
+        Nothing ->
+            Dict.empty
+
+
+{-| The smallest number of motor turns after which every gear with one of the
+given speed ratios is back at its starting angle (has made a whole number of
+revolutions): `lcm dens / gcd nums` for reduced ratios.
+
+Ratios with `num = 0` (gears that do not turn) are ignored. Returns `Nothing`
+for an empty list, for a ratio with `den = 0`, when the cycle would need more
+than 10000 motor turns' worth of denominator (`lcm dens > 10000`), which is
+far longer than any useful animation, and when a reduced `num` is over 10000
+(a train so fast that its exact ratios would lose precision as Ints).
+
+    cycleMotorTurns [ { num = 1, den = 1 }, { num = 1, den = 3 } ] == Just 3
+
+-}
+cycleMotorTurns : List Ratio -> Maybe Float
+cycleMotorTurns ratios =
+    let
+        turning =
+            ratios
+                |> List.map reduceRatio
+                |> List.filter (\r -> r.num /= 0)
+
+        step r acc =
+            case acc of
+                Nothing ->
+                    Nothing
+
+                Just ( l, g ) ->
+                    if r.den <= 0 || r.num > maxCycleDenominator then
+                        Nothing
+
+                    else
+                        let
+                            nextL =
+                                lcmInt l r.den
+                        in
+                        if nextL > maxCycleDenominator then
+                            Nothing
+
+                        else
+                            Just ( nextL, gcdInt g r.num )
+    in
+    if List.isEmpty turning then
+        Nothing
+
+    else
+        List.foldl step (Just ( 1, 0 )) turning
+            |> Maybe.andThen
+                (\( l, g ) ->
+                    if g <= 0 then
+                        Nothing
+
+                    else
+                        Just (toFloat l / toFloat g)
+                )
+
+
+{-| The largest `lcm dens` and reduced `num` `cycleMotorTurns` accepts.
+-}
+maxCycleDenominator : Int
+maxCycleDenominator =
+    10000
 
 
 {-| Choose the motor-capable rotating gear whose directed traversal reaches the
@@ -292,19 +428,28 @@ propagateWithLinkages graph linkages motorId motorAngle =
 
 
 {-| Iterative BFS over the gear graph using an explicit queue.
+
+`propagate` and `propagateRatios` share this traversal, so both visit gears
+through exactly the same tree. `mesh g1 g2 value` gives a mesh neighbour's
+value from the current gear's; `rigid` does the same for a coaxial neighbour
+(`Nothing` when an instance is missing, which keeps the value).
+
 -}
-bfsStep :
-    GearGraph
-    -> List ( GearId, Float )
+bfsWith :
+    { mesh : GearInstance -> GearInstance -> a -> a
+    , rigid : Maybe ( GearInstance, GearInstance ) -> a -> a
+    }
+    -> GearGraph
+    -> List ( GearId, a )
     -> Set GearId
-    -> Dict GearId Float
-    -> Dict GearId Float
-bfsStep graph queue visited angles =
+    -> Dict GearId a
+    -> Dict GearId a
+bfsWith step graph queue visited values =
     case queue of
         [] ->
-            angles
+            values
 
-        ( currentId, currentAngle ) :: rest ->
+        ( currentId, currentValue ) :: rest ->
             let
                 neighbours =
                     Dict.get currentId graph.connections |> Maybe.withDefault []
@@ -322,50 +467,82 @@ bfsStep graph queue visited angles =
                         (\n -> not (Set.member n visited) && isRotatingGear graph n)
                         rigidNeighbours
 
-                ( newVisited, newAngles, newEntries ) =
+                ( newVisited, newValues, newEntries ) =
                     List.foldl
-                        (\neighbourId ( vis, ang, entries ) ->
+                        (\neighbourId ( vis, vals, entries ) ->
                             case ( gearInstance graph currentId, gearInstance graph neighbourId ) of
                                 ( Just g1, Just g2 ) ->
                                     let
-                                        neighbourAngle =
-                                            currentAngle * meshRatio g1 g2
+                                        neighbourValue =
+                                            step.mesh g1 g2 currentValue
                                     in
                                     ( Set.insert neighbourId vis
-                                    , Dict.insert neighbourId neighbourAngle ang
-                                    , ( neighbourId, neighbourAngle ) :: entries
+                                    , Dict.insert neighbourId neighbourValue vals
+                                    , ( neighbourId, neighbourValue ) :: entries
                                     )
 
                                 _ ->
-                                    ( vis, ang, entries )
+                                    ( vis, vals, entries )
                         )
-                        ( visited, angles, [] )
+                        ( visited, values, [] )
                         unvisited
 
-                ( newVisited2, newAngles2, newEntries2 ) =
+                ( newVisited2, newValues2, newEntries2 ) =
                     List.foldl
-                        (\neighbourId ( vis, ang, entries ) ->
+                        (\neighbourId ( vis, vals, entries ) ->
                             let
-                                neighbourAngle =
-                                    case ( gearInstance graph currentId, gearInstance graph neighbourId ) of
-                                        ( Just g1, Just g2 ) ->
-                                            currentAngle * rigidSign g1 g2
-
-                                        _ ->
-                                            currentAngle
+                                neighbourValue =
+                                    step.rigid
+                                        (Maybe.map2 Tuple.pair
+                                            (gearInstance graph currentId)
+                                            (gearInstance graph neighbourId)
+                                        )
+                                        currentValue
                             in
                             ( Set.insert neighbourId vis
-                            , Dict.insert neighbourId neighbourAngle ang
-                            , ( neighbourId, neighbourAngle ) :: entries
+                            , Dict.insert neighbourId neighbourValue vals
+                            , ( neighbourId, neighbourValue ) :: entries
                             )
                         )
-                        ( newVisited, newAngles, [] )
+                        ( newVisited, newValues, [] )
                         unvisitedRigid
             in
-            bfsStep graph
+            bfsWith step
+                graph
                 (rest ++ List.reverse newEntries ++ List.reverse newEntries2)
                 newVisited2
-                newAngles2
+                newValues2
+
+
+reduceRatio : Ratio -> Ratio
+reduceRatio r =
+    let
+        g =
+            gcdInt r.num r.den
+    in
+    if g <= 1 then
+        r
+
+    else
+        { num = r.num // g, den = r.den // g }
+
+
+gcdInt : Int -> Int -> Int
+gcdInt a b =
+    if b == 0 then
+        abs a
+
+    else
+        gcdInt b (modBy (abs b) a)
+
+
+lcmInt : Int -> Int -> Int
+lcmInt a b =
+    if a == 0 || b == 0 then
+        0
+
+    else
+        abs (a // gcdInt a b * b)
 
 
 {-| Ratio for a co-axial (rigid) pair, `angle(g2) / angle(g1)`.

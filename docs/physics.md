@@ -201,6 +201,15 @@ gives a positive ratio. Crown and bevel pairs take their sign from the same
 formula. If the geometry is degenerate (coincident centres, no pitch point), a
 non-worm `meshSign` falls back to `−1`.
 
+`Gear.Physics.propagateRatios` walks the same BFS tree (through a shared
+`bfsWith`) but keeps each gear's ratio magnitude as an exact reduced fraction
+`num / den`. `Gear.Physics.cycleMotorTurns` turns those fractions into the
+smallest number of motor turns after which every gear is back at its start,
+`lcm dens / gcd nums` (`Nothing` when the lcm is over 10000).
+`Simulation.motionCycle` applies it from the motor's driving gear over the
+full graph, keeping only the animated gears, so a snapshot animation can loop
+seamlessly.
+
 Worm contact has no single physically meaningful pitch point for the spur-style
 no-slip formula. Both checked-in worm parts reference the same local LDraw
 thread geometry. In LDraw local coordinates it is right-handed: angular phase

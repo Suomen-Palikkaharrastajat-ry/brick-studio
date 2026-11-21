@@ -3432,7 +3432,7 @@ snapshotRequestWithOptions :
     , width : Maybe Int
     , height : Maybe Int
     , timeBudgetMs : Maybe Int
-    , animation : Maybe { fps : Int, durationSeconds : Float, framesExtraTriangles : Maybe (List (List Float)) }
+    , animation : Maybe { frames : Int, durationSeconds : Float, samplesPerPixel : Maybe Int, framesExtraTriangles : Maybe (List (List Float)) }
     }
     -> Model
     -> Encode.Value
@@ -3473,7 +3473,7 @@ snapshotFrameRequest :
     , width : Int
     , height : Int
     , timeBudgetMs : Maybe Int
-    , animation : Maybe { fps : Int, durationSeconds : Float, framesExtraTriangles : Maybe (List (List Float)) }
+    , animation : Maybe { frames : Int, durationSeconds : Float, samplesPerPixel : Maybe Int, framesExtraTriangles : Maybe (List (List Float)) }
     }
     -> Model
     -> Encode.Value

@@ -3,6 +3,7 @@ module Studio.HashPayload exposing
     , Mat3Record
     , Mode(..)
     , Payload
+    , base64UrlToStandard
     , bytesToList
     , canonicalOrientations
     , decode
@@ -12,10 +13,13 @@ module Studio.HashPayload exposing
     , encode
     , encodeBytes
     , encodeLeb128
+    , extractFragment
     , extractKit
     , fromDocument
     , kitOfPlacements
     , listToBytes
+    , parseDirectBase64
+    , standardToBase64Url
     , toDocument
     , zigZagDecode
     , zigZagEncode
@@ -267,6 +271,95 @@ encodeBytes payload =
 decodeBytes : List Int -> Maybe Payload
 decodeBytes list =
     decode (listToBytes list)
+
+
+{-| Extract the hash fragment from a full URL or hash string (after `#`).
+Returns the input unchanged if `#` is absent.
+-}
+extractFragment : String -> String
+extractFragment hash =
+    case String.split "#" hash of
+        _ :: after :: _ ->
+            after
+
+        _ ->
+            hash
+
+
+{-| Extract a direct base64url payload string from `#b/:base64url` or `b/:base64url`,
+or when combined with `&` parameters such as `#track=pine-ridge&b/:base64url`.
+-}
+parseDirectBase64 : String -> Maybe String
+parseDirectBase64 hash =
+    let
+        clean =
+            extractFragment hash
+                |> String.trim
+
+        direct =
+            if String.startsWith "b/" clean then
+                Just (String.dropLeft 2 clean)
+
+            else if String.startsWith "/b/" clean then
+                Just (String.dropLeft 3 clean)
+
+            else
+                Nothing
+    in
+    case direct of
+        Just value ->
+            Just value
+
+        Nothing ->
+            clean
+                |> String.split "&"
+                |> List.filterMap
+                    (\segment ->
+                        let
+                            trimmed =
+                                String.trim segment
+                        in
+                        if String.startsWith "b/" trimmed then
+                            Just (String.dropLeft 2 trimmed)
+
+                        else if String.startsWith "/b/" trimmed then
+                            Just (String.dropLeft 3 trimmed)
+
+                        else
+                            Nothing
+                    )
+                |> List.head
+
+
+{-| Convert URL-safe base64 (`-`, `_`, unpadded) to standard padded base64 (`+`, `/`, `=`).
+-}
+base64UrlToStandard : String -> String
+base64UrlToStandard b64 =
+    let
+        standard =
+            b64
+                |> String.replace "-" "+"
+                |> String.replace "_" "/"
+    in
+    case modBy 4 (String.length standard) of
+        2 ->
+            standard ++ "=="
+
+        3 ->
+            standard ++ "="
+
+        _ ->
+            standard
+
+
+{-| Convert standard padded base64 (`+`, `/`, `=`) into unpadded URL-safe base64url.
+-}
+standardToBase64Url : String -> String
+standardToBase64Url b64 =
+    b64
+        |> String.replace "+" "-"
+        |> String.replace "/" "_"
+        |> String.replace "=" ""
 
 
 stripDat : String -> String

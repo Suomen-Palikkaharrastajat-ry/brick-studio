@@ -3549,15 +3549,76 @@ movePlaneDrag initialDrag grab ( x, y ) model =
 
             else
                 let
-                    targetWorldPoints =
-                        otherPlacements
-                            |> List.concatMap
-                                (\targetP ->
+                    -- Only target points a candidate snap can reach are transformed in
+                    -- full (a 32 x 32 baseplate has 1024 studs). A snap moves one lead
+                    -- point at most the release distance and turns the lead about it, so
+                    -- every lead point ends within release distance + the lead's point
+                    -- spread of where it is now; contacts count within 0.5 LDU.
+                    leadWorldPositions =
+                        List.map (\c -> Mat4.transform leadSurfaceMatrix c.localPosition) leadConn.connections
+
+                    snapRegion =
+                        DragPlane.unionBox leadWorldPositions
+                            |> Maybe.map
+                                (\b ->
                                     let
-                                        pConn =
-                                            Connectivity.extractPartConnectivity targetP.part resolveLines
+                                        margin =
+                                            model.snapDistance * 1.5 + Vec3.distance b.min b.max + 1.0
+
+                                        grow =
+                                            vec3 margin margin margin
                                     in
-                                    List.map (Connectivity.transformPoint targetP.matrix targetP.id) pConn.connections
+                                    { min = Vec3.sub b.min grow, max = Vec3.add b.max grow }
+                                )
+
+                    inSnapRegion pos =
+                        case snapRegion of
+                            Just r ->
+                                (Vec3.getX pos >= Vec3.getX r.min)
+                                    && (Vec3.getX pos <= Vec3.getX r.max)
+                                    && (Vec3.getY pos >= Vec3.getY r.min)
+                                    && (Vec3.getY pos <= Vec3.getY r.max)
+                                    && (Vec3.getZ pos >= Vec3.getZ r.min)
+                                    && (Vec3.getZ pos <= Vec3.getZ r.max)
+
+                            Nothing ->
+                                False
+
+                    targetConnections =
+                        List.map
+                            (\targetP -> ( targetP, (Connectivity.extractPartConnectivity targetP.part resolveLines).connections ))
+                            otherPlacements
+
+                    targetWorldPoints =
+                        targetConnections
+                            |> List.concatMap
+                                (\( targetP, connections ) ->
+                                    List.filterMap
+                                        (\c ->
+                                            if inSnapRegion (Mat4.transform targetP.matrix c.localPosition) then
+                                                Just (Connectivity.transformPoint targetP.matrix targetP.id c)
+
+                                            else
+                                                Nothing
+                                        )
+                                        connections
+                                )
+
+                    -- Side snaps follow the cursor ray, which can reach past the region;
+                    -- SideSnap only takes side points (|normal.y| < 0.3).
+                    sideTargetPoints =
+                        targetConnections
+                            |> List.concatMap
+                                (\( targetP, connections ) ->
+                                    List.filterMap
+                                        (\c ->
+                                            if abs (Vec3.getY (Connectivity.transformDirection targetP.matrix c.normal)) < 0.3 then
+                                                Just (Connectivity.transformPoint targetP.matrix targetP.id c)
+
+                                            else
+                                                Nothing
+                                        )
+                                        connections
                                 )
 
                     cursorRay =
@@ -3588,7 +3649,7 @@ movePlaneDrag initialDrag grab ( x, y ) model =
                                         ray
                                         leadSurfaceMatrix
                                         leadConn.connections
-                                        targetWorldPoints
+                                        sideTargetPoints
                                 )
 
                     activeConnectionSnap =

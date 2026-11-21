@@ -1,15 +1,19 @@
 module UI.SnapshotModal exposing
     ( Actions
-    , AnimDuration(..)
-    , AnimFps(..)
+    , AnimClip
+    , AnimMotion(..)
+    , AnimRequest
     , AnimResolution(..)
+    , AnimSmoothness(..)
     , AnimSpeed(..)
+    , AnimTurnTime(..)
     , AspectPreset(..)
     , CameraActions
     , CropRect
     , FramingActions
     , InteractionMsg(..)
     , Model
+    , MotorCycle
     , OutputMode(..)
     , Phase(..)
     , PreviewData
@@ -19,18 +23,22 @@ module UI.SnapshotModal exposing
     , RenderStage(..)
     , ShaderPreset(..)
     , animDimensions
-    , animFpsValue
-    , animSecondsValue
+    , animSamplesPerPixel
+    , animSmoothnessFrames
     , animSpeedMultiplier
+    , animTurnSeconds
+    , animationClip
     , defaultCrop
     , effectiveDimensions
     , effectiveFilename
     , frameOutputSize
     , frameRect
-    , getAnimDuration
-    , getAnimFps
+    , frameTime
+    , getAnimMotion
     , getAnimResolution
+    , getAnimSmoothness
     , getAnimSpeed
+    , getAnimTurnTime
     , getAnimation
     , getMode
     , getQuality
@@ -41,14 +49,16 @@ module UI.SnapshotModal exposing
     , isFraming
     , isRendering
     , markSaved
+    , motorCycle
     , outputSize
     , progressDetailDecoder
     , qualityDimensions
     , reframe
-    , setAnimDuration
-    , setAnimFps
+    , setAnimMotion
     , setAnimResolution
+    , setAnimSmoothness
     , setAnimSpeed
+    , setAnimTurnTime
     , setAspect
     , setFailed
     , setMode
@@ -58,6 +68,7 @@ module UI.SnapshotModal exposing
     , setReady
     , setShader
     , shaderToString
+    , slowMotionOffered
     , startCameraRendering
     , startRendering
     , view
@@ -212,7 +223,7 @@ qualityDimensions quality =
             { width = 2560, height = 1440, timeBudgetMs = 60000 }
 
 
-{-| Snapshot output format: Still PNG image or Animated WebP turntable.
+{-| Snapshot output format: Still PNG image or Animated WebP.
 -}
 type OutputMode
     = ModeStill
@@ -224,29 +235,111 @@ type OutputMode
 type AnimResolution
     = Res720p
     | Res480p
-    | Res360p
 
 
-{-| Frame rate presets for animations.
+{-| How many frames an animation may have, which sets its render time:
+36, 48 or 96 frames (`animSmoothnessFrames`).
 -}
-type AnimFps
-    = Fps10
-    | Fps30
+type AnimSmoothness
+    = SmoothQuick
+    | SmoothNormal
+    | SmoothSmooth
 
 
-{-| Animation duration presets.
+{-| How long one turn of a turntable animation takes.
 -}
-type AnimDuration
-    = Dur2s
-    | Dur6s
+type AnimTurnTime
+    = Turn6s
+    | Turn10s
 
 
-{-| Animation speed / smoothness presets.
+{-| Slow-motion presets for motor animations (see `slowMotionOffered`).
 -}
 type AnimSpeed
     = Speed1x
     | SpeedHalf
     | SpeedQuarter
+
+
+{-| What an animation shows, as told by the host: the camera turning around
+the model, or the model's gears turning under its motor.
+-}
+type AnimMotion
+    = AnimTurntable
+    | AnimMotor MotorCycle
+
+
+{-| The motor's motion, from the host:
+
+  - `cycleSeconds` — real time after which every animated part is back where
+    it started (`Nothing` when that is too long to compute)
+  - `fastestRpm` — the speed of the fastest animated part
+  - `motorRpm` — the speed of the motor gear itself, used to make a clip
+    that is not seamless at least loop the motor gear cleanly
+
+All speeds are magnitudes.
+
+-}
+type alias MotorCycle =
+    { cycleSeconds : Maybe Float
+    , fastestRpm : Float
+    , motorRpm : Float
+    }
+
+
+{-| Convert a gear train's cycle (`Simulation.motionCycle`, or any record with
+`motorTurns` and `maxSpeedRatio`) and the motor speed in RPM into the
+`MotorCycle` that `setAnimMotion` expects.
+-}
+motorCycle : Float -> { a | motorTurns : Maybe Float, maxSpeedRatio : Float } -> MotorCycle
+motorCycle rpm cycle =
+    let
+        speedRpm =
+            abs rpm
+    in
+    { cycleSeconds =
+        cycle.motorTurns
+            |> Maybe.andThen
+                (\turns ->
+                    if speedRpm > 0 then
+                        Just (turns * 60 / speedRpm)
+
+                    else
+                        Nothing
+                )
+    , fastestRpm = speedRpm * abs cycle.maxSpeedRatio
+    , motorRpm = speedRpm
+    }
+
+
+{-| The animation the current settings make (`animationClip`):
+
+  - `frames` — the number of frames to render
+  - `playbackSeconds` — how long the WebP takes to play once
+  - `simulatedSeconds` — how much motor time the frames cover; frame `i`
+    shows `start + i × simulatedSeconds / frames`. For a turntable this
+    equals the playback time.
+  - `seamless` — whether the last frame flows into the first
+
+-}
+type alias AnimClip =
+    { frames : Int
+    , playbackSeconds : Float
+    , simulatedSeconds : Float
+    , seamless : Bool
+    }
+
+
+{-| What the host needs to render the animation (`getAnimation`): the clip's
+frame count, playback length (`durationSeconds`) and simulated time, and an
+explicit sample count per pixel (`Nothing` leaves it to the renderer).
+-}
+type alias AnimRequest =
+    { frames : Int
+    , durationSeconds : Float
+    , simulatedSeconds : Float
+    , samplesPerPixel : Maybe Int
+    }
 
 
 {-| Convert speed preset to speed multiplier.
@@ -264,28 +357,44 @@ animSpeedMultiplier speed =
             0.25
 
 
-{-| Convert FPS preset to integer value.
+{-| The most frames an animation of this smoothness may have.
 -}
-animFpsValue : AnimFps -> Int
-animFpsValue fps =
-    case fps of
-        Fps10 ->
+animSmoothnessFrames : AnimSmoothness -> Int
+animSmoothnessFrames smoothness =
+    case smoothness of
+        SmoothQuick ->
+            36
+
+        SmoothNormal ->
+            48
+
+        SmoothSmooth ->
+            96
+
+
+{-| One turn of a turntable animation, in seconds.
+-}
+animTurnSeconds : AnimTurnTime -> Int
+animTurnSeconds turnTime =
+    case turnTime of
+        Turn6s ->
+            6
+
+        Turn10s ->
             10
 
-        Fps30 ->
-            30
 
-
-{-| Convert duration preset to float seconds.
+{-| The explicit samples per pixel sent for an animation: 720p gets 10, as
+480p gets from the renderer's own size rule (which would give 720p only 6).
 -}
-animSecondsValue : AnimDuration -> Float
-animSecondsValue dur =
-    case dur of
-        Dur2s ->
-            2.0
+animSamplesPerPixel : AnimResolution -> Maybe Int
+animSamplesPerPixel res =
+    case res of
+        Res720p ->
+            Just 10
 
-        Dur6s ->
-            6.0
+        Res480p ->
+            Nothing
 
 
 {-| Calculate pixel dimensions for an animation based on resolution preset (widescreen 16:9).
@@ -298,9 +407,6 @@ animDimensions res =
 
         Res480p ->
             { width = 854, height = 480 }
-
-        Res360p ->
-            { width = 640, height = 360 }
 
 
 {-| The phases of snapshot capture: framing, rendering, preview, or error.
@@ -319,8 +425,8 @@ type InteractionMsg
     | SelectQuality QualityPreset
     | SelectOutputMode OutputMode
     | SelectAnimResolution AnimResolution
-    | SelectAnimFps AnimFps
-    | SelectAnimDuration AnimDuration
+    | SelectAnimSmoothness AnimSmoothness
+    | SelectAnimTurnTime AnimTurnTime
     | SelectAnimSpeed AnimSpeed
 
 
@@ -335,9 +441,10 @@ type alias Model =
     , quality : QualityPreset
     , mode : OutputMode
     , animRes : AnimResolution
-    , animFps : AnimFps
-    , animDuration : AnimDuration
+    , animSmoothness : AnimSmoothness
+    , animTurnTime : AnimTurnTime
     , animSpeed : AnimSpeed
+    , animMotion : AnimMotion
     , phase : Phase
     , progress : Progress
     , progressDetail : ProgressDetail
@@ -377,9 +484,10 @@ init config =
     , quality = QualityStandard
     , mode = ModeStill
     , animRes = Res480p
-    , animFps = Fps10
-    , animDuration = Dur2s
-    , animSpeed = SpeedHalf
+    , animSmoothness = SmoothNormal
+    , animTurnTime = Turn6s
+    , animSpeed = Speed1x
+    , animMotion = AnimTurntable
     , phase = Rendering
     , progress = { fraction = 0, samples = 0 }
     , progressDetail = initialProgressDetail
@@ -399,9 +507,10 @@ initFraming config =
     , quality = QualityStandard
     , mode = ModeStill
     , animRes = Res480p
-    , animFps = Fps10
-    , animDuration = Dur2s
-    , animSpeed = SpeedHalf
+    , animSmoothness = SmoothNormal
+    , animTurnTime = Turn6s
+    , animSpeed = Speed1x
+    , animMotion = AnimTurntable
     , phase = Framing
     , progress = { fraction = 0, samples = 0 }
     , progressDetail = initialProgressDetail
@@ -591,13 +700,6 @@ cropOutputSize model =
     }
 
 
-{-| Number of frames in the animation for the current settings.
--}
-animationFrameCount : Model -> Int
-animationFrameCount model =
-    max 1 (round (animSecondsValue model.animDuration * toFloat (animFpsValue model.animFps)))
-
-
 {-| Show error message on render failure.
 -}
 setFailed : String -> Model -> Model
@@ -772,20 +874,20 @@ setAnimResolution res model =
             updated
 
 
-{-| Get the active animation FPS preset.
+{-| Get the active animation smoothness preset.
 -}
-getAnimFps : Model -> AnimFps
-getAnimFps model =
-    model.animFps
+getAnimSmoothness : Model -> AnimSmoothness
+getAnimSmoothness model =
+    model.animSmoothness
 
 
-{-| Set the active animation FPS preset.
+{-| Set the active animation smoothness preset.
 -}
-setAnimFps : AnimFps -> Model -> Model
-setAnimFps fps model =
+setAnimSmoothness : AnimSmoothness -> Model -> Model
+setAnimSmoothness smoothness model =
     let
         updated =
-            { model | animFps = fps }
+            { model | animSmoothness = smoothness }
     in
     case model.phase of
         Preview _ ->
@@ -795,20 +897,20 @@ setAnimFps fps model =
             updated
 
 
-{-| Get the active animation duration preset.
+{-| Get the active turntable turn time preset.
 -}
-getAnimDuration : Model -> AnimDuration
-getAnimDuration model =
-    model.animDuration
+getAnimTurnTime : Model -> AnimTurnTime
+getAnimTurnTime model =
+    model.animTurnTime
 
 
-{-| Set the active animation duration preset.
+{-| Set the active turntable turn time preset.
 -}
-setAnimDuration : AnimDuration -> Model -> Model
-setAnimDuration dur model =
+setAnimTurnTime : AnimTurnTime -> Model -> Model
+setAnimTurnTime turnTime model =
     let
         updated =
-            { model | animDuration = dur }
+            { model | animTurnTime = turnTime }
     in
     case model.phase of
         Preview _ ->
@@ -818,14 +920,32 @@ setAnimDuration dur model =
             updated
 
 
-{-| Get the active animation speed / smoothness preset.
+{-| What the animation shows, as last told by the host.
+-}
+getAnimMotion : Model -> AnimMotion
+getAnimMotion model =
+    model.animMotion
+
+
+{-| Tell the modal what an animation would show (host information: the
+motor's cycle). A host sets it when the user switches to animation mode and
+again at render, so it is only computed for animations. Unlike the setters
+for the user's choices, this keeps the phase, so a finished animation stays
+on screen.
+-}
+setAnimMotion : AnimMotion -> Model -> Model
+setAnimMotion motion model =
+    { model | animMotion = motion }
+
+
+{-| Get the active slow-motion preset as chosen (see `animationClip` for the one in effect).
 -}
 getAnimSpeed : Model -> AnimSpeed
 getAnimSpeed model =
     model.animSpeed
 
 
-{-| Set the active animation speed / smoothness preset.
+{-| Set the active slow-motion preset.
 -}
 setAnimSpeed : AnimSpeed -> Model -> Model
 setAnimSpeed speed model =
@@ -842,6 +962,8 @@ setAnimSpeed speed model =
 
 
 {-| Effective rendering dimensions and time budget based on current mode and settings.
+An animation's render time follows its frame count and size, not a budget:
+the renderer ignores `timeBudgetMs` for animations, so it is a constant here.
 -}
 effectiveDimensions : Model -> { width : Int, height : Int, timeBudgetMs : Int }
 effectiveDimensions model =
@@ -853,33 +975,305 @@ effectiveDimensions model =
             let
                 dims =
                     animDimensions model.animRes
-
-                totalFrames =
-                    round (animSecondsValue model.animDuration * toFloat (animFpsValue model.animFps))
-
-                budget =
-                    clamp 6000 60000 (totalFrames * 250)
             in
             { width = dims.width
             , height = dims.height
-            , timeBudgetMs = budget
+            , timeBudgetMs = animationTimeBudgetMs
             }
 
 
-{-| Get optional animation parameters for the render request.
+animationTimeBudgetMs : Int
+animationTimeBudgetMs =
+    60000
+
+
+{-| Get the animation to render, or `Nothing` for a still.
 -}
-getAnimation : Model -> Maybe { fps : Int, durationSeconds : Float, speedMultiplier : Float }
+getAnimation : Model -> Maybe AnimRequest
 getAnimation model =
     case model.mode of
         ModeStill ->
             Nothing
 
         ModeAnimation ->
+            let
+                clip =
+                    animationClip model
+            in
             Just
-                { fps = animFpsValue model.animFps
-                , durationSeconds = animSecondsValue model.animDuration
-                , speedMultiplier = animSpeedMultiplier model.animSpeed
+                { frames = clip.frames
+                , durationSeconds = clip.playbackSeconds
+                , simulatedSeconds = clip.simulatedSeconds
+                , samplesPerPixel = animSamplesPerPixel model.animRes
                 }
+
+
+{-| Simulation time of 0-based frame `index` starting from `startTime`, matching
+`AnimClip`: `startTime + index × simulatedSeconds / frames`.
+-}
+frameTime : Float -> { a | frames : Int, simulatedSeconds : Float } -> Int -> Float
+frameTime startTime clip index =
+    startTime + toFloat index * clip.simulatedSeconds / toFloat (max 1 clip.frames)
+
+
+
+-- ── Animation clip rules ──────────────────────────────────────────────────────
+
+
+{-| Highest frame rate of a motor animation; short loops play at this rate.
+-}
+maxAnimFps : Float
+maxAnimFps =
+    30
+
+
+{-| Longest seamless motor loop played at 1×; longer cycles fall back.
+-}
+seamlessMaxSeconds : Float
+seamlessMaxSeconds =
+    10
+
+
+{-| Longest playback of a seamless loop in slow motion (the renderer's maximum).
+-}
+slowSeamlessMaxSeconds : Float
+slowSeamlessMaxSeconds =
+    30
+
+
+{-| Simulated length of a motor clip whose cycle is too long to loop.
+-}
+fallbackClipSeconds : Float
+fallbackClipSeconds =
+    6
+
+
+{-| A motor cycle shorter than this is repeated until it is at least this long.
+-}
+minCycleSeconds : Float
+minCycleSeconds =
+    1
+
+
+{-| Above this step per frame (of the fastest part) slow motion is offered.
+-}
+slowMotionDegreesPerFrame : Float
+slowMotionDegreesPerFrame =
+    15
+
+
+{-| The animation the current settings make.
+
+A turntable has the smoothness level's frame count over one turn, and always
+loops seamlessly.
+
+A motor animation at 1× plays its cycle in real time when the cycle is known
+and at most `seamlessMaxSeconds` long (a cycle under 1 s is repeated a whole
+number of times to reach 1 s), so it loops seamlessly. Otherwise it falls back
+to about `fallbackClipSeconds`, rounded to a whole number of motor turns so
+at least the motor gear loops cleanly. The frame count is the playback time
+at `maxAnimFps`, capped by the smoothness level.
+
+In slow motion (only when offered, see `slowMotionOffered`) the same
+simulated time plays `1 / multiplier` times as long, with more frames.
+
+-}
+animationClip : Model -> AnimClip
+animationClip model =
+    case model.animMotion of
+        AnimTurntable ->
+            let
+                seconds =
+                    toFloat (animTurnSeconds model.animTurnTime)
+            in
+            { frames = animSmoothnessFrames model.animSmoothness
+            , playbackSeconds = seconds
+            , simulatedSeconds = seconds
+            , seamless = True
+            }
+
+        AnimMotor cycle ->
+            motorClip (animSmoothnessFrames model.animSmoothness)
+                cycle
+                (animSpeedMultiplier (effectiveSpeed (animSmoothnessFrames model.animSmoothness) cycle model.animSpeed))
+
+
+{-| The motor clip at slow-motion factor `s` (1 for real time), for at most
+`maxFrames` frames.
+-}
+motorClip : Int -> MotorCycle -> Float -> AnimClip
+motorClip maxFrames cycle s =
+    let
+        withFrames playback simulated seamless =
+            { frames = clamp 1 maxFrames (round (maxAnimFps * playback))
+            , playbackSeconds = playback
+            , simulatedSeconds = simulated
+            , seamless = seamless
+            }
+    in
+    case seamlessCycle cycle of
+        Just c ->
+            withFrames (c / s) c True
+
+        Nothing ->
+            let
+                -- In practice `s` is always 1 here: a fallback clip lasts
+                -- about 6 s, so it is capped by the smoothness level and
+                -- slow motion is never offered for it.
+                simulated =
+                    if cycle.motorRpm > 0 then
+                        let
+                            turnSeconds =
+                                60 / cycle.motorRpm
+
+                            turns =
+                                max 1 (round (fallbackClipSeconds * s / turnSeconds))
+                        in
+                        toFloat turns * turnSeconds
+
+                    else
+                        fallbackClipSeconds * s
+            in
+            withFrames (simulated / s) simulated False
+
+
+{-| The simulated length of a seamless loop at 1×, or `Nothing` when the
+cycle is unknown or longer than `seamlessMaxSeconds`. A cycle under
+`minCycleSeconds` is repeated the fewest whole times that reach it.
+-}
+seamlessCycle : MotorCycle -> Maybe Float
+seamlessCycle cycle =
+    case cycle.cycleSeconds of
+        Just c ->
+            if c <= 0 then
+                Nothing
+
+            else
+                let
+                    repeats =
+                        max 1 (ceiling ((minCycleSeconds - 1.0e-9) / c))
+
+                    stretched =
+                        toFloat repeats * c
+                in
+                if stretched <= seamlessMaxSeconds then
+                    Just stretched
+
+                else
+                    Nothing
+
+        Nothing ->
+            Nothing
+
+
+{-| The slow-motion presets worth offering for this motor motion, slowest
+last. ½× is offered when the fastest part moves more than
+`slowMotionDegreesPerFrame` per frame at 1× and the 1× clip has fewer frames
+than the smoothness level allows, so slowing it down adds frames. ¼× is
+offered only when the ½× clip still has fewer frames than allowed. A seamless
+loop stays seamless: a multiplier is offered only while its playback stays
+within `slowSeamlessMaxSeconds`.
+-}
+offeredSlowSpeeds : Int -> MotorCycle -> List AnimSpeed
+offeredSlowSpeeds maxFrames cycle =
+    let
+        realTime =
+            motorClip maxFrames cycle 1
+
+        degreesPerFrame =
+            cycle.fastestRpm * 6 * realTime.simulatedSeconds / toFloat realTime.frames
+
+        fits clip =
+            not clip.seamless || clip.playbackSeconds <= slowSeamlessMaxSeconds
+
+        half =
+            motorClip maxFrames cycle 0.5
+
+        quarter =
+            motorClip maxFrames cycle 0.25
+    in
+    if degreesPerFrame > slowMotionDegreesPerFrame && realTime.frames < maxFrames && fits half then
+        if half.frames < maxFrames && fits quarter then
+            [ SpeedHalf, SpeedQuarter ]
+
+        else
+            [ SpeedHalf ]
+
+    else
+        []
+
+
+{-| The slow-motion preset in effect: the chosen one when it is offered, ½×
+when ¼× was chosen but only ½× is offered, and 1× otherwise.
+-}
+effectiveSpeed : Int -> MotorCycle -> AnimSpeed -> AnimSpeed
+effectiveSpeed maxFrames cycle chosen =
+    let
+        offered =
+            offeredSlowSpeeds maxFrames cycle
+    in
+    case chosen of
+        Speed1x ->
+            Speed1x
+
+        SpeedHalf ->
+            if List.member SpeedHalf offered then
+                SpeedHalf
+
+            else
+                Speed1x
+
+        SpeedQuarter ->
+            if List.member SpeedQuarter offered then
+                SpeedQuarter
+
+            else if List.member SpeedHalf offered then
+                SpeedHalf
+
+            else
+                Speed1x
+
+
+{-| Whether the slow-motion presets are shown: only for a motor animation
+whose fastest part jumps more than `slowMotionDegreesPerFrame` per frame at
+1× and where slowing down would add frames (see `animationClip`).
+-}
+slowMotionOffered : Model -> Bool
+slowMotionOffered model =
+    not (List.isEmpty (slowSpeedsFor model))
+
+
+slowSpeedsFor : Model -> List AnimSpeed
+slowSpeedsFor model =
+    case model.animMotion of
+        AnimTurntable ->
+            []
+
+        AnimMotor cycle ->
+            offeredSlowSpeeds (animSmoothnessFrames model.animSmoothness) cycle
+
+
+{-| The slow-motion preset shown as active.
+-}
+activeSpeedFor : Model -> AnimSpeed
+activeSpeedFor model =
+    case model.animMotion of
+        AnimTurntable ->
+            Speed1x
+
+        AnimMotor cycle ->
+            effectiveSpeed (animSmoothnessFrames model.animSmoothness) cycle model.animSpeed
+
+
+{-| The subtitle facts of the current animation.
+-}
+clipSummary : Model -> { frames : Int, seconds : Float, loop : Bool }
+clipSummary model =
+    let
+        clip =
+            animationClip model
+    in
+    { frames = clip.frames, seconds = clip.playbackSeconds, loop = clip.seamless }
 
 
 {-| Ensure the filename has the correct extension (.png for still, .webp for animation).
@@ -926,11 +1320,11 @@ handleInteraction msg model =
         SelectAnimResolution res ->
             setAnimResolution res model
 
-        SelectAnimFps fps ->
-            setAnimFps fps model
+        SelectAnimSmoothness smoothness ->
+            setAnimSmoothness smoothness model
 
-        SelectAnimDuration dur ->
-            setAnimDuration dur model
+        SelectAnimTurnTime turnTime ->
+            setAnimTurnTime turnTime model
 
         SelectAnimSpeed speed ->
             setAnimSpeed speed model
@@ -1078,7 +1472,7 @@ viewHeader lang model =
                             in
                             case model.mode of
                                 ModeAnimation ->
-                                    I18n.snapshotAnimationSubtitle lang size (animationFrameCount model)
+                                    I18n.snapshotAnimationSubtitle lang size (clipSummary model)
 
                                 ModeStill ->
                                     I18n.snapshotStillSubtitle lang size
@@ -1158,14 +1552,43 @@ viewToolbar lang actions model =
         activeRes =
             model.animRes
 
-        activeFps =
-            model.animFps
+        activeSmoothness =
+            model.animSmoothness
 
-        activeDur =
-            model.animDuration
+        activeTurnTime =
+            model.animTurnTime
 
         activeSpeed =
-            model.animSpeed
+            activeSpeedFor model
+
+        slowSpeeds =
+            slowSpeedsFor model
+
+        motionPills =
+            case model.animMotion of
+                AnimTurntable ->
+                    [ optionPill "anim-turn-6s" (actions.onInteraction (SelectAnimTurnTime Turn6s)) (I18n.snapshotAnimTurnSeconds lang (animTurnSeconds Turn6s)) (activeTurnTime == Turn6s)
+                    , optionPill "anim-turn-10s" (actions.onInteraction (SelectAnimTurnTime Turn10s)) (I18n.snapshotAnimTurnSeconds lang (animTurnSeconds Turn10s)) (activeTurnTime == Turn10s)
+                    , toolbarDivider
+                    ]
+
+                AnimMotor _ ->
+                    if List.isEmpty slowSpeeds then
+                        []
+
+                    else
+                        optionPill "anim-speed-1x" (actions.onInteraction (SelectAnimSpeed Speed1x)) (I18n.snapshotAnimSpeed1x lang) (activeSpeed == Speed1x)
+                            :: List.map
+                                (\speed ->
+                                    case speed of
+                                        SpeedQuarter ->
+                                            optionPill "anim-speed-quarter" (actions.onInteraction (SelectAnimSpeed SpeedQuarter)) (I18n.snapshotAnimSpeedQuarter lang) (activeSpeed == SpeedQuarter)
+
+                                        _ ->
+                                            optionPill "anim-speed-half" (actions.onInteraction (SelectAnimSpeed SpeedHalf)) (I18n.snapshotAnimSpeedHalf lang) (activeSpeed == SpeedHalf)
+                                )
+                                slowSpeeds
+                            ++ [ toolbarDivider ]
     in
     div
         [ Attr.style "display" "flex"
@@ -1209,29 +1632,20 @@ viewToolbar lang actions model =
                             [ -- 2. Fixed resolutions (Animation mode is 16:9 widescreen)
                               optionPill "anim-res-720p" (actions.onInteraction (SelectAnimResolution Res720p)) (I18n.snapshotAnimRes720p lang) (activeRes == Res720p)
                             , optionPill "anim-res-480p" (actions.onInteraction (SelectAnimResolution Res480p)) (I18n.snapshotAnimRes480p lang) (activeRes == Res480p)
-                            , optionPill "anim-res-360p" (actions.onInteraction (SelectAnimResolution Res360p)) (I18n.snapshotAnimRes360p lang) (activeRes == Res360p)
                             , toolbarDivider
 
-                            -- 3. FPS
-                            , optionPill "anim-fps-10" (actions.onInteraction (SelectAnimFps Fps10)) (I18n.snapshotAnimFps10 lang) (activeFps == Fps10)
-                            , optionPill "anim-fps-30" (actions.onInteraction (SelectAnimFps Fps30)) (I18n.snapshotAnimFps30 lang) (activeFps == Fps30)
+                            -- 3. Smoothness (the frame count, so the render time)
+                            , optionPill "anim-smooth-quick" (actions.onInteraction (SelectAnimSmoothness SmoothQuick)) (I18n.snapshotAnimSmoothQuick lang) (activeSmoothness == SmoothQuick)
+                            , optionPill "anim-smooth-normal" (actions.onInteraction (SelectAnimSmoothness SmoothNormal)) (I18n.snapshotAnimSmoothNormal lang) (activeSmoothness == SmoothNormal)
+                            , optionPill "anim-smooth-smooth" (actions.onInteraction (SelectAnimSmoothness SmoothSmooth)) (I18n.snapshotAnimSmoothSmooth lang) (activeSmoothness == SmoothSmooth)
                             , toolbarDivider
-
-                            -- 4. Duration
-                            , optionPill "anim-dur-2s" (actions.onInteraction (SelectAnimDuration Dur2s)) (I18n.snapshotAnimDur2s lang) (activeDur == Dur2s)
-                            , optionPill "anim-dur-6s" (actions.onInteraction (SelectAnimDuration Dur6s)) (I18n.snapshotAnimDur6s lang) (activeDur == Dur6s)
-                            , toolbarDivider
-
-                            -- 5. Speed / Smoothness
-                            , optionPill "anim-speed-1x" (actions.onInteraction (SelectAnimSpeed Speed1x)) (I18n.snapshotAnimSpeed1x lang) (activeSpeed == Speed1x)
-                            , optionPill "anim-speed-half" (actions.onInteraction (SelectAnimSpeed SpeedHalf)) (I18n.snapshotAnimSpeedHalf lang) (activeSpeed == SpeedHalf)
-                            , optionPill "anim-speed-quarter" (actions.onInteraction (SelectAnimSpeed SpeedQuarter)) (I18n.snapshotAnimSpeedQuarter lang) (activeSpeed == SpeedQuarter)
-                            , toolbarDivider
-
-                            -- 6. Shader presets
-                            , optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
-                            , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
                             ]
+                                -- 4. Turn time (turntable) or slow motion (motor, when it helps)
+                                ++ motionPills
+                                ++ [ -- 5. Shader presets
+                                     optionPill "shader-preset-glossy" (actions.onInteraction (SelectShader ShaderGlossy)) (I18n.snapshotShaderGlossy lang) (activeShader == ShaderGlossy)
+                                   , optionPill "shader-preset-matte" (actions.onInteraction (SelectShader ShaderMatte)) (I18n.snapshotShaderMatte lang) (activeShader == ShaderMatte)
+                                   ]
                    )
             )
         ]
@@ -1563,7 +1977,7 @@ viewCameraOverlay lang actions viewSize model =
         outputLabel =
             case model.mode of
                 ModeAnimation ->
-                    I18n.snapshotAnimationSubtitle lang size (animationFrameCount model)
+                    I18n.snapshotAnimationSubtitle lang size (clipSummary model)
 
                 ModeStill ->
                     I18n.snapshotStillSubtitle lang size

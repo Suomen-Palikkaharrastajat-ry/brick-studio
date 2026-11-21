@@ -4,6 +4,7 @@ module Simulation exposing
     , DrivenPart
     , Event(..)
     , Model
+    , MotionCycle
     , Msg(..)
     , PlaybackState
     , analyse
@@ -13,6 +14,7 @@ module Simulation exposing
     , gearEntitiesFor
     , init
     , markUnavailable
+    , motionCycle
     , needsAnimationFrame
     , pickGear
     , refreshLods
@@ -1195,6 +1197,57 @@ rotatingGearIds model =
     Dict.keys model.gearAngles
         |> List.filter (\gid -> Dict.member gid model.gearMeshes)
         |> Set.fromList
+
+
+{-| How the animated gears repeat as the motor turns, independent of its speed.
+
+  - `motorTurns` — the smallest number of motor turns after which every
+    animated gear (and so every part turning with one) is back where it
+    started, or `Nothing` when that cycle is too long to compute
+    (see `Gear.Physics.cycleMotorTurns`)
+  - `maxSpeedRatio` — turns of the fastest animated gear per motor turn
+
+-}
+type alias MotionCycle =
+    { motorTurns : Maybe Float
+    , maxSpeedRatio : Float
+    }
+
+
+{-| The motion cycle of the given animated gears (typically `rotatingGearIds`).
+
+The ratios come from the full gear graph, walked from the motor's driving gear
+the same way the angles are, so gears left out of the set (glued, in a
+submodel, not loaded) still carry the motion through to the ones in it. Set
+members the motor does not reach are ignored. `Nothing` when nothing is
+analysed, no driving gear is set, or no gear of the set is reached.
+
+-}
+motionCycle : Set GearId -> Model -> Maybe MotionCycle
+motionCycle animated model =
+    case ( model.gearGraph, model.motor.drivingGearId ) of
+        ( Just graph, Just motorId ) ->
+            let
+                ratios =
+                    Physics.propagateRatios graph motorId
+                        |> Dict.filter (\gid _ -> Set.member gid animated)
+                        |> Dict.values
+            in
+            if List.isEmpty ratios then
+                Nothing
+
+            else
+                Just
+                    { motorTurns = Physics.cycleMotorTurns ratios
+                    , maxSpeedRatio =
+                        ratios
+                            |> List.map (\r -> toFloat r.num / toFloat (max 1 r.den))
+                            |> List.maximum
+                            |> Maybe.withDefault 1
+                    }
+
+        _ ->
+            Nothing
 
 
 {-| A top-level part that turns with a gear without being a gear: an axle the

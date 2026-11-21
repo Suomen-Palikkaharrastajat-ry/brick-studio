@@ -5,6 +5,7 @@ module Render.Scene exposing
     , conditionalToQuad
     , renderScene
     , renderSceneWithStyle
+    , renderSceneWithTransform
     )
 
 {-| Scene assembly: convert flat geometry into WebGL meshes and render them.
@@ -22,7 +23,7 @@ over the opaque pass without z-fighting or blocking each other.
 -}
 
 import LDraw.Geometry exposing (ConditionalEdge)
-import Math.Matrix4 as Mat4
+import Math.Matrix4 as Mat4 exposing (Mat4)
 import Math.Vector3 as Vec3 exposing (Vec3)
 import Render.Camera as Camera exposing (Camera)
 import Render.EdgeShader as EdgeShader exposing (ConditionalVertex, EdgeVertex)
@@ -98,10 +99,19 @@ renderScene scene camera light width height =
     renderSceneWithStyle scene camera (Style.fromLight light) width height
 
 
-{-| Render the scene with the provided material style configuration.
+{-| Render the scene with the provided material style configuration at identity transform.
 -}
 renderSceneWithStyle : Scene -> Camera -> Style.Style -> Int -> Int -> List WebGL.Entity
 renderSceneWithStyle scene camera styleInput width height =
+    renderSceneWithTransform Mat4.identity scene camera styleInput width height
+
+
+{-| Render the scene with a custom world model transform matrix.
+Useful when rendering articulated sub-assemblies (e.g. rotating wheels or pivoting bogies)
+while reusing `Render.Shader` and `Render.EdgeShader`.
+-}
+renderSceneWithTransform : Mat4 -> Scene -> Camera -> Style.Style -> Int -> Int -> List WebGL.Entity
+renderSceneWithTransform modelMat scene camera styleInput width height =
     let
         style =
             Style.clampStyle styleInput
@@ -114,9 +124,6 @@ renderSceneWithStyle scene camera styleInput width height =
 
         projMat =
             Camera.projectionMatrix aspect (Camera.nearPlane camera) (Camera.farPlane camera)
-
-        modelMat =
-            Mat4.identity
 
         triangleUniforms =
             { modelMatrix = modelMat

@@ -4,6 +4,7 @@ module SimulationTest exposing (suite)
 playback clock and the motor controls.
 -}
 
+import Array
 import Dict
 import Expect
 import Gear.Types exposing (GearAxis(..), GearHoleKind(..), GearKind(..), GearSpec)
@@ -99,6 +100,13 @@ sum), with an axle along Z through the second one.
 drivenLines : List LDrawLine
 drivenLines =
     [ gear24 0, gear24 60, axleAlongZ 60 0 ]
+
+
+{-| An 8T and a 24T gear 40 LDU apart (their pitch radii sum).
+-}
+eightToTwentyFour : List LDrawLine
+eightToTwentyFour =
+    [ part "3647.dat" 0, part "3648.dat" 40 ]
 
 
 gear24 : Float -> LDrawLine
@@ -602,6 +610,95 @@ suite =
                         |> Tuple.first
                         |> Simulation.rotatingGearIds
                         |> Expect.equal (Set.fromList [ 0 ])
+            ]
+        , describe "motionCycle"
+            [ test "8T driving 24T: 3 motor turns, the motor is the fastest" <|
+                \_ ->
+                    let
+                        model =
+                            meshModel eightToTwentyFour
+                    in
+                    Simulation.motionCycle (Simulation.rotatingGearIds model) model
+                        |> Expect.equal (Just { motorTurns = Just 3, maxSpeedRatio = 1 })
+            , test "motor on the 24T: 1 motor turn, the 8T turns 3 times as fast" <|
+                \_ ->
+                    let
+                        model =
+                            meshModel eightToTwentyFour
+                                |> Simulation.update (SetMotorGear 1)
+                                |> Tuple.first
+                    in
+                    Simulation.motionCycle (Simulation.rotatingGearIds model) model
+                        |> Expect.equal (Just { motorTurns = Just 1, maxSpeedRatio = 3 })
+            , test "a motor gear outside the set gives a cycle under one motor turn" <|
+                \_ ->
+                    let
+                        model =
+                            meshModel eightToTwentyFour
+                                |> Simulation.update (SetMotorGear 1)
+                                |> Tuple.first
+                    in
+                    Simulation.motionCycle (Set.singleton 0) model
+                        |> Maybe.map (\c -> ( Maybe.map (\t -> abs (t - 1 / 3) < 1.0e-9) c.motorTurns, c.maxSpeedRatio ))
+                        |> Expect.equal (Just ( Just True, 3 ))
+            , test "an intermediate gear left out of the set still carries the motion" <|
+                \_ ->
+                    -- 8T (0) → 16T (1) → 24T (2); only 0 and 2 are animated.
+                    meshModel [ part "3647.dat" 0, part "4019.dat" 30, part "3648.dat" 80 ]
+                        |> Simulation.motionCycle (Set.fromList [ 0, 2 ])
+                        |> Expect.equal (Just { motorTurns = Just 3, maxSpeedRatio = 1 })
+            , test "set members the motor does not reach are ignored" <|
+                \_ ->
+                    meshModel (eightToTwentyFour ++ [ part "3647.dat" 500 ])
+                        |> Simulation.motionCycle (Set.fromList [ 0, 1, 2 ])
+                        |> Expect.equal (Just { motorTurns = Just 3, maxSpeedRatio = 1 })
+            , test "a cycle over the cap keeps the fastest part's speed and gives no motor turns" <|
+                \_ ->
+                    let
+                        model =
+                            meshModel eightToTwentyFour
+
+                        -- Give the driven gear a prime tooth count, so the cycle needs lcm 10007.
+                        withTeeth graph =
+                            { graph
+                                | instances =
+                                    Array.map
+                                        (\g ->
+                                            if g.id == 1 then
+                                                { g | spec = (\sp -> { sp | teeth = 10007 }) g.spec }
+
+                                            else
+                                                g
+                                        )
+                                        graph.instances
+                            }
+                    in
+                    { model | gearGraph = Maybe.map withTeeth model.gearGraph }
+                        |> Simulation.motionCycle (Set.singleton 1)
+                        |> Maybe.map (\c -> ( c.motorTurns, abs (c.maxSpeedRatio - 8 / 10007) < 1.0e-12 ))
+                        |> Expect.equal (Just ( Nothing, True ))
+            , test "an empty set gives Nothing" <|
+                \_ ->
+                    meshModel eightToTwentyFour
+                        |> Simulation.motionCycle Set.empty
+                        |> Expect.equal Nothing
+            , test "no motor gives Nothing" <|
+                \_ ->
+                    let
+                        model =
+                            meshModel eightToTwentyFour
+
+                        motor =
+                            model.motor
+                    in
+                    { model | motor = { motor | drivingGearId = Nothing } }
+                        |> Simulation.motionCycle (Set.fromList [ 0, 1 ])
+                        |> Expect.equal Nothing
+            , test "an unanalysed model gives Nothing" <|
+                \_ ->
+                    Simulation.init config
+                        |> Simulation.motionCycle (Set.fromList [ 0, 1 ])
+                        |> Expect.equal Nothing
             ]
         , describe "true axes"
             [ test "a flipped gear is rendered about its own true axis" <|

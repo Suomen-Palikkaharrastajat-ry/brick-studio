@@ -2,13 +2,16 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   WEBP_QUALITY,
+  MIN_FRAME_MS,
   animationEtaMs,
+  animationFrameCount,
   animationMotion,
   animationSamplesOverride,
   copyWebglCanvasTo2d,
   dataUrlToBlob,
   encodeWebp,
   fittedSize,
+  frameDurationsMs,
   initSnapshots,
   stillProgressReporter,
 } from './snapshot.js'
@@ -619,4 +622,95 @@ test('animationEtaMs estimates from finished frames, skipping the scene-building
   // Frames 1 and 2 took 3 s each; frame 0's 5 s is left out. 6.5 frames left.
   assert.equal(animationEtaMs({ frameMs: [5000, 3000, 3000], totalFrames: 10, frame: 3, frameFraction: 0.5, frameElapsedMs: 1500 }), 19500)
   assert.equal(animationEtaMs({ frameMs: [3000, 3000], totalFrames: 2, frame: 2, frameFraction: 0, frameElapsedMs: 0 }), 0)
+})
+
+/** The frame durations (ms) of an animated WebP data URL, read from its ANMF chunks. */
+function anmfDurations(dataUrl) {
+  const bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64')
+  assert.equal(bytes.toString('latin1', 0, 4), 'RIFF')
+  assert.equal(bytes.toString('latin1', 8, 12), 'WEBP')
+  const durations = []
+  let i = 12
+  while (i + 8 <= bytes.length) {
+    const tag = bytes.toString('latin1', i, i + 4)
+    const size = bytes.readUInt32LE(i + 4)
+    if (tag === 'ANMF') durations.push(bytes.readUIntLE(i + 8 + 12, 3))
+    i += 8 + size + (size % 2)
+  }
+  return durations
+}
+
+const sum = (xs) => xs.reduce((a, b) => a + b, 0)
+
+test('frameDurationsMs spreads the duration over the frames in whole ms with an exact total', () => {
+  const cases = [
+    [36, 10, 10000],
+    [72, 6, 6000],
+    [20, 2, 2000],
+  ]
+  for (const [n, d, total] of cases) {
+    const durations = frameDurationsMs(n, d)
+    assert.equal(durations.length, n)
+    assert.equal(sum(durations), total, `${n} frames over ${d} s`)
+    assert.ok(durations.every((ms) => Number.isInteger(ms)))
+    assert.ok(Math.max(...durations) - Math.min(...durations) <= 1, `${n} frames over ${d} s: ${durations}`)
+  }
+  assert.deepEqual(new Set(frameDurationsMs(20, 2)), new Set([100]))
+  assert.deepEqual(new Set(frameDurationsMs(36, 10)), new Set([277, 278]))
+})
+
+test('frameDurationsMs raises the duration so no frame is shorter than MIN_FRAME_MS', () => {
+  assert.equal(MIN_FRAME_MS, 20)
+  const durations = frameDurationsMs(120, 2)
+  assert.equal(durations.length, 120)
+  assert.ok(durations.every((ms) => ms === 20))
+  assert.equal(sum(durations), 2400)
+})
+
+test('animationFrameCount rounds and clamps an explicit frame count, and ignores bad values', () => {
+  assert.equal(animationFrameCount(36), 36)
+  assert.equal(animationFrameCount(35.6), 36)
+  assert.equal(animationFrameCount(5000), 600)
+  assert.equal(animationFrameCount(0), null)
+  assert.equal(animationFrameCount(-3), null)
+  assert.equal(animationFrameCount(undefined), null)
+  assert.equal(animationFrameCount('x'), null)
+})
+
+test('a turntable with frameCount renders that many frames and muxes the exact total duration', async () => {
+  const { session, sent } = await renderAnimation({ frameCount: 36, fps: 4, durationSeconds: 10, motion: 'turntable' })
+  assert.equal(session.frames.length, 36)
+  assert.equal(new Set(session.frames.map((f) => f.camera.position.join(','))).size, 36)
+  assert.equal(sent.ready.length, 1)
+  const durations = anmfDurations(sent.ready[0].dataUrl)
+  assert.equal(durations.length, 36)
+  assert.deepEqual(durations, frameDurationsMs(36, 10))
+  assert.equal(sum(durations), 10000)
+})
+
+test('a 72-frame, 6 s motor animation gives each frame its share of the 6 s', async () => {
+  const frames = Array.from({ length: 72 }, () => [])
+  const { session, sent } = await renderAnimation({ frameCount: 72, fps: 12, durationSeconds: 6, motion: 'motor', framesExtraTriangles: frames })
+  assert.equal(session.frames.length, 72)
+  const durations = anmfDurations(sent.ready[0].dataUrl)
+  assert.equal(durations.length, 72)
+  assert.equal(sum(durations), 6000)
+})
+
+test('a motor animation has one frame per entry even when frameCount disagrees', async () => {
+  const { session, sent } = await renderAnimation({ frameCount: 10, fps: 2, durationSeconds: 3, motion: 'motor', framesExtraTriangles: [[], [], []] })
+  assert.equal(session.frames.length, 3)
+  assert.deepEqual(anmfDurations(sent.ready[0].dataUrl), [1000, 1000, 1000])
+})
+
+test('requests without frameCount keep the old frame count and uniform durations', async () => {
+  const turntable = await renderAnimation({ fps: 10, durationSeconds: 0.5 })
+  assert.equal(turntable.session.frames.length, 5)
+  assert.deepEqual(anmfDurations(turntable.sent.ready[0].dataUrl), [100, 100, 100, 100, 100])
+  // An old motor request: 3 frames at 10 fps stay 100 ms each, whatever the duration.
+  const motor = await renderAnimation({ fps: 10, durationSeconds: 2, motion: 'motor', framesExtraTriangles: [[], [], []] })
+  assert.deepEqual(anmfDurations(motor.sent.ready[0].dataUrl), [100, 100, 100])
+  // 60 fps keeps its 17 ms frames (no 20 ms floor for old requests).
+  const fast = await renderAnimation({ fps: 60, durationSeconds: 0.5 })
+  assert.deepEqual(new Set(anmfDurations(fast.sent.ready[0].dataUrl)), new Set([17]))
 })

@@ -13,9 +13,11 @@ import Gear.Physics
         , angleAt
         , crankSliderPosition
         , crankSliderRodAngle
+        , cycleMotorTurns
         , defaultMotorGearId
         , fourBarAngles
         , propagate
+        , propagateRatios
         , propagateWithLinkages
         )
 import Gear.Types exposing (GearAxis(..), GearGraph, GearId, GearInstance, GearKind(..), GearSpec)
@@ -168,6 +170,44 @@ wormWheelSpurGraph =
     { instances = Array.fromList [ wheel, worm, spur ]
     , connections = Dict.fromList [ ( 0, [ 2 ] ), ( 1, [ 0 ] ), ( 2, [ 0 ] ) ]
     , rigidAxles = Dict.empty
+    }
+
+
+{-| 8T (0) meshes 24T (1); 1 shares an axle with 8T (2), which meshes 24T (3).
+-}
+compoundGraph : GearGraph
+compoundGraph =
+    { instances =
+        Array.fromList
+            [ makeInstance 0 8 8
+            , makeInstance 1 24 24
+            , makeInstance 2 8 8
+            , makeInstance 3 24 24
+            ]
+    , connections =
+        Dict.fromList
+            [ ( 0, [ 1 ] )
+            , ( 1, [ 0 ] )
+            , ( 2, [ 3 ] )
+            , ( 3, [ 2 ] )
+            ]
+    , rigidAxles = Dict.fromList [ ( 1, [ 2 ] ), ( 2, [ 1 ] ) ]
+    }
+
+
+{-| `compoundGraph` with a closing mesh 0–3 of a different ratio, so the loop
+is inconsistent: the ratio of 3 depends on the path the traversal takes.
+-}
+compoundLoopGraph : GearGraph
+compoundLoopGraph =
+    { compoundGraph
+        | connections =
+            Dict.fromList
+                [ ( 0, [ 1, 3 ] )
+                , ( 1, [ 0 ] )
+                , ( 2, [ 3 ] )
+                , ( 3, [ 2, 0 ] )
+                ]
     }
 
 
@@ -521,6 +561,137 @@ suite =
                         |> angleAt
                         |> (\f -> f 1)
                         |> Expect.within (Expect.Absolute 1.0e-6) -0.6
+            ]
+        , describe "propagateRatios"
+            [ test "8T driving 24T: motor 1/1, driven 1/3" <|
+                \_ ->
+                    propagateRatios (twoGearGraph 8 24) 0
+                        |> Expect.equal
+                            (Dict.fromList
+                                [ ( 0, { num = 1, den = 1 } )
+                                , ( 1, { num = 1, den = 3 } )
+                                ]
+                            )
+            , test "compound 8:24 twice gives 1/9" <|
+                \_ ->
+                    propagateRatios compoundGraph 0
+                        |> Dict.get 3
+                        |> Expect.equal (Just { num = 1, den = 9 })
+            , test "worm driving a 24T gives 1/24" <|
+                \_ ->
+                    propagateRatios (wormWheelGraph "4716.dat" False False False) 0
+                        |> Dict.get 1
+                        |> Expect.equal (Just { num = 1, den = 24 })
+            , test "a co-axial pair with a flipped axis keeps 1/1" <|
+                \_ ->
+                    let
+                        flippedGraph =
+                            geometryGraph
+                                [ placedGear "3648.dat" 0 24 Mat4.identity
+                                , placedGear "3647.dat" 1 8 (Mat4.makeRotate pi (vec3 1 0 0))
+                                ]
+                                |> (\g -> { g | rigidAxles = Dict.fromList [ ( 0, [ 1 ] ), ( 1, [ 0 ] ) ], connections = Dict.empty })
+                    in
+                    propagateRatios flippedGraph 0
+                        |> Dict.get 1
+                        |> Expect.equal (Just { num = 1, den = 1 })
+            , test "a gear that cannot be a motor gives no ratios" <|
+                \_ ->
+                    let
+                        graph =
+                            twoGearGraphWithSpecs (spec 8 16 |> (\s -> { s | motorCapable = False })) (spec 24 24)
+                    in
+                    propagateRatios graph 0
+                        |> Expect.equal Dict.empty
+            , test "an inconsistent loop takes the ratios of the BFS tree that is drawn" <|
+                \_ ->
+                    -- BFS reaches 3 straight from 0 (1/3); a walk through 1 and 2 would give 1/9.
+                    propagateRatios compoundLoopGraph 0
+                        |> Dict.toList
+                        |> Expect.equal
+                            [ ( 0, { num = 1, den = 1 } )
+                            , ( 1, { num = 1, den = 3 } )
+                            , ( 2, { num = 1, den = 3 } )
+                            , ( 3, { num = 1, den = 3 } )
+                            ]
+            , test "ratios match abs (propagate … 1.0) on the fixtures" <|
+                \_ ->
+                    let
+                        fixtures =
+                            [ ( twoGearGraph 8 24, 0 )
+                            , ( chainGraph 8 16 8, 0 )
+                            , ( chainGraph 40 8 24, 0 )
+                            , ( compoundGraph, 0 )
+                            , ( compoundLoopGraph, 0 )
+                            , ( wormWheelGraph "4716.dat" True False False, 0 )
+                            , ( wormWheelSpurGraph, 1 )
+                            , ( isolatedGraph, 0 )
+                            ]
+
+                        matches ( graph, motorId ) =
+                            let
+                                angles =
+                                    propagate graph motorId 1.0
+
+                                ratios =
+                                    propagateRatios graph motorId
+                            in
+                            (Dict.keys angles == Dict.keys ratios)
+                                && List.all
+                                    (\( gearId, angle ) ->
+                                        case Dict.get gearId ratios of
+                                            Just r ->
+                                                abs (abs angle - toFloat r.num / toFloat r.den) < 1.0e-9
+
+                                            Nothing ->
+                                                False
+                                    )
+                                    (Dict.toList angles)
+                    in
+                    List.map matches fixtures
+                        |> Expect.equal (List.map (\_ -> True) fixtures)
+            ]
+        , describe "cycleMotorTurns"
+            [ test "[1, 1/3] needs 3 motor turns" <|
+                \_ ->
+                    cycleMotorTurns [ { num = 1, den = 1 }, { num = 1, den = 3 } ]
+                        |> Expect.equal (Just 3)
+            , test "[1, 3/5] needs 5 motor turns" <|
+                \_ ->
+                    cycleMotorTurns [ { num = 1, den = 1 }, { num = 3, den = 5 } ]
+                        |> Expect.equal (Just 5)
+            , test "[2/3] needs 1.5 motor turns" <|
+                \_ ->
+                    cycleMotorTurns [ { num = 2, den = 3 } ]
+                        |> Expect.equal (Just 1.5)
+            , test "[5] (motor not animated, fast output) needs 0.2 motor turns" <|
+                \_ ->
+                    cycleMotorTurns [ { num = 5, den = 1 } ]
+                        |> Expect.equal (Just 0.2)
+            , test "unreduced ratios are reduced first" <|
+                \_ ->
+                    cycleMotorTurns [ { num = 8, den = 24 } ]
+                        |> Expect.equal (Just 3)
+            , test "an empty list gives Nothing" <|
+                \_ ->
+                    cycleMotorTurns []
+                        |> Expect.equal Nothing
+            , test "a huge lcm gives Nothing" <|
+                \_ ->
+                    cycleMotorTurns [ { num = 1, den = 97 }, { num = 1, den = 101 }, { num = 1, den = 103 } ]
+                        |> Expect.equal Nothing
+            , test "a numerator over 10000 gives Nothing" <|
+                \_ ->
+                    cycleMotorTurns [ { num = 1, den = 1 }, { num = 10007, den = 3 } ]
+                        |> Expect.equal Nothing
+            , test "a numerator of exactly 10000 is still allowed" <|
+                \_ ->
+                    cycleMotorTurns [ { num = 10000, den = 1 } ]
+                        |> Expect.equal (Just 1.0e-4)
+            , test "an lcm of exactly 10000 is still allowed" <|
+                \_ ->
+                    cycleMotorTurns [ { num = 1, den = 16 }, { num = 1, den = 625 } ]
+                        |> Expect.equal (Just 10000)
             ]
         , describe "Kinematic Linkages"
             [ test "crank-slider calculates exact position at top/bottom dead center and quadrature" <|

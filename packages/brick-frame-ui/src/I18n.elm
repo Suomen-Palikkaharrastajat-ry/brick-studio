@@ -221,18 +221,15 @@ module I18n exposing
     , shortcutsFootnote
       -- Inspector & BOM
     , shortcutsHelpRows
-    , snapshotAnimDur2s
-    , snapshotAnimDur4s
-    , snapshotAnimDur6s
-    , snapshotAnimFps10
-    , snapshotAnimFps15
-    , snapshotAnimFps30
-    , snapshotAnimRes360p
     , snapshotAnimRes480p
     , snapshotAnimRes720p
+    , snapshotAnimSmoothNormal
+    , snapshotAnimSmoothQuick
+    , snapshotAnimSmoothSmooth
     , snapshotAnimSpeed1x
     , snapshotAnimSpeedHalf
     , snapshotAnimSpeedQuarter
+    , snapshotAnimTurnSeconds
     , snapshotAnimationSubtitle
     , snapshotAspect16_9
     , snapshotAspect1_1
@@ -3530,39 +3527,50 @@ snapshotAnimRes480p _ =
     "480p"
 
 
-snapshotAnimRes360p : Language -> String
-snapshotAnimRes360p _ =
-    "360p"
+{-| Smoothness: the fewest frames, so the quickest render.
+-}
+snapshotAnimSmoothQuick : Language -> String
+snapshotAnimSmoothQuick lang =
+    case lang of
+        Fi ->
+            "Nopea"
+
+        En ->
+            "Quick"
 
 
-snapshotAnimFps10 : Language -> String
-snapshotAnimFps10 _ =
-    "10 fps"
+snapshotAnimSmoothNormal : Language -> String
+snapshotAnimSmoothNormal lang =
+    case lang of
+        Fi ->
+            "Normaali"
+
+        En ->
+            "Normal"
 
 
-snapshotAnimFps15 : Language -> String
-snapshotAnimFps15 _ =
-    "15 fps"
+{-| Smoothness: the most frames, so the smoothest motion and the longest render.
+-}
+snapshotAnimSmoothSmooth : Language -> String
+snapshotAnimSmoothSmooth lang =
+    case lang of
+        Fi ->
+            "Sujuva"
+
+        En ->
+            "Smooth"
 
 
-snapshotAnimFps30 : Language -> String
-snapshotAnimFps30 _ =
-    "30 fps"
+{-| How long one turn of a turntable animation takes, in whole seconds.
+-}
+snapshotAnimTurnSeconds : Language -> Int -> String
+snapshotAnimTurnSeconds lang seconds =
+    case lang of
+        Fi ->
+            "Kierros " ++ String.fromInt seconds ++ " s"
 
-
-snapshotAnimDur2s : Language -> String
-snapshotAnimDur2s _ =
-    "2 s"
-
-
-snapshotAnimDur4s : Language -> String
-snapshotAnimDur4s _ =
-    "4 s"
-
-
-snapshotAnimDur6s : Language -> String
-snapshotAnimDur6s _ =
-    "6 s"
+        En ->
+            String.fromInt seconds ++ " s turn"
 
 
 snapshotAnimSpeed1x : Language -> String
@@ -3740,14 +3748,62 @@ snapshotStillSubtitle lang size =
             pixelSize size ++ " PNG of the current view"
 
 
-snapshotAnimationSubtitle : Language -> { width : Int, height : Int } -> Int -> String
-snapshotAnimationSubtitle lang size frames =
+{-| The size, frame count and playback length of an animation, and whether
+it loops seamlessly. Seconds are rounded to a tenth, without a trailing
+".0", and with a decimal comma in Finnish: "6 s", "2,5 s".
+-}
+snapshotAnimationSubtitle : Language -> { width : Int, height : Int } -> { frames : Int, seconds : Float, loop : Bool } -> String
+snapshotAnimationSubtitle lang size clip =
     case lang of
         Fi ->
-            pixelSize size ++ " WebP-animaatio, " ++ String.fromInt frames ++ " kuvaa"
+            pixelSize size
+                ++ " WebP-animaatio, "
+                ++ String.fromInt clip.frames
+                ++ " kuvaa, "
+                ++ tenths "," clip.seconds
+                ++ " s"
+                ++ (if clip.loop then
+                        ", saumaton silmukka"
+
+                    else
+                        ""
+                   )
 
         En ->
-            pixelSize size ++ " WebP animation, " ++ String.fromInt frames ++ " frames"
+            pixelSize size
+                ++ " WebP animation, "
+                ++ String.fromInt clip.frames
+                ++ " frames, "
+                ++ tenths "." clip.seconds
+                ++ " s"
+                ++ (if clip.loop then
+                        ", seamless loop"
+
+                    else
+                        ""
+                   )
+
+
+{-| A non-negative number rounded to one decimal, without a trailing zero
+decimal, using the given decimal separator.
+-}
+tenths : String -> Float -> String
+tenths separator value =
+    let
+        t =
+            round (value * 10)
+
+        whole =
+            t // 10
+
+        frac =
+            modBy 10 t
+    in
+    if frac == 0 then
+        String.fromInt whole
+
+    else
+        String.fromInt whole ++ separator ++ String.fromInt frac
 
 
 pixelSize : { width : Int, height : Int } -> String

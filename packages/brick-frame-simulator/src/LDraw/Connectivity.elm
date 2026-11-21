@@ -449,20 +449,18 @@ alignedContactCount snapMatrix targetPlacementId draggedPoints targetPoints =
             in
             List.any
                 (\target ->
-                    if not (isCompatible dragged.connType target.connType) then
+                    -- the distance test first: it rejects nearly every target cheaply
+                    if Vec3.distance draggedPosition target.worldPosition > 0.5 || not (isCompatible dragged.connType target.connType) then
                         False
 
                     else
                         let
                             desiredNormal =
                                 targetDesiredNormal dragged.connType draggedNormal target.worldNormal
-
-                            normalMatches =
-                                not (isDirectional dragged.connType)
-                                    || Vec3.dot draggedNormal desiredNormal
-                                    >= -0.2
                         in
-                        normalMatches && Vec3.distance draggedPosition target.worldPosition <= 0.5
+                        not (isDirectional dragged.connType)
+                            || Vec3.dot draggedNormal desiredNormal
+                            >= -0.2
                 )
                 targetsOnPlacement
     in
@@ -504,15 +502,12 @@ solveSnapCandidatesWithPriority priority maxDist rotationIndex currentMatrix dra
                 )
                 targetPoints
 
-        evalPair draggedLocal targetWorld =
+        evalPair ( draggedLocal, draggedWorldPos ) targetWorld =
             if not (isCompatible draggedLocal.connType targetWorld.connType) then
                 Nothing
 
             else
                 let
-                    draggedWorldPos =
-                        Mat4.transform currentMatrix draggedLocal.localPosition
-
                     dist =
                         Vec3.distance draggedWorldPos targetWorld.worldPosition
                 in
@@ -594,9 +589,13 @@ solveSnapCandidatesWithPriority priority maxDist rotationIndex currentMatrix dra
                                   }
                                 )
 
+        -- each dragged point's world position once, not once per target
         candidates =
             draggedPoints
-                |> List.concatMap (\d -> List.filterMap (evalPair d) accessibleTargetPoints)
+                |> List.concatMap
+                    (\d ->
+                        List.filterMap (evalPair ( d, Mat4.transform currentMatrix d.localPosition )) accessibleTargetPoints
+                    )
 
         rankedCandidates =
             List.sortBy (\( _, score, _ ) -> score) candidates
@@ -2581,19 +2580,7 @@ knownCatalogPart name =
 
         "30374" ->
             -- Bar 4L
-            Just
-                { part = "30374.dat"
-                , connections =
-                    [ { id = 1
-                      , connType = BarFemale { diameter = 4.0 }
-                      , localPosition = vec3 0 40 0
-                      , normal = vec3 0 1 0
-                      , tangent = vec3 1 0 0
-                      }
-                    ]
-                , boundingBoxes =
-                    [ { min = vec3 -4 0 -4, max = vec3 4 80 4 } ]
-                }
+            Just (makeBar 4 "30374.dat")
 
         "87087" ->
             -- Brick 1 x 1 with Stud on 1 Side (SNOT): the side stud faces -Z
@@ -3102,6 +3089,657 @@ knownCatalogPart name =
                 , boundingBoxes = [ { min = vec3 -20 -38 -10, max = vec3 20 8 10 } ]
                 }
 
+        -- ── Microscale, slopes and inverted slopes ─────────────────────
+        -- Measured from the LDraw part files (kulits tree). New entries keep a
+        -- single envelope box first (it sets drag collisions and where a freshly
+        -- added part rests); only 15070's tooth and 4022's beam add a second box.
+        "3941" ->
+            -- Brick 2 x 2 round (the axle hole is left out on purpose: a Technic
+            -- point would turn off Health's stud rules)
+            Just (makeBrick 2 2 24 "3941.dat")
+
+        "4032b" ->
+            -- Plate 2 x 2 round (axle hole left out, as for 3941)
+            Just (makeBrick 2 2 8 "4032b.dat")
+
+        "3811" ->
+            -- Baseplate 32 x 32: 1024 studs, no anti-studs
+            Just baseplate32x32
+
+        "3867" ->
+            -- Baseplate 16 x 16: 256 studs, no anti-studs
+            Just baseplate16x16
+
+        "63864" ->
+            -- Tile 1 x 3
+            Just (makeTile 3 1 "63864.dat")
+
+        "60481a" ->
+            -- Slope 65 2 x 1 x 2
+            Just (makeSlope 1 2 48 "60481a.dat")
+
+        "35464" ->
+            -- Slope 45 1 x 1 double: origin at the bottom (like 54200), no studs
+            Just (makePart "35464.dat" [] [ vec3 0 0 0 ] [ boxOf -10 -16 -10 10 0 10 ])
+
+        "85984" ->
+            -- Slope 31 1 x 2 x 2/3 (cheese slope): origin at the bottom
+            Just (makePart "85984.dat" [] [ vec3 -10 0 0, vec3 10 0 0 ] [ boxOf -20 -16 -10 20 0 10 ])
+
+        "11477" ->
+            -- Slope curved 2 x 1: origin at the bottom; only the bottom-level
+            -- anti-stud is modelled (the notch at (0, −8, 10) is left out)
+            Just (makePart "11477.dat" [] [ vec3 0 0 -10 ] [ boxOf -10 -16 -20 10 0 20 ])
+
+        "15068" ->
+            -- Slope curved 2 x 2 x 2/3: origin at the bottom, notch at Y −8 left out
+            Just (makePart "15068.dat" [] [ vec3 -10 0 -10, vec3 10 0 -10 ] [ boxOf -20 -16 -20 20 0 20 ])
+
+        "93273" ->
+            -- Slope curved 4 x 1 double: origin at the bottom, the ends sit on studs,
+            -- the middle notch at Y −8 is left out
+            Just (makePart "93273.dat" [] [ vec3 0 0 -30, vec3 0 0 30 ] [ boxOf -10 -16 -40 10 0 40 ])
+
+        "50950" ->
+            -- Slope curved 3 x 1: origin at the top, no studs; notch at (0, 16, 20) left out
+            Just (makePart "50950.dat" [] [ vec3 0 24 -20, vec3 0 24 0 ] [ boxOf -10 0 -30 10 24 30 ])
+
+        "61678" ->
+            -- Slope curved 4 x 1: origin at the top, no studs; notches at Y 16 / 8 left out
+            Just (makePart "61678.dat" [] [ vec3 0 24 -30, vec3 0 24 -10 ] [ boxOf -10 0 -40 10 24 40 ])
+
+        "3665b" ->
+            -- Slope 45 2 x 1 inverted
+            Just (makeInvertedSlope 1 2 "3665b.dat")
+
+        "3660b" ->
+            -- Slope 45 2 x 2 inverted
+            Just (makeInvertedSlope 2 2 "3660b.dat")
+
+        "3747b" ->
+            -- Slope 33 3 x 2 inverted
+            Just (makeInvertedSlope 2 3 "3747b.dat")
+
+        "24201" ->
+            -- Slope curved 2 x 1 inverted: two hollow studs, the front one a plate
+            -- lower; the underside has no flat face, so no anti-studs
+            Just (makePart "24201.dat" [ vec3 0 0 0, vec3 0 8 20 ] [] [ boxOf -10 -4 -10 10 16 30 ])
+
+        "98283" ->
+            -- Brick 1 x 2 with masonry profile
+            Just (makeBrick 2 1 24 "98283.dat")
+
+        "2877" ->
+            -- Brick 1 x 2 with grille
+            Just (makeBrick 2 1 24 "2877.dat")
+
+        "30136" ->
+            -- Brick 1 x 2 log
+            Just (makeBrick 2 1 24 "30136.dat")
+
+        "4490" ->
+            -- Arch 1 x 3: anti-studs only under the legs; the opening (|x| < 10)
+            -- is inside the envelope box
+            Just
+                (makePart "4490.dat"
+                    [ vec3 -20 0 0, vec3 0 0 0, vec3 20 0 0 ]
+                    [ vec3 -20 24 0, vec3 20 24 0 ]
+                    [ boxOf -30 -4 -10 30 24 10 ]
+                )
+
+        "3659" ->
+            -- Arch 1 x 4: anti-studs only under the legs (opening |x| < 20)
+            Just
+                (makePart "3659.dat"
+                    [ vec3 -30 0 0, vec3 -10 0 0, vec3 10 0 0, vec3 30 0 0 ]
+                    [ vec3 -30 24 0, vec3 30 24 0 ]
+                    [ boxOf -40 -4 -10 40 24 10 ]
+                )
+
+        "87552" ->
+            -- Panel 1 x 2 x 2 with side supports (front pocket enclosed in the box)
+            Just (makeBrick 2 1 48 "87552.dat")
+
+        "4865b" ->
+            -- Panel 1 x 2 x 1: no studs, wall z 6..10 Y 0..16 over a plate base
+            Just (makePart "4865b.dat" [] [ vec3 -10 24 0, vec3 10 24 0 ] [ boxOf -20 0 -10 20 24 10 ])
+
+        "3633" ->
+            -- Fence 1 x 4 x 1 lattice: no studs, lattice z −10..−4 over a plate base
+            Just
+                (makePart "3633.dat"
+                    []
+                    [ vec3 -30 24 0, vec3 -10 24 0, vec3 10 24 0, vec3 30 24 0 ]
+                    [ boxOf -40 0 -10 40 24 10 ]
+                )
+
+        "4589" ->
+            -- Cone 1 x 1 (axle hole not modelled)
+            Just (makeBrick 1 1 24 "4589.dat")
+
+        "3942c" ->
+            -- Cone 2 x 2 x 2: one centre top stud, no centre anti-stud
+            Just
+                (makePart "3942c.dat"
+                    [ vec3 0 0 0 ]
+                    [ vec3 -10 48 -10, vec3 10 48 -10, vec3 -10 48 10, vec3 10 48 10 ]
+                    [ boxOf -20 -4 -20 20 48 20 ]
+                )
+
+        "4740" ->
+            -- Dish 2 x 2 inverted: one centre top stud
+            Just
+                (makePart "4740.dat"
+                    [ vec3 0 0 0 ]
+                    [ vec3 -10 8 -10, vec3 10 8 -10, vec3 -10 8 10, vec3 10 8 10 ]
+                    [ boxOf -20 -4 -20 20 8 20 ]
+                )
+
+        "43888" ->
+            -- Brick 1 x 1 x 6 round pillar
+            Just (makeBrick 1 1 144 "43888.dat")
+
+        "87994" ->
+            -- Bar 3L
+            Just (makeBar 3 "87994.dat")
+
+        "3957a" ->
+            -- Antenna 4H: one anti-stud at the bottom, mast up to Y −88
+            Just (makePart "3957a.dat" [] [ vec3 0 8 0 ] [ boxOf -8 -88 -8 8 8 8 ])
+
+        "61252" ->
+            -- Plate 1 x 1 with horizontal clip: the held bar runs along X, centred
+            -- (0, 2, −20); the clip ring stays outside the box (like makeClipPlate)
+            Just (withConnections [ clipAt 20 (vec3 0 2 -20) (vec3 1 0 0) ] (makeBrick 1 1 8 "61252.dat"))
+
+        "15070" ->
+            -- Plate 1 x 1 with tooth: the tooth is a second box, so a fresh ground
+            -- add (first box only) sinks it 16 LDU until the mesh is built
+            let
+                plate =
+                    makeBrick 1 1 8 "15070.dat"
+            in
+            Just { plate | boundingBoxes = plate.boundingBoxes ++ [ boxOf -10 0 -18 10 24 -10 ] }
+
+        "33291" ->
+            -- Plate 1 x 1 round with flower petals (petals r12 Y 0..3 left out of the box)
+            Just (makeBrick 1 1 8 "33291.dat")
+
+        "32607" ->
+            -- Plant plate 1 x 1 with leaves (leaves inside the box)
+            Just (makePart "32607.dat" [ vec3 0 0 0 ] [ vec3 0 8 0 ] [ boxOf -10 -4 -26 28 8 10 ])
+
+        "2423" ->
+            -- Plant leaves 4 x 3: six leaf studs, a stud tube under the centre and
+            -- under the far leaf tip; the 3-LDU leaves are boxed to Y 8
+            Just
+                (makePart "2423.dat"
+                    [ vec3 0 0 0, vec3 -20 0 -20, vec3 20 0 -20, vec3 -20 0 -40, vec3 20 0 -40, vec3 0 0 -60 ]
+                    [ vec3 0 8 0, vec3 0 8 -60 ]
+                    [ boxOf -26 -4 -68 26 8 10 ]
+                )
+
+        "24866" ->
+            -- Plate 1 x 1 round with 5 petals
+            Just (makeBrick 1 1 8 "24866.dat")
+
+        -- ── Every other visible curated part ───────────────────────────
+        -- Plates, tiles and baseplates
+        "3032" ->
+            Just (makeBrick 6 4 8 "3032.dat")
+
+        "3035" ->
+            Just (makeBrick 8 4 8 "3035.dat")
+
+        "3036" ->
+            Just (makeBrick 8 6 8 "3036.dat")
+
+        "3030" ->
+            Just (makeBrick 10 4 8 "3030.dat")
+
+        "3029" ->
+            Just (makeBrick 12 4 8 "3029.dat")
+
+        "3028" ->
+            Just (makeBrick 12 6 8 "3028.dat")
+
+        "3027" ->
+            Just (makeBrick 16 6 8 "3027.dat")
+
+        "4477" ->
+            Just (makeBrick 10 1 8 "4477.dat")
+
+        "3023bp00" ->
+            Just (makeBrick 2 1 8 "3023bp00.dat")
+
+        "4162" ->
+            Just (makeTile 8 1 "4162.dat")
+
+        "26603" ->
+            Just (makeTile 3 2 "26603.dat")
+
+        "14769" ->
+            Just (makeTile 2 2 "14769.dat")
+
+        "3069bp64" ->
+            Just (makeTile 2 1 "3069bp64.dat")
+
+        "14719" ->
+            -- Tile 2 x 2 corner: two boxes for the L shape
+            Just
+                (makePart "14719.dat"
+                    []
+                    [ vec3 0 8 0, vec3 20 8 0, vec3 0 8 20 ]
+                    [ boxOf -10 0 -10 30 8 10, boxOf -10 0 10 10 8 30 ]
+                )
+
+        "18674" ->
+            -- Plate 2 x 2 round with a centre stud
+            Just
+                (makePart "18674.dat"
+                    [ vec3 0 0 0 ]
+                    [ vec3 -10 8 -10, vec3 10 8 -10, vec3 -10 8 10, vec3 10 8 10 ]
+                    [ boxOf -20 -4 -20 20 8 20 ]
+                )
+
+        -- Bricks, slopes, arches, round parts and Technic basics
+        "3001b" ->
+            Just (makeBrick 4 2 24 "3001b.dat")
+
+        "3245c" ->
+            Just (makeBrick 2 1 48 "3245c.dat")
+
+        "60593" ->
+            Just (makeBrick 2 1 72 "60593.dat")
+
+        "59900" ->
+            -- Cone 1 x 1 with top groove (axle holes not modelled)
+            Just (makeBrick 1 1 24 "59900.dat")
+
+        "4286" ->
+            Just (makeSlope 1 3 24 "4286.dat")
+
+        "4460b" ->
+            Just (makeSlope 1 2 72 "4460b.dat")
+
+        "3678b" ->
+            Just (makeSlope 2 2 48 "3678b.dat")
+
+        "3044b" ->
+            -- Slope 45 2 x 1 double: no studs
+            Just (makePart "3044b.dat" [] [ vec3 0 24 -10, vec3 0 24 10 ] [ boxOf -10 0 -20 10 24 20 ])
+
+        "3048b" ->
+            -- Slope 45 1 x 2 triple: no studs
+            Just (makePart "3048b.dat" [] [ vec3 -10 24 0, vec3 10 24 0 ] [ boxOf -20 0 -10 20 24 10 ])
+
+        "3045" ->
+            -- Slope 45 2 x 2 double convex: origin at a corner stud, the 2 x 2 centred at (10, −10)
+            Just
+                (makePart "3045.dat"
+                    [ vec3 0 0 0 ]
+                    cornerSlopeAntiStuds
+                    [ boxOf -10 -4 -30 30 24 10 ]
+                )
+
+        "3046" ->
+            -- Slope 45 2 x 2 double concave: three studs, origin at a corner stud
+            Just
+                (makePart "3046.dat"
+                    [ vec3 0 0 0, vec3 20 0 0, vec3 0 0 -20 ]
+                    cornerSlopeAntiStuds
+                    [ boxOf -10 -4 -30 30 24 10 ]
+                )
+
+        "30413" ->
+            -- Panel 1 x 4 x 1: no studs
+            Just
+                (makePart "30413.dat"
+                    []
+                    [ vec3 -30 24 0, vec3 -10 24 0, vec3 10 24 0, vec3 30 24 0 ]
+                    [ boxOf -40 0 -10 40 24 10 ]
+                )
+
+        "3455" ->
+            -- Arch 1 x 6: anti-studs only under the legs
+            Just
+                (makePart "3455.dat"
+                    (List.map (\x -> vec3 x 0 0) (centeredPitch 6))
+                    [ vec3 -50 24 0, vec3 50 24 0 ]
+                    [ boxOf -60 -4 -10 60 24 10 ]
+                )
+
+        "6182" ->
+            -- Arch 1 x 4 x 2: anti-studs only under the legs
+            Just
+                (makePart "6182.dat"
+                    (List.map (\x -> vec3 x 0 0) (centeredPitch 4))
+                    [ vec3 -30 48 0, vec3 30 48 0 ]
+                    [ boxOf -40 -4 -10 40 48 10 ]
+                )
+
+        "2489" ->
+            -- Barrel 2 x 2 x 1.67: open top, anti-studs underneath
+            Just
+                (makePart "2489.dat"
+                    []
+                    [ vec3 -10 40 -10, vec3 10 40 -10, vec3 -10 40 10, vec3 10 40 10 ]
+                    [ boxOf -20 -4 -20 20 40 20 ]
+                )
+
+        "35442" ->
+            -- Plate gear 6 tooth 2 x 2
+            Just
+                (makePart "35442.dat"
+                    grid2x2Studs
+                    (grid2x2At 8)
+                    [ boxOf -33.4 -4 -37.5 33.4 8 37.5 ]
+                )
+
+        "51739" ->
+            -- Wing 2 x 4
+            Just
+                (makePart "51739.dat"
+                    grid2x2Studs
+                    (grid2x2At 8)
+                    [ boxOf -38.5 -4 -20 38.5 8 20 ]
+                )
+
+        "61485" ->
+            -- Turntable flat base 4 x 4: 16 anti-studs on the 4 x 4 grid
+            Just
+                (makePart "61485.dat"
+                    []
+                    (List.concatMap (\x -> List.map (\z -> vec3 x 8 z) (centeredPitch 4)) (centeredPitch 4))
+                    [ boxOf -40 -4 -40 40 8 40 ]
+                )
+
+        "3680" ->
+            -- Turntable 2 x 2 base
+            Just (makePart "3680.dat" [] (grid2x2At 8) [ boxOf -20 0 -20 20 8 20 ])
+
+        "4459" ->
+            Just (makeTechnicPin 10 True "4459.dat")
+
+        "87083" ->
+            Just (makeAxle 4 "87083.dat")
+
+        "55013" ->
+            Just (makeAxle 8 "55013.dat")
+
+        -- Clips (the held bar's centre, normal along the bar; clip rings stay outside the boxes)
+        "4081b" ->
+            Just (withConnections [ clipAt 20 (vec3 0 2 -20) (vec3 1 0 0) ] (makeBrick 1 1 8 "4081b.dat"))
+
+        "63868" ->
+            Just (withConnections [ clipAt 20 (vec3 30 2 0) (vec3 0 0 1) ] (makeBrick 2 1 8 "63868.dat"))
+
+        "2555" ->
+            Just (withConnections [ clipAt 20 (vec3 0 -6 0) (vec3 0 0 1) ] (makeTile 1 1 "2555.dat"))
+
+        "15712" ->
+            Just (withConnections [ clipAt 20 (vec3 0 -6 0) (vec3 0 0 1) ] (makeTile 1 1 "15712.dat"))
+
+        "2335" ->
+            -- Flag 2 x 2: two clips on a vertical bar along Y
+            Just
+                (withConnections
+                    [ clipAt 20 (vec3 0 4 0) (vec3 0 1 0), clipAt 21 (vec3 0 36 0) (vec3 0 1 0) ]
+                    (makePart "2335.dat" [] [] [ boxOf -2 0 10 2 40 50 ])
+                )
+
+        "30258" ->
+            -- Road sign 2 x 2 with clip (clip point measured approximate, ±0.5 LDU)
+            Just
+                (withConnections
+                    [ clipAt 20 (vec3 0 0 0) (vec3 0 1 0) ]
+                    (makePart "30258.dat" [] [] [ boxOf -20 -20 -9 20 20 -6 ])
+                )
+
+        -- Inferred or simplified layouts (to verify in Studio)
+        "6005" ->
+            -- Arch 1 x 3 x 2 with curved top: stud on the low end, the anti-stud
+            -- under its ledge at Y 16 is a guess
+            Just
+                (makePart "6005.dat"
+                    [ vec3 0 8 0 ]
+                    [ vec3 0 48 -40, vec3 0 16 0 ]
+                    [ boxOf -10 0 -50 10 48 -10, boxOf -10 4 -10 10 16 10 ]
+                )
+
+        "2654a" ->
+            -- Dish 2 x 2 with rim: a domed underside with one centre recess (inferred anti-stud)
+            Just (makePart "2654a.dat" grid2x2Studs [ vec3 0 8 0 ] [ boxOf -20 -4 -20 20 8 20 ])
+
+        "32028" ->
+            -- Plate 1 x 2 with door rail: the rail cannot snap a door
+            let
+                plate =
+                    makeBrick 2 1 8 "32028.dat"
+            in
+            Just { plate | boundingBoxes = [ boxOf -20 -4 -19 20 8 10 ] }
+
+        "92013" ->
+            -- Brick 2 x 2 with ball socket: brick body only, socket omitted
+            Just (makeBrick 2 2 24 "92013.dat")
+
+        "4022" ->
+            -- Train buffer beam: deck box first (its max Y carries the anti-studs),
+            -- beam second; a fresh ground add sinks the beam until the mesh is built
+            Just
+                (makePart "4022.dat"
+                    []
+                    (grid2x2At 8)
+                    [ boxOf -61 0 -53 61 8 20, boxOf -65 8 -54 65 40 -20 ]
+                )
+
+        "4315" ->
+            -- Hinge plate 1 x 4 with car roof holder: plate only, holder omitted
+            Just (makeBrick 4 1 8 "4315.dat")
+
+        "44570" ->
+            -- Hinge plate 3 x 4 locking (fingers omitted; the z +10 anti-stud row is inferred)
+            let
+                positions =
+                    List.concatMap (\x -> List.map (\z -> ( x, z )) [ 10, -10, -30 ]) (centeredPitch 4)
+            in
+            Just
+                (makePart "44570.dat"
+                    (List.map (\( x, z ) -> vec3 x 0 z) positions)
+                    (List.map (\( x, z ) -> vec3 x 8 z) positions)
+                    [ boxOf -40 -4 -40 40 8 20 ]
+                )
+
+        "32209" ->
+            -- Axle 5.5 with stop
+            Just
+                { part = "32209.dat"
+                , connections =
+                    List.indexedMap
+                        (\idx x -> technicAt (idx + 1) (TechnicAxleMale { length = 107.5 }) (vec3 x 0 0) (vec3 1 0 0))
+                        [ -45, -25, -5, 15, 35 ]
+                , boundingBoxes = [ boxOf -55 -8 -8 52.5 8 8 ]
+                }
+
+        "32235" ->
+            -- Axle flexible 19 (straight)
+            Just (makeAxle 19 "32235.dat")
+
+        "32054" ->
+            -- Pin long with stop bush
+            Just (makeTechnicPin 15 True "32054.dat")
+
+        "15100" ->
+            -- Pin with pin hole
+            Just
+                { part = "15100.dat"
+                , connections =
+                    [ technicAt 1 (TechnicPinMale { length = 20, friction = True }) (vec3 20 0 0) (vec3 1 0 0)
+                    , technicAt 2 (TechnicPinFemale { length = 20 }) (vec3 0 0 0) (vec3 0 1 0)
+                    ]
+                , boundingBoxes = [ boxOf -9 -10 -9 30 10 9 ]
+                }
+
+        "18654" ->
+            -- Technic beam 1 (a single pin hole along Y)
+            Just
+                { part = "18654.dat"
+                , connections = [ technicAt 1 (TechnicPinFemale { length = 20 }) (vec3 0 0 0) (vec3 0 1 0) ]
+                , boundingBoxes = [ boxOf -9 -10 -9 9 10 9 ]
+                }
+
+        "15459" ->
+            -- Technic suspension arm 1 x 5: pin holes along X
+            Just
+                { part = "15459.dat"
+                , connections =
+                    List.indexedMap
+                        (\idx z -> technicAt (idx + 1) (TechnicPinFemale { length = 20 }) (vec3 0 0 z) (vec3 1 0 0))
+                        [ 0, -20, -40, -60 ]
+                , boundingBoxes = [ boxOf -10 -9 -90 10 9 9 ]
+                }
+
+        "32526" ->
+            -- Technic beam 3 x 5 bent 90
+            Just
+                { part = "32526.dat"
+                , connections =
+                    List.indexedMap
+                        (\idx position -> technicAt (idx + 1) (TechnicPinFemale { length = 20 }) position (vec3 0 1 0))
+                        [ vec3 0 0 0, vec3 0 0 20, vec3 0 0 40, vec3 0 0 60, vec3 0 0 80, vec3 20 0 80, vec3 40 0 80 ]
+                , boundingBoxes = [ boxOf -9 -10 -9 9 10 89, boxOf -9 -10 71 49 10 89 ]
+                }
+
+        "32527" ->
+            -- Panel fairing #5: two pin holes along Z
+            Just
+                { part = "32527.dat"
+                , connections = fairingPinHoles
+                , boundingBoxes = [ boxOf -36.5 -59 -20 9 -4 79.7 ]
+                }
+
+        "32528" ->
+            -- Panel fairing #6 (mirror of 32527)
+            Just
+                { part = "32528.dat"
+                , connections = fairingPinHoles
+                , boundingBoxes = [ boxOf -9 -59 -20 36.5 -4 79.7 ]
+                }
+
+        "4185a" ->
+            -- Technic wedge belt wheel: an axle hole along Z
+            Just
+                { part = "4185a.dat"
+                , connections = makeAxleHolePoints 1 5 (vec3 0 0 0)
+                , boundingBoxes = [ boxOf -30 -30 -5 30 30 5 ]
+                }
+
+        "6628" ->
+            -- Pin towball with friction (towball omitted)
+            Just
+                { part = "6628.dat"
+                , connections = [ technicAt 1 (TechnicPinMale { length = 20, friction = True }) (vec3 10 0 0) (vec3 1 0 0) ]
+                , boundingBoxes = [ boxOf -18 -8 -8 20 8 8 ]
+                }
+
+        "2736" ->
+            -- Axle towball (towball omitted)
+            Just
+                { part = "2736.dat"
+                , connections = [ technicAt 1 (TechnicAxleMale { length = 17.5 }) (vec3 8.75 0 0) (vec3 1 0 0) ]
+                , boundingBoxes = [ boxOf -20 -8 -8 17.5 8 8 ]
+                }
+
+        "53585" ->
+            -- Technic ball joint with axle hole along Y
+            Just
+                { part = "53585.dat"
+                , connections =
+                    [ technicAt 1 (TechnicAxleFemale { length = 15 }) (vec3 0 0 0) (vec3 0 1 0)
+                    , technicAt 2 (TechnicAxleFemale { length = 15 }) (vec3 0 7.5 0) (vec3 0 1 0)
+                    , technicAt 3 (TechnicAxleFemale { length = 15 }) (vec3 0 -7.5 0) (vec3 0 -1 0)
+                    ]
+                , boundingBoxes = [ boxOf -12.8 -9.6 -12.8 12.8 9.6 12.8 ]
+                }
+
+        "60176" ->
+            -- Constraction connector 3 x 2 with ball socket: axle hole along X (socket omitted)
+            Just
+                { part = "60176.dat"
+                , connections = [ technicAt 1 (TechnicAxleFemale { length = 40 }) (vec3 0 0 0) (vec3 1 0 0) ]
+                , boundingBoxes = [ boxOf -20 -10 -29.2 20 10 30 ]
+                }
+
+        -- Hinge and turntable halves (rigid: the joint is not modelled; box = plate body only)
+        "2429" ->
+            Just
+                (makePart "2429.dat"
+                    [ vec3 -30 0 10, vec3 -10 0 10 ]
+                    [ vec3 -30 8 10, vec3 -10 8 10 ]
+                    [ boxOf -40 -4 0 0 8 20 ]
+                )
+
+        "2430" ->
+            Just
+                (makePart "2430.dat"
+                    [ vec3 10 0 10, vec3 30 0 10 ]
+                    [ vec3 10 8 10, vec3 30 8 10 ]
+                    [ boxOf 0 -4 0 40 8 20 ]
+                )
+
+        "4275b" ->
+            Just (makeBrick 2 1 8 "4275b.dat")
+
+        "4276b" ->
+            Just (makeBrick 2 1 8 "4276b.dat")
+
+        "44301a" ->
+            Just (makeBrick 2 1 8 "44301a.dat")
+
+        "44302a" ->
+            Just (makeBrick 2 1 8 "44302a.dat")
+
+        "44568" ->
+            Just (makeBrick 4 1 8 "44568.dat")
+
+        "3937" ->
+            -- Hinge 1 x 2 base (anti-studs inferred)
+            Just (makePart "3937.dat" [] [ vec3 -10 24 0, vec3 10 24 0 ] [ boxOf -20 2 -10 20 24 10 ])
+
+        "3938" ->
+            -- Hinge 1 x 2 top
+            Just (makePart "3938.dat" [ vec3 -10 0 0, vec3 10 0 0 ] [] [ boxOf -20 -4 -10 20 16 10 ])
+
+        "3679" ->
+            -- Turntable 2 x 2 top
+            Just (makePart "3679.dat" grid2x2Studs [] [ boxOf -17.5 -4 -17.5 17.5 8 17.5 ])
+
+        -- Decor: no connection points, measured box
+        "3742" ->
+            -- Plant flower (fits flower stems, which are not modelled)
+            Just (makePart "3742.dat" [] [] [ boxOf -11 -4 -11.5 11 2 11.9 ])
+
+        "3711" ->
+            -- Technic chain link
+            Just (makePart "3711.dat" [] [] [ boxOf -9.7 -5 -5 9.8 5 21 ])
+
+        "4000" ->
+            -- Ladder 4 x 15.6 with pivot
+            Just (makePart "4000.dat" [] [] [ boxOf -266 -21 -35 46 34 35 ])
+
+        "4593" ->
+            -- Hinge control stick
+            Just (makePart "4593.dat" [] [] [ boxOf -4 -38 -4 4 4 4 ])
+
+        "60601" ->
+            -- Glass for window 1 x 2 x 2 (hidden; old models only): no boxes, so
+            -- Health skips it instead of flagging the glass inside its frame
+            Just (makePart "60601.dat" [] [] [])
+
+        "60602" ->
+            -- Glass for window 1 x 2 x 3 (hidden; old models only): no boxes
+            Just (makePart "60602.dat" [] [] [])
+
         "4079" ->
             Just
                 { part = "4079.dat"
@@ -3124,21 +3762,183 @@ knownCatalogPart name =
             Nothing
 
 
+{-| A 1 x 1 plate with a clip on its front. The clip point is the centre of the
+held bar (0, 4, −20) and its normal is the bar axis (vertical), so a bar dragged
+into the clip stands upright beside the plate instead of passing through it.
+-}
 makeClipPlate : String -> PartConnectivity
 makeClipPlate pName =
-    let
-        base =
-            makeBrick 1 1 8 pName
+    withConnections [ clipAt 20 (vec3 0 4 -20) (vec3 0 -1 0) ] (makeBrick 1 1 8 pName)
 
-        clip =
-            { id = 20
-            , connType = ClipMale { width = 4.0 }
-            , localPosition = vec3 0 4 -10
-            , normal = vec3 0 0 -1
-            , tangent = vec3 1 0 0
-            }
+
+{-| A clip (`ClipMale`, 4 LDU bar) at the centre of the bar it holds, with its
+normal along the held bar's axis. Clips and bars align by anti-parallel normals,
+and a bar's normal runs along the bar, so this seats the bar inside the clip.
+-}
+clipAt : Int -> Vec3 -> Vec3 -> ConnectionPoint
+clipAt id position barAxis =
+    technicAt id (ClipMale { width = 4.0 }) position barAxis
+
+
+{-| A connection point with an explicit type, position and normal; the tangent
+is any axis perpendicular to the normal.
+-}
+technicAt : Int -> ConnectionType -> Vec3 -> Vec3 -> ConnectionPoint
+technicAt id connType position normal =
+    { id = id
+    , connType = connType
+    , localPosition = position
+    , normal = normal
+    , tangent =
+        if abs (Vec3.getY normal) > 0.7 then
+            vec3 1 0 0
+
+        else
+            vec3 0 1 0
+    }
+
+
+{-| A part with `extra` connection points added to `base`'s.
+-}
+withConnections : List ConnectionPoint -> PartConnectivity -> PartConnectivity
+withConnections extra base =
+    { base | connections = base.connections ++ extra }
+
+
+{-| A part from explicit stud and anti-stud positions: studs get ids 1…,
+anti-studs ids 100…. The FIRST box drives drag collisions and where a freshly
+added part rests (until its mesh is built), so it must reach the part's real
+bottom; Health checks every box.
+-}
+makePart : String -> List Vec3 -> List Vec3 -> List BoundingBox3D -> PartConnectivity
+makePart partName studs antiStuds boxes =
+    { part = partName
+    , connections =
+        List.indexedMap (\idx position -> studAt (idx + 1) position) studs
+            ++ List.indexedMap (\idx position -> antiStudAt (idx + 100) position) antiStuds
+    , boundingBoxes = boxes
+    }
+
+
+{-| A box from its min and max corners.
+-}
+boxOf : Float -> Float -> Float -> Float -> Float -> Float -> BoundingBox3D
+boxOf minX minY minZ maxX maxY maxZ =
+    { min = vec3 minX minY minZ, max = vec3 maxX maxY maxZ }
+
+
+{-| Studs on a 2 x 2 grid at Y = 0.
+-}
+grid2x2Studs : List Vec3
+grid2x2Studs =
+    grid2x2At 0
+
+
+{-| Positions on a 2 x 2 grid (±10, ±10) at height `y`.
+-}
+grid2x2At : Float -> List Vec3
+grid2x2At y =
+    [ vec3 -10 y -10, vec3 10 y -10, vec3 -10 y 10, vec3 10 y 10 ]
+
+
+{-| Anti-studs of the 2 x 2 corner slopes 3045/3046, whose origin is a corner stud.
+-}
+cornerSlopeAntiStuds : List Vec3
+cornerSlopeAntiStuds =
+    [ vec3 0 24 0, vec3 20 24 0, vec3 0 24 -20, vec3 20 24 -20 ]
+
+
+{-| The two pin holes of the panel fairings 32527/32528, along Z.
+-}
+fairingPinHoles : List ConnectionPoint
+fairingPinHoles =
+    [ technicAt 1 (TechnicPinFemale { length = 20 }) (vec3 0 -30 -20) (vec3 0 0 1)
+    , technicAt 2 (TechnicPinFemale { length = 20 }) (vec3 0 -50 -20) (vec3 0 0 1)
+    ]
+
+
+{-| An inverted slope `width` studs along X and `depth` studs toward −Z: studs on
+the full top grid (z = 0, −20, …), anti-studs only on the back row (z = 0) where
+the flat bottom is. The empty space under the overhang is inside the box.
+-}
+makeInvertedSlope : Int -> Int -> String -> PartConnectivity
+makeInvertedSlope width depth partName =
+    let
+        halfW =
+            toFloat width * 10.0
+
+        xs =
+            centeredPitch width
+
+        zs =
+            List.map (\j -> -20.0 * toFloat j) (List.range 0 (depth - 1))
     in
-    { base | connections = clip :: base.connections }
+    makePart partName
+        (List.concatMap (\x -> List.map (\z -> vec3 x 0 z) zs) xs)
+        (List.map (\x -> vec3 x 24 0) xs)
+        [ boxOf -halfW -4 (10 - 20 * toFloat depth) halfW 24 10 ]
+
+
+{-| A bar `n` studs long along +Y from its origin at one end (Y 0 to 20n), so a
+fresh add stands it upright. Bar points (`BarFemale`, 4 LDU) sit at 1-stud steps
+(Y 10, 30, …, 20n − 10) plus 4 LDU from each end (Y 4 and 20n − 4), so a bar in a
+ground-level clip can seat with its end flush on the ground.
+-}
+makeBar : Int -> String -> PartConnectivity
+makeBar n partName =
+    let
+        len =
+            20.0 * toFloat n
+
+        ys =
+            4 :: List.map (\i -> 10.0 + 20.0 * toFloat i) (List.range 0 (n - 1)) ++ [ len - 4 ]
+    in
+    { part = partName
+    , connections =
+        List.indexedMap
+            (\idx y ->
+                { id = idx + 1
+                , connType = BarFemale { diameter = 4.0 }
+                , localPosition = vec3 0 y 0
+                , normal = vec3 0 1 0
+                , tangent = vec3 1 0 0
+                }
+            )
+            ys
+    , boundingBoxes = [ boxOf -4 0 -4 4 len 4 ]
+    }
+
+
+{-| A baseplate `length` x `width` studs: studs only (no anti-studs, so stud ids
+1… never clash with anti-stud ids from 100), box from Y −4 (studs) to 4.
+-}
+makeBaseplate : Int -> Int -> String -> PartConnectivity
+makeBaseplate length width partName =
+    let
+        halfL =
+            toFloat length * 10.0
+
+        halfW =
+            toFloat width * 10.0
+    in
+    makePart partName
+        (List.concatMap (\x -> List.map (\z -> vec3 x 0 z) (centeredPitch width)) (centeredPitch length))
+        []
+        [ boxOf -halfL -4 -halfW halfL 4 halfW ]
+
+
+{-| Baseplate 32 x 32 (3811), built once.
+-}
+baseplate32x32 : PartConnectivity
+baseplate32x32 =
+    makeBaseplate 32 32 "3811.dat"
+
+
+{-| Baseplate 16 x 16 (3867), built once.
+-}
+baseplate16x16 : PartConnectivity
+baseplate16x16 =
+    makeBaseplate 16 16 "3867.dat"
 
 
 {-| An upward stud (normal −Y in LDraw's Y-down space) at `position`.

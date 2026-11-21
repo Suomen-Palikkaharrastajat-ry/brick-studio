@@ -274,8 +274,9 @@ suite =
                                 , timeBudgetMs = Just 15000
                                 , animation =
                                     Just
-                                        { fps = 15
+                                        { frames = 2
                                         , durationSeconds = 4.0
+                                        , samplesPerPixel = Just 10
                                         , framesExtraTriangles = Just [ [ 1.0, 2.0, 3.0 ], [ 4.0, 5.0, 6.0 ] ]
                                         }
                                 , viewAspect = Nothing
@@ -283,8 +284,14 @@ suite =
                     in
                     Expect.all
                         [ \_ ->
+                            Decode.decodeValue (Decode.at [ "animation", "frameCount" ] Decode.int) request
+                                |> Expect.equal (Ok 2)
+                        , \_ ->
                             Decode.decodeValue (Decode.at [ "animation", "fps" ] Decode.int) request
-                                |> Expect.equal (Ok 15)
+                                |> Expect.equal (Ok 1)
+                        , \_ ->
+                            Decode.decodeValue (Decode.at [ "animation", "samplesPerPixel" ] Decode.int) request
+                                |> Expect.equal (Ok 10)
                         , \_ ->
                             Decode.decodeValue (Decode.at [ "animation", "durationSeconds" ] Decode.float) request
                                 |> Expect.equal (Ok 4.0)
@@ -299,6 +306,40 @@ suite =
                                 |> Expect.equal (Ok "motor")
                         ]
                         ()
+            , test "a 36-frame, 10 s turntable sends frameCount 36, fps 4 and no samplesPerPixel" <|
+                \_ ->
+                    animationRequest Nothing
+                        |> Expect.all
+                            [ Decode.decodeValue (Decode.at [ "animation", "frameCount" ] Decode.int)
+                                >> Expect.equal (Ok 36)
+                            , Decode.decodeValue (Decode.at [ "animation", "fps" ] Decode.int)
+                                >> Expect.equal (Ok 4)
+                            , Decode.decodeValue (Decode.at [ "animation", "durationSeconds" ] Decode.float)
+                                >> Expect.equal (Ok 10)
+                            , Decode.decodeValue (Decode.at [ "animation", "samplesPerPixel" ] Decode.value)
+                                >> Result.toMaybe
+                                >> Expect.equal Nothing
+                            , Decode.decodeValue (Decode.at [ "animation", "motion" ] Decode.string)
+                                >> Expect.equal (Ok "turntable")
+                            ]
+            , test "a single frame over 10 s still sends fps 1" <|
+                \_ ->
+                    Snapshot.encodeRequestWithOptions
+                        { filename = "anim.webp"
+                        , camera = Camera.init
+                        , lightDirection = Nothing
+                        , triangles = []
+                        , crop = Nothing
+                        , outlineEdges = Nothing
+                        , shader = Nothing
+                        , width = Nothing
+                        , height = Nothing
+                        , timeBudgetMs = Nothing
+                        , animation = Just { frames = 1, durationSeconds = 10.0, samplesPerPixel = Nothing, framesExtraTriangles = Nothing }
+                        , viewAspect = Nothing
+                        }
+                        |> Decode.decodeValue (Decode.map2 Tuple.pair (Decode.at [ "animation", "frameCount" ] Decode.int) (Decode.at [ "animation", "fps" ] Decode.int))
+                        |> Expect.equal (Ok ( 1, 1 ))
             , test "encodeRequestWithOptions marks an animation with empty motor frames as motor" <|
                 \_ ->
                     animationRequest (Just [ [], [] ])
@@ -335,7 +376,7 @@ animationRequest frames =
         , width = Nothing
         , height = Nothing
         , timeBudgetMs = Nothing
-        , animation = Just { fps = 10, durationSeconds = 2.0, framesExtraTriangles = frames }
+        , animation = Just { frames = 36, durationSeconds = 10.0, samplesPerPixel = Nothing, framesExtraTriangles = frames }
         , viewAspect = Nothing
         }
 

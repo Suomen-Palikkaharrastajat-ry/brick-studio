@@ -13,9 +13,9 @@
  *   `width` × `height` with its aspect ratio kept (the fallback). Unless
  *   `transparent`, the page's `--color-surface-canvas` token fills the
  *   background first.
- * - `captureRender` with `animation: { fps, durationSeconds, motion?,
- *   framesExtraTriangles?, samplesPerPixel? }` renders an animated WebP
- *   instead (see "Animations" below).
+ * - `captureRender` with `animation: { frameCount?, fps, durationSeconds,
+ *   motion?, framesExtraTriangles?, samplesPerPixel? }` renders an animated
+ *   WebP instead (see "Animations" below).
  * - `cancelSnapshot` (Elm → JS): stops the render in flight and terminates
  *   its workers. Nothing is sent for a cancelled render.
  * - `snapshotProgress` (JS → Elm): `{ fraction, samples, stage, elapsedMs,
@@ -37,19 +37,28 @@
  * the workers and its BVH built once. `animation.motion` picks the kind
  * (`animationMotion`):
  * - `"turntable"`: the camera makes one full turn around its target, over
- *   `fps × durationSeconds` frames. `framesExtraTriangles` is ignored.
+ *   the request's frame count (see below). `framesExtraTriangles` is ignored.
  * - `"motor"`: the camera stays put and frame f adds `framesExtraTriangles[f]`
  *   (the turning gears at frame f) as a small per-frame layer, with the
  *   ground pinned at the lowest point over all frames. There is one frame per
- *   entry (or `fps × durationSeconds` frames when there are none), and an
- *   entry may be empty: that frame shows only the static model.
+ *   entry (or the request's frame count when there are none), and an entry
+ *   may be empty: that frame shows only the static model.
  * Without `motion` (older hosts), a non-empty `framesExtraTriangles` array
  * means motor and anything else turntable.
+ *
+ * Frame count and timing (`animationTiming`): the frame count is the
+ * positive integer `animation.frameCount` (rounded, 1 to MAX_FRAME_COUNT)
+ * when given, otherwise `round(fps × durationSeconds)`, with `fps` rounded
+ * and clamped to 1–60 and `durationSeconds` clamped to 0.5–30. With
+ * `frameCount`, the frames share `durationSeconds` exactly, in whole
+ * milliseconds (`frameDurationsMs`), and the duration is raised so that no
+ * frame is shorter than MIN_FRAME_MS. Without it (older hosts), every frame
+ * lasts `max(10, round(1000 / fps))` ms, as before.
  *
  * Every frame gets the same number of samples per pixel N, so frames look
  * alike and do not flicker: `animation.samplesPerPixel` when given (rounded,
  * 1 to 256), otherwise `samplesPerPixelFor` of the final frame size (6 at
- * 720p, 10 at 480p, 17 at 360p). Render time therefore follows the frame
+ * 720p, 10 at 480p). Render time therefore follows the frame
  * count and size; `timeBudgetMs` is not used for animations. Progress
  * `fraction` counts sampling and the main-thread denoise and encode of each
  * frame (their split is measured on the frames done so far); `samples` is
@@ -87,6 +96,10 @@ const FINISH_MS_PER_PIXEL = 0.0025
 const MIN_ESTIMATE_FRACTION = 0.05
 /** Most samples per pixel an explicit `animation.samplesPerPixel` may ask for. */
 const MAX_OVERRIDE_SAMPLES = 256
+/** Most frames an explicit `animation.frameCount` may ask for. */
+const MAX_FRAME_COUNT = 600
+/** Shortest frame of a `frameCount` animation, in ms; browsers show shorter ones slower. */
+export const MIN_FRAME_MS = 20
 
 /** The render currently in flight, or null. */
 let activeRender = null
@@ -337,6 +350,52 @@ export function animationSamplesOverride(value) {
 }
 
 /**
+ * Per-frame durations in whole ms for `frameCount` frames spread over
+ * `durationSeconds`: frame f lasts `round(1000·D·(f+1)/N) − round(1000·D·f/N)`,
+ * so they add up to `round(1000·D)` exactly. D is first raised to
+ * `N · MIN_FRAME_MS / 1000` when the frames would be shorter than that.
+ */
+export function frameDurationsMs(frameCount, durationSeconds) {
+  const n = Math.max(1, Math.round(frameCount))
+  const totalMs = 1000 * Math.max(durationSeconds, (n * MIN_FRAME_MS) / 1000)
+  const durations = []
+  for (let f = 0; f < n; f++) {
+    durations.push(Math.round((totalMs * (f + 1)) / n) - Math.round((totalMs * f) / n))
+  }
+  return durations
+}
+
+/**
+ * The explicit `animation.frameCount`, rounded and clamped to
+ * [1, MAX_FRAME_COUNT], or null when it is missing or not positive.
+ */
+export function animationFrameCount(value) {
+  const n = Number(value)
+  if (!(Number.isFinite(n) && n > 0)) return null
+  return Math.min(MAX_FRAME_COUNT, Math.max(1, Math.round(n)))
+}
+
+/**
+ * Frame count and per-frame durations of an animation request (see
+ * "Frame count and timing" in the module header). `framesExtraTriangles` is
+ * the motor frame list in use, or null: a motor animation has one frame per
+ * entry whatever else the request says.
+ */
+export function animationTiming(anim = {}, framesExtraTriangles = null) {
+  const fps = Math.max(1, Math.min(60, Math.round(anim.fps || 15)))
+  const durationSeconds = Math.max(0.5, Math.min(30, Number(anim.durationSeconds) || 4.0))
+  const frameCount = animationFrameCount(anim.frameCount)
+  const totalFrames = framesExtraTriangles
+    ? framesExtraTriangles.length
+    : (frameCount ?? Math.max(1, Math.round(fps * durationSeconds)))
+  const durationsMs =
+    frameCount !== null
+      ? frameDurationsMs(totalFrames, durationSeconds)
+      : new Array(totalFrames).fill(Math.max(10, Math.round(1000 / fps)))
+  return { fps, totalFrames, durationsMs }
+}
+
+/**
  * The kind of animation a request asks for, `'motor'` or `'turntable'`: the
  * explicit `animation.motion` when it is one of those, otherwise motor
  * exactly when `framesExtraTriangles` is a non-empty array.
@@ -365,17 +424,12 @@ async function startAnimationPathTrace(ports, request, deps = {}) {
   const isCurrent = () => !controller.signal.aborted && activeRender === controller
 
   const anim = request.animation || {}
-  const fps = Math.max(1, Math.min(60, Math.round(anim.fps || 15)))
-  const durationSeconds = Math.max(0.5, Math.min(30, Number(anim.durationSeconds) || 4.0))
   const motor = animationMotion(anim) === 'motor'
   const framesExtraTriangles =
     motor && Array.isArray(anim.framesExtraTriangles) && anim.framesExtraTriangles.length > 0
       ? anim.framesExtraTriangles
       : null
-  const totalFrames = framesExtraTriangles
-    ? framesExtraTriangles.length
-    : Math.max(1, Math.round(fps * durationSeconds))
-  const frameDurationMs = Math.max(10, Math.round(1000 / fps))
+  const { fps, totalFrames, durationsMs } = animationTiming(anim, framesExtraTriangles)
   const override = animationSamplesOverride(anim.samplesPerPixel)
 
   const baseFilename = request.filename || 'palikkakehys-render.webp'
@@ -465,7 +519,7 @@ async function startAnimationPathTrace(ports, request, deps = {}) {
       finishingMs += endedAt - (sampledAt ?? endedAt)
       frameMs.push(endedAt - startedAt)
 
-      frames.push({ dataUrl, durationMs: frameDurationMs })
+      frames.push({ dataUrl, durationMs: durationsMs[f] })
 
       if (!isCurrent()) return
       sendProgress(f, 1, spp, f + 1 < totalFrames ? 'sampling' : 'assembling')
