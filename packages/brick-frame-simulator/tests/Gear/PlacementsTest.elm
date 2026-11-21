@@ -41,6 +41,14 @@ suite =
                 \_ ->
                     Placements.placementAt doc "3705.dat" (vec3 40.001 -60 -0.001)
                         |> Expect.equal (Just 1)
+            , test "finds placement inside a grouped submodel" <|
+                \_ ->
+                    let
+                        groupedDoc =
+                            Document.groupIntoSubmodel "gear-group" [ 0 ] doc
+                    in
+                    Placements.placementAt groupedDoc "3648.dat" (vec3 0 0 0)
+                        |> Expect.equal (Just 0)
             ]
         , describe "partSources"
             [ test "a driven axle is paired with its gear and its placement" <|

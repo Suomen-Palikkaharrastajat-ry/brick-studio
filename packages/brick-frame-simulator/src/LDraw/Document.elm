@@ -10,6 +10,8 @@ module LDraw.Document exposing
     , entryToText
     , explodeSubmodel
     , fingerprint
+    , flattenedLines
+    , flattenedPlacements
     , fromLines
     , getPlacement
     , gluedIds
@@ -70,6 +72,7 @@ writer emits it as a plain `.ldr`. Anything with named submodels is an `.mpd`.
 
 -}
 
+import Dict exposing (Dict)
 import LDraw.Format as Format
 import LDraw.Parser as Parser
 import LDraw.Types exposing (LDrawLine(..), SubFileData)
@@ -272,6 +275,69 @@ placements doc =
 mainPlacements : Document -> List Placement
 mainPlacements doc =
     (mainSubmodel doc).entries |> List.filterMap placementOf
+
+
+{-| Every leaf placement in the document, recursively expanding references to
+non-main submodels (e.g. grouped parts) with accumulated world transforms and
+inherited colors. Placements that are not submodel references remain as-is.
+-}
+flattenedPlacements : Document -> List Placement
+flattenedPlacements doc =
+    let
+        submodelMap =
+            doc.submodels
+                |> List.map (\s -> ( normalise s.name, s ))
+                |> Dict.fromList
+
+        expandEntry ancestors parentMat parentColor entry acc =
+            case entry of
+                PlacementEntry p ->
+                    expandPlacement ancestors parentMat parentColor p acc
+
+                Raw _ ->
+                    acc
+
+        expandPlacement ancestors parentMat parentColor p acc =
+            let
+                combinedMat =
+                    Mat4.mul parentMat p.matrix
+
+                effectiveColor =
+                    if p.color == 16 || p.color == -1 then
+                        parentColor
+
+                    else
+                        p.color
+
+                cleanPart =
+                    normalise p.part
+            in
+            if Set.member cleanPart ancestors then
+                acc
+
+            else
+                case Dict.get cleanPart submodelMap of
+                    Just childSub ->
+                        let
+                            nextAncestors =
+                                Set.insert cleanPart ancestors
+                        in
+                        List.foldl (expandEntry nextAncestors combinedMat effectiveColor) acc childSub.entries
+
+                    Nothing ->
+                        { p | matrix = combinedMat, color = effectiveColor } :: acc
+    in
+    List.foldl (expandEntry Set.empty Mat4.identity 16) [] (mainSubmodel doc).entries
+        |> List.reverse
+
+
+{-| Flatten the main submodel and all referenced submodels into a single list of
+leaf lines with accumulated transforms.
+-}
+flattenedLines : Document -> List LDrawLine
+flattenedLines doc =
+    flattenedPlacements doc
+        |> List.map (\p -> SubFileRef { file = p.part, transform = p.matrix, color = p.color })
 
 
 {-| The submodels other than the main one, as parsed lines under their

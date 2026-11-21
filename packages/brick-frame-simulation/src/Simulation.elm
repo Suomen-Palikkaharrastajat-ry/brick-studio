@@ -250,9 +250,10 @@ analyse { lines, cache } model =
     let
         taggedLines =
             tagGluedLines lines
+                |> expandSubmodelLines cache
 
         gearInstances =
-            Detect.extractGears model.gearSpecs lines cache
+            Detect.extractGears model.gearSpecs (List.map Tuple.first taggedLines) cache
 
         components =
             topLevelComponents taggedLines
@@ -953,6 +954,60 @@ resolveRootColor colorCode =
 
     else
         colorCode
+
+
+expandSubmodelLines : PartCache -> List ( LDrawLine, Bool ) -> List ( LDrawLine, Bool )
+expandSubmodelLines cache taggedLines =
+    let
+        expandOne ( line, isGlued ) acc =
+            case line of
+                SubFileRef ref ->
+                    let
+                        lower =
+                            String.toLower ref.file
+                    in
+                    if String.endsWith ".ldr" lower || String.endsWith ".mpd" lower || not (String.endsWith ".dat" lower) then
+                        case Dict.get ref.file cache of
+                            Just (Loaded subLines) ->
+                                let
+                                    expandedChild child =
+                                        case child of
+                                            SubFileRef childRef ->
+                                                let
+                                                    childColor =
+                                                        if childRef.color == 16 || childRef.color == -1 then
+                                                            ref.color
+
+                                                        else
+                                                            childRef.color
+                                                in
+                                                ( SubFileRef
+                                                    { childRef
+                                                        | transform = Mat4.mul ref.transform childRef.transform
+                                                        , color = childColor
+                                                    }
+                                                , isGlued
+                                                )
+
+                                            other ->
+                                                ( other, isGlued )
+
+                                    childTagged =
+                                        List.map expandedChild subLines
+                                in
+                                expandSubmodelLines cache childTagged ++ acc
+
+                            _ ->
+                                ( line, isGlued ) :: acc
+
+                    else
+                        ( line, isGlued ) :: acc
+
+                _ ->
+                    ( line, isGlued ) :: acc
+    in
+    List.foldl expandOne [] taggedLines
+        |> List.reverse
 
 
 

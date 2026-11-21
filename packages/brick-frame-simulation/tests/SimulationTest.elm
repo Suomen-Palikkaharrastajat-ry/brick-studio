@@ -1408,6 +1408,28 @@ suite =
                     Simulation.pickGear Camera.init 800 600 400 300 (Simulation.init config)
                         |> Expect.equal Nothing
             ]
+        , describe "grouped submodels"
+            [ test "gears inside a grouped submodel .ldr are detected and meshed" <|
+                \_ ->
+                    let
+                        subCache =
+                            Dict.fromList
+                                [ ( "submodel1.ldr", Resolve.Loaded [ part "3647.dat" 0, part "4019.dat" 30 ] ) ]
+
+                        subLines =
+                            [ SubFileRef { file = "submodel1.ldr", transform = Mat4.identity, color = 16 } ]
+
+                        ( subModel, analysis ) =
+                            Simulation.init config
+                                |> Simulation.analyse { lines = subLines, cache = subCache }
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal True subModel.simulationAvailable
+                        , \_ -> Expect.equal 2 (subModel.gearGraph |> Maybe.map (.instances >> Array.length) |> Maybe.withDefault 0)
+                        , \_ -> Expect.equal 2 (Dict.size subModel.gearAngles)
+                        ]
+                        ()
+            ]
         ]
 
 

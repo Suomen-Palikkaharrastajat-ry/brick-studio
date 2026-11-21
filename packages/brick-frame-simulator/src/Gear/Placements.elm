@@ -32,7 +32,7 @@ originTolerance =
 -}
 placementAt : Document -> String -> Vec3 -> Maybe Int
 placementAt document file origin =
-    Document.mainPlacements document
+    Document.flattenedPlacements document
         |> List.filter
             (\placement ->
                 placement.part

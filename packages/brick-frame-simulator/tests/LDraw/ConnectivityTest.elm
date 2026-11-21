@@ -3852,7 +3852,7 @@ shortestArcSnapTests =
                                                     |> List.map (\b -> ( 3, tireSnap.snapMatrix, b ))
                                         in
                                         Expect.all
-                                            [ \_ -> Expect.within (Expect.Absolute 0.001) 28.0 (Vec3.getX rimPos)
+                                            [ \_ -> Expect.within (Expect.Absolute 0.001) 33.0 (Vec3.getX rimPos)
                                             , \_ -> Expect.within (Expect.Absolute 0.001) 5.0 (Vec3.getY rimPos)
                                             , \_ -> Expect.within (Expect.Absolute 0.001) (Vec3.getX rimPos) (Vec3.getX tirePos)
                                             , \_ -> Expect.within (Expect.Absolute 0.001) (Vec3.getY rimPos) (Vec3.getY tirePos)

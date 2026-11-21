@@ -1,4 +1,4 @@
-module UI.Button exposing (IconConfig, action, icon, link, primary, secondary, toggle)
+module UI.Button exposing (IconConfig, action, icon, link, primary, primaryOnDark, secondary, toggle)
 
 {-| Toolbar buttons in the panel style shared by the viewer and the studio.
 
@@ -91,6 +91,23 @@ primary msg label =
             ++ [ Attr.style "background" Theme.brand
                , Attr.style "color" Theme.textOnDark
                , Attr.style "border-color" Theme.brand
+               ]
+        )
+        [ text label ]
+
+
+{-| High-contrast bright primary CTA button for dark slate surfaces and overlays.
+-}
+primaryOnDark : msg -> String -> Html msg
+primaryOnDark msg label =
+    button
+        (Attr.type_ "button"
+            :: Html.Events.onClick msg
+            :: secondaryStyle
+            ++ [ Attr.style "background" "linear-gradient(90deg, #0284c7, #0ea5e9)"
+               , Attr.style "color" "#ffffff"
+               , Attr.style "border-color" "#38bdf8"
+               , Attr.style "font-weight" "700"
                ]
         )
         [ text label ]

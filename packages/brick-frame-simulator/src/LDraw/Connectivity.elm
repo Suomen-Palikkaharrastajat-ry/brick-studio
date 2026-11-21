@@ -4482,7 +4482,7 @@ makeLiftarm studs partName =
 {-| Procedurally generate connectivity descriptor for a wheel rim.
 Center is at (0, 0, 0) with axis Z.
 If isAxleHole is True, creates TechnicAxleFemale points;
-if False, creates 3 TechnicPinFemale points at z=0, z=min 10 halfThick, and z=-(min 10 halfThick).
+if False, creates a single TechnicPinFemale point at z = min 10 halfThick on the inner face (normal = +Z).
 Also includes a concentric WheelRim connection point at (0, 0, 0).
 -}
 makeWheelRim : Bool -> Float -> Float -> Float -> String -> PartConnectivity
@@ -4498,20 +4498,8 @@ makeWheelRim isAxleHole thickness radius tireDiameter partName =
             else
                 [ { id = 1
                   , connType = TechnicPinFemale { length = thickness }
-                  , localPosition = vec3 0 0 0
-                  , normal = vec3 0 0 1
-                  , tangent = vec3 1 0 0
-                  }
-                , { id = 2
-                  , connType = TechnicPinFemale { length = thickness }
-                  , localPosition = vec3 0 0 (min 10.0 halfThick)
-                  , normal = vec3 0 0 1
-                  , tangent = vec3 1 0 0
-                  }
-                , { id = 3
-                  , connType = TechnicPinFemale { length = thickness }
                   , localPosition = vec3 0 0 -(min 10.0 halfThick)
-                  , normal = vec3 0 0 -1
+                  , normal = vec3 0 0 1
                   , tangent = vec3 1 0 0
                   }
                 ]

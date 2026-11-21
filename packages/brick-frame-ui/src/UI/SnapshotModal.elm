@@ -81,9 +81,11 @@ module UI.SnapshotModal exposing
 animation (WebP) of the 3D view.
 
 Framing is a camera overlay over the live view (`viewCameraOverlay`): the host
-keeps moving the camera as in the design view, and the chosen aspect
-letterboxes the view (`frameRect`). The finished image is shown in a modal
-dialog (`viewFramingWithLanguage`) with Save and Reframe.
+keeps moving the camera as in the design view, the chosen aspect letterboxes
+the view (`frameRect`), and progress, the finished image or WebP preview, and
+errors render directly inside the framed overlay with Save and Reframe actions.
+The dialog view (`viewFramingWithLanguage`) remains available for hosts that do
+not use the live camera overlay.
 
 -}
 
@@ -557,7 +559,17 @@ startRendering model =
 -}
 reframe : Model -> Model
 reframe model =
-    { model | phase = Framing, crop = defaultCrop }
+    { model | phase = Framing, crop = defaultCrop, cameraView = Nothing }
+
+
+clearPreviewPhase : Model -> Model
+clearPreviewPhase model =
+    case model.phase of
+        Preview _ ->
+            reframe model
+
+        _ ->
+            model
 
 
 {-| Set the aspect of the camera frame (see `frameRect`). On a finished image
@@ -565,12 +577,7 @@ this goes back to framing so it can be rendered again.
 -}
 setAspect : AspectPreset -> Model -> Model
 setAspect aspect model =
-    case model.phase of
-        Preview _ ->
-            { model | aspect = aspect, phase = Framing }
-
-        _ ->
-            { model | aspect = aspect }
+    clearPreviewPhase { model | aspect = aspect }
 
 
 {-| Record the path tracer's progress from a host that sends only
@@ -781,15 +788,7 @@ If in the preview phase, switches back to framing so the user can re-render.
 -}
 setShader : ShaderPreset -> Model -> Model
 setShader preset model =
-    case model.phase of
-        Preview _ ->
-            { model
-                | shader = preset
-                , phase = Framing
-            }
-
-        _ ->
-            { model | shader = preset }
+    clearPreviewPhase { model | shader = preset }
 
 
 {-| Get the currently selected shader preset.
@@ -804,15 +803,7 @@ If in the preview phase, switches back to framing so the user can re-render.
 -}
 setQuality : QualityPreset -> Model -> Model
 setQuality preset model =
-    case model.phase of
-        Preview _ ->
-            { model
-                | quality = preset
-                , phase = Framing
-            }
-
-        _ ->
-            { model | quality = preset }
+    clearPreviewPhase { model | quality = preset }
 
 
 {-| Get the currently selected quality preset.
@@ -834,21 +825,7 @@ If in preview phase, switches back to framing so the user can re-render.
 -}
 setMode : OutputMode -> Model -> Model
 setMode mode model =
-    let
-        updated =
-            case mode of
-                ModeAnimation ->
-                    { model | mode = ModeAnimation }
-
-                ModeStill ->
-                    { model | mode = ModeStill }
-    in
-    case model.phase of
-        Preview _ ->
-            { updated | phase = Framing }
-
-        _ ->
-            updated
+    clearPreviewPhase { model | mode = mode }
 
 
 {-| Get the active animation resolution preset.
@@ -862,16 +839,7 @@ getAnimResolution model =
 -}
 setAnimResolution : AnimResolution -> Model -> Model
 setAnimResolution res model =
-    let
-        updated =
-            { model | animRes = res }
-    in
-    case model.phase of
-        Preview _ ->
-            { updated | phase = Framing }
-
-        _ ->
-            updated
+    clearPreviewPhase { model | animRes = res }
 
 
 {-| Get the active animation smoothness preset.
@@ -885,16 +853,7 @@ getAnimSmoothness model =
 -}
 setAnimSmoothness : AnimSmoothness -> Model -> Model
 setAnimSmoothness smoothness model =
-    let
-        updated =
-            { model | animSmoothness = smoothness }
-    in
-    case model.phase of
-        Preview _ ->
-            { updated | phase = Framing }
-
-        _ ->
-            updated
+    clearPreviewPhase { model | animSmoothness = smoothness }
 
 
 {-| Get the active turntable turn time preset.
@@ -908,16 +867,7 @@ getAnimTurnTime model =
 -}
 setAnimTurnTime : AnimTurnTime -> Model -> Model
 setAnimTurnTime turnTime model =
-    let
-        updated =
-            { model | animTurnTime = turnTime }
-    in
-    case model.phase of
-        Preview _ ->
-            { updated | phase = Framing }
-
-        _ ->
-            updated
+    clearPreviewPhase { model | animTurnTime = turnTime }
 
 
 {-| What the animation shows, as last told by the host.
@@ -949,16 +899,7 @@ getAnimSpeed model =
 -}
 setAnimSpeed : AnimSpeed -> Model -> Model
 setAnimSpeed speed model =
-    let
-        updated =
-            { model | animSpeed = speed }
-    in
-    case model.phase of
-        Preview _ ->
-            { updated | phase = Framing }
-
-        _ ->
-            updated
+    clearPreviewPhase { model | animSpeed = speed }
 
 
 {-| Effective rendering dimensions and time budget based on current mode and settings.
@@ -1426,6 +1367,27 @@ viewStyles =
     .snapshot-hint-touch { display: block; }
     .snapshot-hint-mouse { display: none; }
 }
+.snapshot-camera-result-buttons {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+    flex: none;
+}
+@media (max-width: 639px) {
+    .snapshot-camera-actions-result {
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+    }
+    .snapshot-camera-result-meta {
+        display: none !important;
+    }
+    .snapshot-camera-result-buttons {
+        width: 100%;
+        margin-left: 0 !important;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+    }
+}
 """
         ]
 
@@ -1479,24 +1441,7 @@ viewHeader lang model =
                     )
                 ]
             ]
-        , span
-            [ Attr.style "font-size" "11px"
-            , Attr.style "font-weight" "600"
-            , Attr.style "padding" "3px 8px"
-            , Attr.style "border-radius" "9999px"
-            , Attr.style "background" Theme.panelSubtleBackground
-            , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
-            , Attr.style "color" Theme.textMuted
-            ]
-            [ text
-                (case model.mode of
-                    ModeAnimation ->
-                        "WebP"
-
-                    ModeStill ->
-                        "PNG"
-                )
-            ]
+        , formatBadge (outputFormatLabel lang model Nothing)
         ]
 
 
@@ -1809,8 +1754,10 @@ viewCropBox crop =
 {-| Actions of the camera overlay (`viewCameraOverlay`).
 -}
 type alias CameraActions msg =
-    { onClose : msg
+    { onSave : { dataUrl : String, filename : String } -> msg
+    , onClose : msg
     , onStartRender : msg
+    , onReframe : msg
     , onSetAspect : AspectPreset -> msg
     , onInteraction : InteractionMsg -> msg
     }
@@ -1937,16 +1884,16 @@ startCameraRendering viewSize model =
     { rendering | crop = frameRect viewSize model, cameraView = Just viewSize }
 
 
-{-| The camera overlay, drawn over the live 3D view while framing and while
-rendering: the view outside the frame is dimmed, the frame has a thin border
-and thirds, and floating bars hold the settings, the output size and the
-Render and Close buttons.
+{-| The camera overlay, drawn over the live 3D view across all snapshot
+phases: while framing, while rendering, when displaying the rendered preview or
+animation, and on failure.
 
-The overlay lets pointer input through to the view, so the host keeps
-orbiting, zooming and panning the camera as in the design view (and should
-route that input to the camera only). While rendering it blocks input and
-shows the progress inside the frame. `view` is the size of the 3D view in CSS
-pixels, which must fill the window under the overlay.
+The view outside the frame is dimmed, the frame has a thin border and (while
+framing) thirds, and floating bars hold the phase-appropriate header/settings
+and actions. While framing, the overlay lets pointer input through to the view
+so the host keeps orbiting, zooming and panning the camera; in every other
+phase it blocks canvas input. `viewSize` is the size of the 3D view in CSS
+pixels, which fills the window under the overlay.
 
 -}
 viewCameraOverlay : Language -> CameraActions msg -> { width : Int, height : Int } -> Model -> Html msg
@@ -1955,8 +1902,8 @@ viewCameraOverlay lang actions viewSize model =
         rect =
             frameRect viewSize model
 
-        rendering =
-            isRendering model
+        framing =
+            isFraming model
 
         pct v =
             String.fromFloat (v * 100) ++ "%"
@@ -1972,7 +1919,17 @@ viewCameraOverlay lang actions viewSize model =
                 []
 
         size =
-            frameOutputSize viewSize model
+            case model.phase of
+                Framing ->
+                    frameOutputSize viewSize model
+
+                _ ->
+                    case model.cameraView of
+                        Just capturedView ->
+                            frameOutputSize capturedView model
+
+                        Nothing ->
+                            frameOutputSize viewSize model
 
         outputLabel =
             case model.mode of
@@ -1982,6 +1939,9 @@ viewCameraOverlay lang actions viewSize model =
                 ModeStill ->
                     I18n.snapshotStillSubtitle lang size
 
+        dimensionsLabel =
+            String.fromInt size.width ++ " × " ++ String.fromInt size.height
+
         thirdLine attrs =
             div
                 ([ Attr.style "position" "absolute"
@@ -1990,20 +1950,256 @@ viewCameraOverlay lang actions viewSize model =
                     ++ attrs
                 )
                 []
+
+        frameContent =
+            case model.phase of
+                Framing ->
+                    [ thirdLine [ Attr.style "left" "33.333%", Attr.style "top" "0", Attr.style "bottom" "0", Attr.style "width" "1px" ]
+                    , thirdLine [ Attr.style "left" "66.667%", Attr.style "top" "0", Attr.style "bottom" "0", Attr.style "width" "1px" ]
+                    , thirdLine [ Attr.style "top" "33.333%", Attr.style "left" "0", Attr.style "right" "0", Attr.style "height" "1px" ]
+                    , thirdLine [ Attr.style "top" "66.667%", Attr.style "left" "0", Attr.style "right" "0", Attr.style "height" "1px" ]
+                    ]
+
+                Rendering ->
+                    [ viewProgressOverlay lang model ]
+
+                Preview data ->
+                    [ img
+                        [ Attr.src data.dataUrl
+                        , Attr.alt "Snapshot preview"
+                        , Attr.style "width" "100%"
+                        , Attr.style "height" "100%"
+                        , Attr.style "object-fit" "contain"
+                        , Attr.style "display" "block"
+                        , Attr.style "pointer-events" "auto"
+                        , Attr.attribute "draggable" "true"
+                        ]
+                        []
+                    ]
+
+                Failed message ->
+                    [ div
+                        [ Attr.style "position" "absolute"
+                        , Attr.style "inset" "0"
+                        , Attr.style "background" "rgba(0, 0, 0, 0.5)"
+                        , Attr.style "backdrop-filter" "blur(3px)"
+                        , Attr.style "-webkit-backdrop-filter" "blur(3px)"
+                        , Attr.style "display" "flex"
+                        , Attr.style "align-items" "center"
+                        , Attr.style "justify-content" "center"
+                        , Attr.style "padding" "16px"
+                        , Attr.style "box-sizing" "border-box"
+                        ]
+                        [ div
+                            [ Attr.style "background" Theme.panelSurface
+                            , Attr.style "color" Theme.textPrimary
+                            , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+                            , Attr.style "border-radius" "10px"
+                            , Attr.style "max-width" "420px"
+                            , Attr.style "max-height" "100%"
+                            , Attr.style "overflow-y" "auto"
+                            , Attr.style "width" "100%"
+                            , Attr.style "box-shadow" "0 10px 30px -10px rgba(0, 0, 0, 0.6)"
+                            ]
+                            [ viewFailed message ]
+                        ]
+                    ]
+
+        topBarTitle =
+            case model.phase of
+                Preview _ ->
+                    I18n.snapshotTitle lang
+
+                Failed _ ->
+                    I18n.snapshotTitle lang
+
+                _ ->
+                    I18n.snapshotCameraTitle lang
+
+        topBarContent =
+            case model.phase of
+                Framing ->
+                    [ div
+                        [ Attr.class "snapshot-camera-scroll"
+                        , Attr.style "min-width" "0"
+                        , Attr.style "flex" "1 1 auto"
+                        , Attr.style "overflow-x" "auto"
+                        ]
+                        [ viewToolbar lang actions model ]
+                    ]
+
+                Rendering ->
+                    []
+
+                Preview data ->
+                    [ div
+                        [ Attr.style "display" "flex"
+                        , Attr.style "align-items" "center"
+                        , Attr.style "gap" "8px"
+                        , Attr.style "margin-left" "auto"
+                        , Attr.style "flex" "none"
+                        ]
+                        [ span
+                            (oneLine
+                                [ Attr.style "font-size" "12px"
+                                , Attr.style "color" Theme.textMuted
+                                , Attr.style "font-variant-numeric" "tabular-nums"
+                                , Attr.attribute "data-testid" "snapshot-camera-dimensions"
+                                ]
+                            )
+                            [ text dimensionsLabel ]
+                        , formatBadge (outputFormatLabel lang model (Just data.filename))
+                        ]
+                    ]
+
+                Failed _ ->
+                    [ div
+                        [ Attr.style "display" "flex"
+                        , Attr.style "align-items" "center"
+                        , Attr.style "margin-left" "auto"
+                        , Attr.style "flex" "none"
+                        ]
+                        [ formatBadge (outputFormatLabel lang model Nothing) ]
+                    ]
+
+        isResultBar =
+            case model.phase of
+                Preview _ ->
+                    True
+
+                Failed _ ->
+                    True
+
+                _ ->
+                    False
+
+        bottomBarExtraAttrs =
+            [ Attr.style "bottom" "12px"
+            , Attr.attribute "data-testid" "snapshot-camera-actions"
+            ]
+                ++ (if isResultBar then
+                        [ Attr.class "snapshot-camera-actions-result" ]
+
+                    else
+                        []
+                   )
+
+        bottomBarContent =
+            case model.phase of
+                Framing ->
+                    [ div
+                        [ Attr.style "display" "flex"
+                        , Attr.style "flex-direction" "column"
+                        , Attr.style "gap" "2px"
+                        , Attr.style "min-width" "0"
+                        , Attr.style "flex" "1 1 auto"
+                        ]
+                        [ span (oneLine [ Attr.style "font-size" "13px", Attr.style "font-weight" "600" ]) [ text outputLabel ]
+                        , span [ Attr.style "display" "flex", Attr.style "min-width" "0" ]
+                            [ cameraHint "snapshot-hint-mouse" (I18n.snapshotCameraHint lang)
+                            , cameraHint "snapshot-hint-touch" (I18n.snapshotCameraTouchHint lang)
+                            ]
+                        ]
+                    , div [ Attr.style "display" "flex", Attr.style "gap" "8px", Attr.style "margin-left" "auto", Attr.style "flex" "none" ]
+                        [ Button.secondary actions.onClose (I18n.snapshotClose lang)
+                        , cameraRenderButton lang actions
+                        ]
+                    ]
+
+                Rendering ->
+                    [ div
+                        [ Attr.style "display" "flex"
+                        , Attr.style "flex-direction" "column"
+                        , Attr.style "gap" "2px"
+                        , Attr.style "min-width" "0"
+                        , Attr.style "flex" "1 1 auto"
+                        ]
+                        [ span (oneLine [ Attr.style "font-size" "13px", Attr.style "font-weight" "600" ]) [ text outputLabel ] ]
+                    , div [ Attr.style "display" "flex", Attr.style "gap" "8px", Attr.style "margin-left" "auto", Attr.style "flex" "none" ]
+                        [ Button.secondary actions.onClose (I18n.snapshotClose lang) ]
+                    ]
+
+                Preview data ->
+                    [ div
+                        [ Attr.class "snapshot-camera-result-meta"
+                        , Attr.style "display" "flex"
+                        , Attr.style "flex-direction" "column"
+                        , Attr.style "gap" "2px"
+                        , Attr.style "min-width" "0"
+                        , Attr.style "flex" "1 1 auto"
+                        ]
+                        [ span (oneLine [ Attr.style "font-size" "13px", Attr.style "font-weight" "600" ]) [ text outputLabel ]
+                        , if data.hasSaved then
+                            div
+                                [ Attr.style "display" "inline-flex"
+                                , Attr.style "align-items" "center"
+                                , Attr.style "gap" "5px"
+                                , Attr.style "font-size" "12px"
+                                , Attr.style "color" Theme.textPrimary
+                                , Attr.style "font-weight" "600"
+                                ]
+                                [ Icon.featherSized 13 "check"
+                                , span (oneLine []) [ text (I18n.snapshotSavedNotice lang) ]
+                                ]
+
+                          else
+                            span (oneLine [ Attr.style "font-size" "12px", Attr.style "color" Theme.textMuted ])
+                                [ text (I18n.snapshotReadyToSave lang) ]
+                        ]
+                    , div [ Attr.class "snapshot-camera-result-buttons" ]
+                        [ Button.secondary actions.onClose (I18n.snapshotClose lang)
+                        , reframeButton lang actions
+                        , saveButton lang actions data
+                        ]
+                    ]
+
+                Failed _ ->
+                    [ div
+                        [ Attr.class "snapshot-camera-result-meta"
+                        , Attr.style "display" "flex"
+                        , Attr.style "flex-direction" "column"
+                        , Attr.style "gap" "2px"
+                        , Attr.style "min-width" "0"
+                        , Attr.style "flex" "1 1 auto"
+                        ]
+                        [ span (oneLine [ Attr.style "font-size" "12px", Attr.style "color" Theme.textMuted ])
+                            [ text (nothingSavedText lang) ]
+                        ]
+                    , div [ Attr.class "snapshot-camera-result-buttons" ]
+                        [ Button.secondary actions.onClose (I18n.snapshotClose lang)
+                        , reframeButton lang actions
+                        ]
+                    ]
+
+        framePointerEvents =
+            case model.phase of
+                Preview _ ->
+                    "auto"
+
+                _ ->
+                    "none"
+
+        frameBackground =
+            case model.phase of
+                Preview _ ->
+                    [ Attr.style "background" previewBackground ]
+
+                _ ->
+                    []
     in
     div
         [ Attr.style "position" "fixed"
         , Attr.style "inset" "0"
         , Attr.style "z-index" "40"
         , Attr.style "pointer-events"
-            (if rendering then
-                "auto"
+            (if framing then
+                "none"
 
              else
-                "none"
+                "auto"
             )
         , Attr.attribute "role" "region"
-        , Attr.attribute "aria-label" (I18n.snapshotCameraTitle lang)
+        , Attr.attribute "aria-label" topBarTitle
         , Attr.attribute "data-testid" "snapshot-camera"
         ]
         [ viewStyles
@@ -2012,110 +2208,149 @@ viewCameraOverlay lang actions viewSize model =
         , mask [ Attr.style "top" (pct rect.y), Attr.style "height" (pct rect.height), Attr.style "left" "0", Attr.style "width" (pct rect.x) ]
         , mask [ Attr.style "top" (pct rect.y), Attr.style "height" (pct rect.height), Attr.style "left" (pct (rect.x + rect.width)), Attr.style "right" "0" ]
         , div
-            [ Attr.style "position" "absolute"
-            , Attr.style "left" (pct rect.x)
-            , Attr.style "top" (pct rect.y)
-            , Attr.style "width" (pct rect.width)
-            , Attr.style "height" (pct rect.height)
-            , Attr.style "box-sizing" "border-box"
-            , Attr.style "border" "1px solid rgba(255, 255, 255, 0.8)"
-            , Attr.style "box-shadow" "0 0 0 1px rgba(0, 0, 0, 0.35)"
-            , Attr.style "pointer-events" "none"
-            , Attr.attribute "data-testid" "snapshot-camera-frame"
-            ]
-            (if rendering then
-                [ viewProgressOverlay lang model ]
-
-             else
-                [ thirdLine [ Attr.style "left" "33.333%", Attr.style "top" "0", Attr.style "bottom" "0", Attr.style "width" "1px" ]
-                , thirdLine [ Attr.style "left" "66.667%", Attr.style "top" "0", Attr.style "bottom" "0", Attr.style "width" "1px" ]
-                , thirdLine [ Attr.style "top" "33.333%", Attr.style "left" "0", Attr.style "right" "0", Attr.style "height" "1px" ]
-                , thirdLine [ Attr.style "top" "66.667%", Attr.style "left" "0", Attr.style "right" "0", Attr.style "height" "1px" ]
-                ]
+            ([ Attr.style "position" "absolute"
+             , Attr.style "left" (pct rect.x)
+             , Attr.style "top" (pct rect.y)
+             , Attr.style "width" (pct rect.width)
+             , Attr.style "height" (pct rect.height)
+             , Attr.style "box-sizing" "border-box"
+             , Attr.style "border" "1px solid rgba(255, 255, 255, 0.8)"
+             , Attr.style "box-shadow" "0 0 0 1px rgba(0, 0, 0, 0.35)"
+             , Attr.style "overflow" "hidden"
+             , Attr.style "pointer-events" framePointerEvents
+             , Attr.attribute "data-testid" "snapshot-camera-frame"
+             ]
+                ++ frameBackground
             )
+            frameContent
         , div
             (cameraBar
                 [ Attr.style "top" "12px"
                 , Attr.attribute "data-testid" "snapshot-camera-settings"
                 ]
             )
-            [ div
-                [ Attr.style "font-size" "13px"
-                , Attr.style "font-weight" "600"
-                , Attr.style "display" "flex"
-                , Attr.style "align-items" "center"
-                , Attr.style "gap" "6px"
-                , Attr.style "white-space" "nowrap"
-                , Attr.style "flex" "none"
-                ]
-                [ Icon.featherSized 16 "camera", text (I18n.snapshotCameraTitle lang) ]
-            , if rendering then
-                text ""
-
-              else
-                div
-                    [ Attr.class "snapshot-camera-scroll"
-                    , Attr.style "min-width" "0"
-                    , Attr.style "flex" "1 1 auto"
-                    , Attr.style "overflow-x" "auto"
-                    ]
-                    [ viewToolbar lang actions model ]
-            ]
-        , div
-            (cameraBar
-                [ Attr.style "bottom" "12px"
-                , Attr.attribute "data-testid" "snapshot-camera-actions"
-                ]
-            )
-            [ div
-                [ Attr.style "display" "flex"
-                , Attr.style "flex-direction" "column"
-                , Attr.style "gap" "2px"
-                , Attr.style "min-width" "0"
-                , Attr.style "flex" "1 1 auto"
-                ]
-                [ span (oneLine [ Attr.style "font-size" "13px", Attr.style "font-weight" "600" ]) [ text outputLabel ]
-                , if rendering then
-                    -- The progress inside the frame says how to cancel.
-                    text ""
-
-                  else
-                    span [ Attr.style "display" "flex", Attr.style "min-width" "0" ]
-                        [ cameraHint "snapshot-hint-mouse" (I18n.snapshotCameraHint lang)
-                        , cameraHint "snapshot-hint-touch" (I18n.snapshotCameraTouchHint lang)
-                        ]
-                ]
-            , div [ Attr.style "display" "flex", Attr.style "gap" "8px", Attr.style "margin-left" "auto", Attr.style "flex" "none" ]
-                (Button.secondary actions.onClose (I18n.snapshotClose lang)
-                    :: (if rendering then
-                            []
+            (div
+                ([ Attr.style "font-size" "13px"
+                 , Attr.style "font-weight" "600"
+                 , Attr.style "display" "flex"
+                 , Attr.style "align-items" "center"
+                 , Attr.style "gap" "6px"
+                 ]
+                    ++ (if isResultBar then
+                            [ Attr.style "min-width" "0", Attr.style "flex" "0 1 auto" ]
 
                         else
-                            [ button
-                                [ Attr.type_ "button"
-                                , Html.Events.onClick actions.onStartRender
-                                , Attr.class "ui-button touch-target"
-                                , Attr.attribute "data-testid" "snapshot-camera-render"
-                                , Attr.style "display" "inline-flex"
-                                , Attr.style "align-items" "center"
-                                , Attr.style "gap" "8px"
-                                , Attr.style "padding" "8px 18px"
-                                , Attr.style "border" ("1px solid " ++ Theme.brand)
-                                , Attr.style "border-radius" "6px"
-                                , Attr.style "font-weight" "600"
-                                , Attr.style "font-size" "13px"
-                                , Attr.style "cursor" "pointer"
-                                , Attr.style "background" Theme.brandYellow
-                                , Attr.style "color" Theme.brand
-                                ]
-                                [ Icon.feather "camera"
-                                , text (I18n.snapshotRenderAction lang)
-                                ]
-                            ]
+                            [ Attr.style "white-space" "nowrap", Attr.style "flex" "none" ]
                        )
                 )
-            ]
+                [ Icon.featherSized 16 "camera"
+                , if isResultBar then
+                    span (oneLine [ Attr.style "min-width" "0" ]) [ text topBarTitle ]
+
+                  else
+                    text topBarTitle
+                ]
+                :: topBarContent
+            )
+        , div
+            (cameraBar bottomBarExtraAttrs)
+            bottomBarContent
         ]
+
+
+cameraRenderButton : Language -> { a | onStartRender : msg } -> Html msg
+cameraRenderButton lang actions =
+    button
+        [ Attr.type_ "button"
+        , Html.Events.onClick actions.onStartRender
+        , Attr.class "ui-button touch-target"
+        , Attr.attribute "data-testid" "snapshot-camera-render"
+        , Attr.style "display" "inline-flex"
+        , Attr.style "align-items" "center"
+        , Attr.style "gap" "8px"
+        , Attr.style "padding" "8px 18px"
+        , Attr.style "border" ("1px solid " ++ Theme.brand)
+        , Attr.style "border-radius" "6px"
+        , Attr.style "font-weight" "600"
+        , Attr.style "font-size" "13px"
+        , Attr.style "cursor" "pointer"
+        , Attr.style "background" Theme.brandYellow
+        , Attr.style "color" Theme.brand
+        ]
+        [ Icon.feather "camera"
+        , text (I18n.snapshotRenderAction lang)
+        ]
+
+
+reframeButton : Language -> { a | onReframe : msg } -> Html msg
+reframeButton lang actions =
+    button
+        [ Attr.type_ "button"
+        , Html.Events.onClick actions.onReframe
+        , Attr.class "ui-button touch-target"
+        , Attr.attribute "data-testid" "snapshot-camera-reframe"
+        , Attr.style "display" "inline-flex"
+        , Attr.style "align-items" "center"
+        , Attr.style "gap" "6px"
+        , Attr.style "padding" "8px 14px"
+        , Attr.style "background" Theme.panelSubtleBackground
+        , Attr.style "color" Theme.textPrimary
+        , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+        , Attr.style "border-radius" "6px"
+        , Attr.style "font-family" "inherit"
+        , Attr.style "font-size" "13px"
+        , Attr.style "font-weight" "500"
+        , Attr.style "line-height" "1.2"
+        , Attr.style "cursor" "pointer"
+        , Attr.style "white-space" "nowrap"
+        ]
+        [ Icon.feather "rotate-ccw"
+        , text (I18n.snapshotReframe lang)
+        ]
+
+
+outputFormatLabel : Language -> Model -> Maybe String -> String
+outputFormatLabel lang model maybeFilename =
+    let
+        isWebp =
+            case maybeFilename of
+                Just name ->
+                    String.endsWith ".webp" name || model.mode == ModeAnimation
+
+                Nothing ->
+                    model.mode == ModeAnimation
+    in
+    if isWebp then
+        I18n.snapshotFormatWebp lang
+
+    else
+        I18n.snapshotFormatPng lang
+
+
+formatBadge : String -> Html msg
+formatBadge label =
+    span
+        [ Attr.style "font-size" "11px"
+        , Attr.style "font-weight" "600"
+        , Attr.style "padding" "3px 8px"
+        , Attr.style "border-radius" "9999px"
+        , Attr.style "background" Theme.panelSubtleBackground
+        , Attr.style "border" ("1px solid " ++ Theme.borderDefault)
+        , Attr.style "color" Theme.textMuted
+        , Attr.style "flex" "none"
+        , Attr.attribute "data-testid" "snapshot-camera-format"
+        ]
+        [ text label ]
+
+
+nothingSavedText : Language -> String
+nothingSavedText lang =
+    case lang of
+        Fi ->
+            "Mitään ei tallennettu."
+
+        En ->
+            "Nothing was saved."
 
 
 {-| Text kept to one line, cut with an ellipsis when it does not fit.
@@ -2345,11 +2580,7 @@ viewPreviewDetails : Language -> Model -> PreviewData -> Html msg
 viewPreviewDetails lang model data =
     let
         fmt =
-            if String.endsWith ".webp" data.filename || model.mode == ModeAnimation then
-                "WebP"
-
-            else
-                "PNG"
+            outputFormatLabel lang model (Just data.filename)
     in
     div
         [ Attr.style "display" "flex"
@@ -2499,15 +2730,7 @@ viewFooter lang actions model =
                     [ Attr.style "font-size" "13px"
                     , Attr.style "color" Theme.textMuted
                     ]
-                    [ text
-                        (case lang of
-                            Fi ->
-                                "Mitään ei tallennettu."
-
-                            En ->
-                                "Nothing was saved."
-                        )
-                    ]
+                    [ text (nothingSavedText lang) ]
                 , Button.secondary actions.onClose (I18n.snapshotClose lang)
                 ]
         )
@@ -2536,12 +2759,13 @@ renderButton lang actions =
         ]
 
 
-saveButton : Language -> FramingActions msg -> PreviewData -> Html msg
+saveButton : Language -> { a | onSave : { dataUrl : String, filename : String } -> msg } -> PreviewData -> Html msg
 saveButton lang actions data =
     button
         [ Attr.type_ "button"
         , Html.Events.onClick (actions.onSave { dataUrl = data.dataUrl, filename = data.filename })
         , Attr.class "ui-button touch-target"
+        , Attr.attribute "data-testid" "snapshot-camera-save"
         , Attr.style "display" "inline-flex"
         , Attr.style "align-items" "center"
         , Attr.style "gap" "8px"

@@ -816,6 +816,104 @@ suite =
                         |> SnapshotModal.setReady { dataUrl = "data:image/png;base64,abc", filename = "r.png" }
                         |> SnapshotModal.outputSize
                         |> Expect.equal { width = 1920, height = 1920 }
+            , test "preview integrates image in frame, hides toolbar, shows dimensions/badge and Save/Reframe/Close actions" <|
+                \_ ->
+                    let
+                        rendered =
+                            SnapshotModal.initFraming { filename = "r.png" }
+                                |> SnapshotModal.setAspect SnapshotModal.Aspect1_1
+                                |> SnapshotModal.startCameraRendering { width = 1280, height = 800 }
+                                |> SnapshotModal.setReady { dataUrl = "data:image/png;base64,result", filename = "r.png" }
+
+                        html =
+                            SnapshotModal.viewCameraOverlay En cameraActions { width = 1280, height = 800 } rendered
+                    in
+                    Query.fromHtml html
+                        |> Expect.all
+                            [ Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-frame") ]
+                                >> Expect.all
+                                    [ Query.has
+                                        [ Selector.tag "img"
+                                        , Selector.attribute (HtmlAttr.src "data:image/png;base64,result")
+                                        , Selector.attribute (HtmlAttr.style "object-fit" "contain")
+                                        , Selector.attribute (HtmlAttr.style "width" "100%")
+                                        , Selector.attribute (HtmlAttr.style "height" "100%")
+                                        , Selector.attribute (HtmlAttr.attribute "draggable" "true")
+                                        ]
+                                    , Query.hasNot [ Selector.attribute (HtmlAttr.attribute "role" "progressbar") ]
+                                    ]
+                            , Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-settings") ]
+                                >> Expect.all
+                                    [ Query.has [ Selector.text "Snapshot" ]
+                                    , Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-dimensions"), Selector.text "1920 × 1920" ]
+                                    , Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-format"), Selector.text "PNG" ]
+                                    , Query.hasNot [ Selector.text "View" ]
+                                    , Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "shader-preset-glossy") ]
+                                    , Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "quality-preset-standard") ]
+                                    ]
+                            , Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-actions") ]
+                                >> Expect.all
+                                    [ Query.has [ Selector.tag "button", Selector.text "Save Image" ]
+                                    , Query.has [ Selector.tag "button", Selector.text "Reframe" ]
+                                    , Query.has [ Selector.tag "button", Selector.text "Close" ]
+                                    , Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-render") ]
+                                    ]
+                            , Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-save") ]
+                                >> Event.simulate Event.click
+                                >> Event.expect (Save { dataUrl = "data:image/png;base64,result", filename = "r.png" })
+                            , Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-reframe") ]
+                                >> Event.simulate Event.click
+                                >> Event.expect Reframe
+                            , Query.has [ Selector.attribute (HtmlAttr.style "pointer-events" "auto") ]
+                            ]
+            , test "animation preview and markSaved update overlay badge and save button state" <|
+                \_ ->
+                    let
+                        renderedAnim =
+                            animModel
+                                |> SnapshotModal.startCameraRendering { width = 1280, height = 800 }
+                                |> SnapshotModal.setReady { dataUrl = "data:image/webp;base64,anim", filename = "a.webp" }
+                                |> SnapshotModal.markSaved
+                    in
+                    SnapshotModal.viewCameraOverlay En cameraActions { width = 1280, height = 800 } renderedAnim
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-frame") ]
+                                >> Query.has [ Selector.tag "img", Selector.attribute (HtmlAttr.src "data:image/webp;base64,anim") ]
+                            , Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-settings") ]
+                                >> Expect.all
+                                    [ Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-dimensions"), Selector.text "854 × 480" ]
+                                    , Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-format"), Selector.text "WebP" ]
+                                    ]
+                            , Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-actions") ]
+                                >> Expect.all
+                                    [ Query.has [ Selector.text "Saved Image" ]
+                                    , Query.has [ Selector.text "Saved to downloads" ]
+                                    ]
+                            ]
+            , test "failed render integrates error card in frame with Reframe and Close, without Save or toolbar" <|
+                \_ ->
+                    SnapshotModal.initFraming { filename = "r.png" }
+                        |> SnapshotModal.startCameraRendering { width = 1280, height = 800 }
+                        |> SnapshotModal.setFailed "Out of memory"
+                        |> SnapshotModal.viewCameraOverlay En cameraActions { width = 1280, height = 800 }
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-frame") ]
+                                >> Query.has [ Selector.text "Out of memory" ]
+                            , Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-settings") ]
+                                >> Expect.all
+                                    [ Query.has [ Selector.text "Snapshot" ]
+                                    , Query.hasNot [ Selector.text "View" ]
+                                    ]
+                            , Query.find [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-actions") ]
+                                >> Expect.all
+                                    [ Query.has [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-reframe") ]
+                                    , Query.has [ Selector.tag "button", Selector.text "Close" ]
+                                    , Query.hasNot [ Selector.attribute (HtmlAttr.attribute "data-testid" "snapshot-camera-save") ]
+                                    ]
+                            , Query.has [ Selector.attribute (HtmlAttr.style "pointer-events" "auto") ]
+                            ]
             ]
         ]
 
@@ -863,8 +961,10 @@ hasTestId testId modal =
 
 cameraActions : SnapshotModal.CameraActions TestMsg
 cameraActions =
-    { onClose = Close
+    { onSave = Save
+    , onClose = Close
     , onStartRender = Render
+    , onReframe = Reframe
     , onSetAspect = SetAspect
     , onInteraction = Interaction
     }

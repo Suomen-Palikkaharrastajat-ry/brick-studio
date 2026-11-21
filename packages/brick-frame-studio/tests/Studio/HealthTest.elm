@@ -479,8 +479,8 @@ technicTests =
                     doc =
                         lines
                             [ "1 72 0 -8 0 1 0 0 0 1 0 0 0 1 4600.dat"
-                            , "1 71 28 -3 0 0 0 1 0 1 0 -1 0 0 4624.dat"
-                            , "1 0 28 -3 0 0 0 1 0 1 0 -1 0 0 3641.dat"
+                            , "1 71 33 -3 0 0 0 1 0 1 0 -1 0 0 4624.dat"
+                            , "1 0 33 -3 0 0 0 1 0 1 0 -1 0 0 3641.dat"
                             ]
                 in
                 Expect.equal [] (Health.check noParts doc Set.empty)
