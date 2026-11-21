@@ -811,6 +811,45 @@ overlaps a b =
         && not (studJoined a b)
         && not (gearsMeshing a b)
         && not (wheelJoined a b)
+        && not (turntableJoined a b)
+
+
+{-| Whether two parts are mating turntable or hinge halves concentrically assembled.
+Exempts turntable top/base and hinge top/base assemblies from collision overlaps.
+-}
+turntableJoined : Item -> Item -> Bool
+turntableJoined a b =
+    let
+        fileA =
+            normalisePartName a.conn.part
+
+        fileB =
+            normalisePartName b.conn.part
+    in
+    if isTurntablePair fileA fileB then
+        let
+            posA =
+                Mat4.transform a.matrix (vec3 0 0 0)
+
+            posB =
+                Mat4.transform b.matrix (vec3 0 0 0)
+        in
+        distance posA posB <= 2.0
+
+    else
+        False
+
+
+isTurntablePair : String -> String -> Bool
+isTurntablePair a b =
+    (a == "3679" && b == "3680")
+        || (a == "3680" && b == "3679")
+        || (a == "99009" && b == "99010")
+        || (a == "99010" && b == "99009")
+        || (a == "3937" && b == "3938")
+        || (a == "3938" && b == "3937")
+        || (a == "61485" && (b == "60481" || b == "60481a"))
+        || ((a == "60481" || a == "60481a") && b == "61485")
 
 
 {-| Whether a wheel rim and matching tire are concentrically mounted.

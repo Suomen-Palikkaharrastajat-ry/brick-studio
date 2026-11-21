@@ -252,7 +252,60 @@ misalignmentTests =
 overlapTests : Test
 overlapTests =
     describe "overlaps"
-        [ test "two overlapping 2 x 4 bricks give one overlap issue" <|
+        [ test "turntable top (3679) and base (3680) are exempt from overlapping" <|
+            \_ ->
+                let
+                    doc =
+                        lines
+                            [ "1 14 0 -8 0 1 0 0 0 1 0 0 0 1 3680.dat"
+                            , "1 14 0 -8 0 1 0 0 0 1 0 0 0 1 3679.dat"
+                            ]
+                in
+                Expect.equal [] (Health.check noParts doc Set.empty)
+        , test "user car with turntable and slightly off-lattice plate is tidied without splitting turntable" <|
+            \_ ->
+                let
+                    doc =
+                        lines
+                            [ "1 1 80 -8 120 1 0 0 0 1 0 0 0 1 4600.dat"
+                            , "1 15 113 -3 120 0 0 1 0 1 0 -1 0 0 4624.dat"
+                            , "1 15 47 -3 120 0 0 -1 0 1 0 1 0 0 4624.dat"
+                            , "1 0 47 -3 121 0 0 -1 0 1 0 1 0 0 3641.dat"
+                            , "1 0 113 -3 120 0 0 1 0 1 0 -1 0 0 3641.dat"
+                            , "1 1 80 -24 81 0 0 1 0 1 0 -1 0 0 3795.dat"
+                            , "1 1 80 -32 71 1 0 0 0 1 0 0 0 1 3829c01.dat"
+                            , "1 15 80 -48 51 1 0 0 0 1 0 0 0 1 3039.dat"
+                            , "1 14 80 -16 120 1 0 0 0 1 0 0 0 1 3022.dat"
+                            , "1 1 80 -8 40 1 0 0 0 1 0 0 0 1 4600.dat"
+                            , "1 15 113 -3 40 0 0 1 0 1 0 -1 0 0 4624.dat"
+                            , "1 15 47 -3 40 0 0 -1 0 1 0 1 0 0 4624.dat"
+                            , "1 0 47 -3 41 0 0 -1 0 1 0 1 0 0 3641.dat"
+                            , "1 0 113 -3 40 0 0 1 0 1 0 -1 0 0 3641.dat"
+                            , "1 14 80 -16 40 1 0 0 0 1 0 0 0 1 3680.dat"
+                            , "1 14 80 -16 40 1 0 0 0 1 0 0 0 1 3679.dat"
+                            ]
+
+                    issues =
+                        Health.check noParts doc Set.empty
+
+                    fixes =
+                        Health.plan noParts doc Set.empty issues
+
+                in
+                Expect.all
+                    [ \_ -> Expect.equal [ Misaligned { placement = 5 } ] issues
+                    , \_ -> Expect.equal [ 5 ] (List.map .placement fixes)
+                    , \_ -> Expect.equal [ SnapToStud ] (List.map .reason fixes)
+                    , \_ ->
+                        case fixes of
+                            [ fix ] ->
+                                Expect.equal ( 80, 80 ) ( round (originX fix.to), round (originZ fix.to) )
+
+                            _ ->
+                                Expect.fail "expected one fix"
+                    ]
+                    ()
+        , test "two overlapping 2 x 4 bricks give one overlap issue" <|
             \_ ->
                 let
                     doc =
