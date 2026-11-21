@@ -150,13 +150,13 @@ knownGears =
     , gear "3648.dat" 24 30.0 "SpurGear" "AxisZ" True True (axle 0 0 : pinHoles24)
     , gear "3648b.dat" 24 30.0 "SpurGear" "AxisZ" True True (axle 0 0 : pinHoles24)
     , gear "3649.dat" 40 50.0 "SpurGear" "AxisZ" True True (axle 0 0 : axleHoles40 ++ pinHoles40)
-    , gear "4716.dat" 1 12.0 "WormGear" "AxisZ" True True [axle 0 0]
-    , gear "32905.dat" 1 12.0 "WormGear" "AxisZ" True True [axle 0 0]
-    , gear "69778.dat" 12 12.0 "SpurGear" "AxisZ" True True [axle 0 0]
+    , gear "4716.dat" 1 10.0 "WormGear" "AxisZ" True True [axle 0 0]
+    , gear "32905.dat" 1 10.0 "WormGear" "AxisZ" True True [axle 0 0]
+    , gear "69778.dat" 12 15.0 "SpurGear" "AxisZ" True True [axle 0 0]
     , gear "32198.dat" 20 25.0 "BevelGear" "AxisZ" True True [axle 0 0]
     , gear "32198a.dat" 20 25.0 "BevelGear" "AxisZ" True True [axle 0 0]
-    , gear "32269.dat" 20 25.0 "BevelGear" "AxisZ" True True [axle 0 0]
-    , gear "32270.dat" 12 15.0 "BevelGear" "AxisZ" True True [axle 0 0]
+    , gear "32269.dat" 20 25.0 "DoubleBevelGear" "AxisZ" True True [axle 0 0]
+    , gear "32270.dat" 12 15.0 "DoubleBevelGear" "AxisZ" True True [axle 0 0]
     , gear "4143.dat" 14 17.5 "BevelGear" "AxisZ" True True [axle 0 0]
     , gear "6589.dat" 12 15.0 "BevelGear" "AxisZ" True True [axle 0 0]
     , gear "3650.dat" 24 30.0 "CrownGear" "AxisZ" True True [axle 0 0]

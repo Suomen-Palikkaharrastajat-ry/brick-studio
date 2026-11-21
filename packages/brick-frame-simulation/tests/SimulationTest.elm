@@ -372,18 +372,18 @@ suite =
                 \_ ->
                     let
                         wormSpec =
-                            { partFile = "4716.dat", teeth = 1, pitchRadius = 12, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ axleHole 0 0 ] }
+                            { partFile = "4716.dat", teeth = 1, pitchRadius = 10, kind = WormGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ axleHole 0 0 ] }
 
                         wheelSpec =
-                            { partFile = "69778.dat", teeth = 12, pitchRadius = 12, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ axleHole 0 0 ] }
+                            { partFile = "69778.dat", teeth = 12, pitchRadius = 15, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [ axleHole 0 0 ] }
 
                         wormTrainConfig =
                             { config | gearSpecs = wheelSpec :: wormSpec :: specs }
 
                         wheelFirstLines =
-                            [ SubFileRef { color = 4, transform = Mat4.makeTranslate3 0 24 0, file = "69778.dat" }
+                            [ SubFileRef { color = 4, transform = Mat4.makeTranslate3 0 25 0, file = "69778.dat" }
                             , SubFileRef { color = 4, transform = Mat4.makeRotate (pi / 2) (Vec3.vec3 0 1 0), file = "4716.dat" }
-                            , SubFileRef { color = 4, transform = Mat4.makeTranslate3 22 24 0, file = "3647.dat" }
+                            , SubFileRef { color = 4, transform = Mat4.makeTranslate3 25 25 0, file = "3647.dat" }
                             ]
 
                         wormCache =

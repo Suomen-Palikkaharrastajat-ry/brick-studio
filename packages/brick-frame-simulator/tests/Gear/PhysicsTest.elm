@@ -6,6 +6,7 @@ module Gear.PhysicsTest exposing (suite)
 import Array
 import Dict
 import Expect
+import Gear.Detect as Detect
 import Gear.Physics
     exposing
         ( KinematicLinkage
@@ -497,6 +498,29 @@ suite =
                     Expect.all
                         (List.map expectation [ ( 1, 1 ), ( 1, -1 ), ( -1, 1 ), ( -1, -1 ) ])
                         ()
+            , test "double bevels 12T + 12T at right angles (detected): ratio -1, +1 with one axis flipped" <|
+                \_ ->
+                    let
+                        ratioWith flipped =
+                            Detect.buildGearGraph
+                                [ doubleBevel 0 12 15 (Mat4.makeTranslate3 0 0 20)
+                                , doubleBevel 1 12 15 (flipIf flipped (Mat4.mul (Mat4.makeTranslate3 20 0 0) (Mat4.makeRotate (pi / 2) (vec3 0 1 0))))
+                                ]
+                                |> (\g -> propagate g 0 1.0)
+                                |> Dict.get 1
+                    in
+                    Expect.equal [ Just -1, Just 1 ]
+                        (List.map (ratioWith >> Maybe.map (\r -> toFloat (round (r * 1000)) / 1000)) [ False, True ])
+            , test "double bevel 12T driving 20T on parallel axles (detected): ratio -0.6" <|
+                \_ ->
+                    Detect.buildGearGraph
+                        [ doubleBevel 0 12 15 Mat4.identity
+                        , doubleBevel 1 20 25 (Mat4.makeTranslate3 40 0 0)
+                        ]
+                        |> (\g -> propagate g 0 1.0)
+                        |> angleAt
+                        |> (\f -> f 1)
+                        |> Expect.within (Expect.Absolute 1.0e-6) -0.6
             ]
         , describe "Kinematic Linkages"
             [ test "crank-slider calculates exact position at top/bottom dead center and quadrature" <|
@@ -668,6 +692,32 @@ placedGear partFile id teeth m =
 
             else
                 SpurGear
+        , axis = AxisZ
+        , motorCapable = True
+        , rotates = True
+        , holes = []
+        }
+    , color = 16
+    , worldPosition = Mat4.transform m (vec3 0 0 0)
+    , worldMatrix = m
+    }
+
+
+{-| A double bevel gear (real pitch radius) at the origin of its matrix.
+-}
+doubleBevel : GearId -> Int -> Float -> Mat4.Mat4 -> GearInstance
+doubleBevel id teeth radius m =
+    { id = id
+    , spec =
+        { partFile =
+            if teeth == 12 then
+                "32270.dat"
+
+            else
+                "32269.dat"
+        , teeth = teeth
+        , pitchRadius = radius
+        , kind = DoubleBevelGear
         , axis = AxisZ
         , motorCapable = True
         , rotates = True

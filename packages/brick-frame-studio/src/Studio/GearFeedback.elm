@@ -35,13 +35,23 @@ import Math.Vector3 as Vec3
 {-| How the selected gear relates to its nearest other gear.
 
   - `Meshes` — the two gears mesh.
-  - `TooFar` / `TooClose` — the axes are right but the centres are `distance`
-    LDU apart where `required` (the sum of the pitch radii) is needed.
-  - `NotParallel` — a spur pair whose axes point different ways.
-  - `NotPerpendicular` — a crown, bevel or worm pair whose axes are not at
-    right angles.
+  - `TooFar` / `TooClose` — a parallel or worm pair whose axes are right but
+    whose centres are `distance` LDU apart where `required` (the sum of the
+    pitch radii) is needed.
+  - `NotParallel` — a spur-like pair whose axes point different ways.
+  - `NotPerpendicular` — a crossed (bevel, crown) or worm pair whose axes are
+    not at right angles.
   - `NotSamePlane` — parallel axes, but the gears sit `offset` LDU apart
     along the axle, so their teeth cannot touch.
+  - `AxlesMustCross` — a bevel or crown pair at right angles whose axles pass
+    each other `gap` LDU apart instead of crossing.
+  - `TeethFaceAway` — a bevel or crown pair on crossing axles where a gear's
+    teeth point away from the crossing.
+  - `AxleOffset` — a bevel or crown pair on crossing axles where the gear
+    labelled `gear` sits `actual` LDU from the other gear's axle but needs
+    `required`.
+  - `CannotMesh` — the two kinds of gear cannot mesh in this arrangement (for
+    example a single bevel with a spur gear, or a crown with a double bevel).
   - `NoOtherGear` — the selected gear is the only gear.
 
 -}
@@ -52,6 +62,10 @@ type GearRelation
     | NotParallel
     | NotPerpendicular
     | NotSamePlane { offset : Float }
+    | AxlesMustCross { gap : Float }
+    | TeethFaceAway
+    | AxleOffset { gear : String, actual : Float, required : Float }
+    | CannotMesh
     | NoOtherGear
 
 
@@ -117,27 +131,86 @@ gearFeedback selectedIds document =
             Nothing
 
 
-{-| Classify one pair; the order of checks mirrors `Detect.meshing`.
+{-| Classify one pair with the facts of `Detect.meshFacts`: first whether the
+kinds can mesh at all, then the parallel checks or the crossed/worm checks.
 -}
 classify : GearInstance -> GearInstance -> GearRelation
 classify selected other =
     let
         facts =
             Detect.meshFacts selected other
+
+        rimLike spec =
+            Detect.isBevelLike spec || Detect.isCrownLike spec
     in
     if Detect.meshing selected other then
         Meshes
 
-    else if facts.perpendicular && not facts.axisOk then
-        NotPerpendicular
+    else
+        case facts.mode of
+            Nothing ->
+                CannotMesh
 
-    else if not facts.axisOk && facts.absDot < 0.9 then
-        NotParallel
+            Just mode ->
+                if
+                    (mode == Detect.ParallelMesh)
+                        && (facts.absDot < 0.5)
+                        && (rimLike selected.spec || rimLike other.spec)
+                then
+                    -- A crown or double bevel at right angles to a gear it
+                    -- only meshes with on parallel axles (the mode is
+                    -- parallel only when no crossed layout exists for the
+                    -- pair). Worm pairs are not caught here: they mesh with
+                    -- any rotating gear.
+                    CannotMesh
 
-    else if not facts.axisOk then
-        NotSamePlane { offset = facts.axialOffset }
+                else
+                    case mode of
+                        Detect.ParallelMesh ->
+                            if facts.absDot < 0.9 then
+                                NotParallel
 
-    else if facts.distance > facts.expected then
+                            else if not facts.axisOk then
+                                NotSamePlane { offset = facts.axialOffset }
+
+                            else
+                                distanceRelation facts
+
+                        Detect.WormMesh ->
+                            if not facts.axisOk then
+                                NotPerpendicular
+
+                            else
+                                distanceRelation facts
+
+                        Detect.CrossedMesh ->
+                            if not facts.axisOk then
+                                NotPerpendicular
+
+                            else if not facts.axesCross then
+                                AxlesMustCross { gap = facts.skew }
+
+                            else if not facts.facesToward then
+                                TeethFaceAway
+
+                            else
+                                case facts.crossOffsets of
+                                    Just c ->
+                                        -- Name the gear that is outside its
+                                        -- window (the selected one on a tie).
+                                        if c.secondExcess > c.firstExcess + 1.0e-6 then
+                                            AxleOffset { gear = gearLabel other.spec, actual = abs c.second, required = c.secondRequired }
+
+                                        else
+                                            AxleOffset { gear = gearLabel selected.spec, actual = abs c.first, required = c.firstRequired }
+
+                                    Nothing ->
+                                        NotPerpendicular
+
+
+distanceRelation : Detect.MeshFacts -> GearRelation
+distanceRelation facts =
+    if facts.distance > facts.expected then
         TooFar { distance = facts.distance, required = facts.expected }
 
     else
@@ -179,6 +252,9 @@ gearLabel spec =
                     BevelGear ->
                         "T bevel"
 
+                    DoubleBevelGear ->
+                        "T double bevel"
+
                     TurntableGear ->
                         "T turntable"
 
@@ -212,8 +288,24 @@ feedbackTextIn lang feedback =
         other =
             Maybe.withDefault "?" feedback.other
 
+        -- Whole LDU, or half LDU where that matters (a crown needs 12.5).
         ldu x =
-            String.fromInt (round x)
+            let
+                halves =
+                    round (abs x * 2)
+
+                sign =
+                    if halves > 0 && x < 0 then
+                        "-"
+
+                    else
+                        ""
+            in
+            if modBy 2 halves == 0 then
+                sign ++ String.fromInt (halves // 2)
+
+            else
+                sign ++ String.fromInt (halves // 2) ++ ".5"
     in
     case feedback.relation of
         Meshes ->
@@ -233,6 +325,18 @@ feedbackTextIn lang feedback =
 
         NotSamePlane { offset } ->
             I18n.gearNotSamePlane lang { gear = feedback.gear, other = other, offset = ldu offset }
+
+        AxlesMustCross { gap } ->
+            I18n.gearAxlesMustCross lang { gear = feedback.gear, other = other, gap = ldu gap }
+
+        TeethFaceAway ->
+            I18n.gearTeethFaceAway lang { gear = feedback.gear, other = other }
+
+        AxleOffset { gear, actual, required } ->
+            I18n.gearAxleOffset lang { gear = feedback.gear, other = other, x = gear, actual = ldu actual, required = ldu required }
+
+        CannotMesh ->
+            I18n.gearCannotMesh lang { gear = feedback.gear, other = other }
 
         NoOtherGear ->
             I18n.gearNoOtherGear lang feedback.gear

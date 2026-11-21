@@ -1218,6 +1218,23 @@ extractionTests =
                         List.filter (\p -> knownCatalogPart p == Nothing) partsToCheck
                 in
                 Expect.equal [] missing
+        , test "thin single bevels (6589, 4143) list the hub box first over their real z span, axle connectors at ±10" <|
+            \_ ->
+                let
+                    summary part =
+                        knownCatalogPart part
+                            |> Maybe.map
+                                (\conn ->
+                                    ( List.map (\b -> [ Vec3.getX b.max, Vec3.getZ b.min, Vec3.getZ b.max ]) conn.boundingBoxes
+                                    , List.map (.localPosition >> Vec3.getZ) conn.connections
+                                    )
+                                )
+                in
+                Expect.equal
+                    [ Just ( [ [ 8, -3, 7 ], [ 15, 0, 7 ] ], [ 0, 10, -10 ] )
+                    , Just ( [ [ 8, -4, 3 ], [ 17.5, -4, 0 ] ], [ 0, 10, -10 ] )
+                    ]
+                    [ summary "6589.dat", summary "4143.dat" ]
         , test "turntable pin holes retain opposite-face connectors" <|
             \_ ->
                 case ( knownCatalogPart "18938.dat", knownCatalogPart "99009.dat", knownCatalogPart "99010.dat" ) of

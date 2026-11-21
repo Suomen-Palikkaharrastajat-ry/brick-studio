@@ -28,10 +28,19 @@ import Math.Vector3 exposing (Vec3)
 {-| Gear construction class. `TurntableGear` denotes an annular gear part and
 does not imply that the part is itself a freely rotating output (see
 `motorCapable` on `GearSpec`).
+
+  - `BevelGear` — a single bevel gear (6589, 4143, 32198a): teeth on one face
+    only, so it meshes only at right angles with crossing axles.
+  - `DoubleBevelGear` — a double bevel gear (32270, 32269): its teeth work as a
+    spur gear on parallel axles and as a bevel gear at right angles.
+  - `CrownGear` — the 24T crown gear: face teeth mesh with a spur gear at right
+    angles, and its rim teeth mesh like a spur gear on parallel axles.
+
 -}
 type GearKind
     = SpurGear
     | BevelGear
+    | DoubleBevelGear
     | CrownGear
     | WormGear
     | TurntableGear

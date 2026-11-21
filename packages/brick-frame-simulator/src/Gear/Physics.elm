@@ -38,8 +38,9 @@ For each meshing pair (g1 → g2):
 The magnitude is `teeth1 / teeth2`. The sign comes from the no-slip rule at the
 pitch point `P`: with `v_X = n_X × (P − C_X)`, the signed ratio is
 `k = (v_1·v_2) / |v_2|²`. Two spur gears with the same axis orientation give
-`−teeth1/teeth2`. Flipping one gear's axis gives a positive ratio. Crown and
-bevel pairs take their sign from the same formula.
+`−teeth1/teeth2`. Flipping one gear's axis gives a positive ratio. Crown,
+bevel and double bevel pairs (on parallel or crossed axles) take their sign
+from the same formula, with `P` from `Gear.Phase.contactPoint`.
 
 Coaxial (rigid) neighbours turn at ratio `+1` when their true axes point the
 same way, and `-1` when one is flipped (`rigidSign`).
@@ -472,7 +473,7 @@ wormThreadHandedness =
     1
 
 
-{-| The no-slip sign of a spur, crown or bevel mesh: `+1` when the two gears
+{-| The no-slip sign of a spur, crown, bevel or double bevel mesh: `+1` when the two gears
 turn in the same sense at the pitch point, `-1` otherwise.
 
 With `v_X = n_X × (P − C_X)` the ratio is `k = (v_1·v_2) / |v_2|²`. Only its

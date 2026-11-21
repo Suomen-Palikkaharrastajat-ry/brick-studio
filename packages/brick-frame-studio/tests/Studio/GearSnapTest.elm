@@ -449,49 +449,209 @@ hysteresisTests =
 perpendicularGearSnapTests : Test
 perpendicularGearSnapTests =
     describe "perpendicular gear snapping"
-        [ test "snaps 12T bevel (32270) to 20T bevel (32269) at 40 LDU distance when axes are perpendicular" <|
+        [ test "snaps a tipped 12T double bevel (32270) onto a crossing axle 20 LDU from a 20T double bevel (32269)" <|
             \_ ->
                 let
                     targetBevel =
                         makePlacement 1 "32269.dat" Mat4.identity 16
 
-                    -- Dragged 12T bevel tipped 90 degrees around X (axis along Y instead of Z)
+                    -- Dragged 12T double bevel tipped 90 degrees around X (axis along -Y)
                     draggedMatrix =
-                        Mat4.mul (Mat4.makeTranslate3 38 0 0) (Mat4.makeRotate (pi / 2) (vec3 1 0 0))
+                        Mat4.mul (Mat4.makeTranslate3 30 0 18) (Mat4.makeRotate (pi / 2) (vec3 1 0 0))
 
                     draggedBevel =
                         makePlacement 2 "32270.dat" draggedMatrix 16
-
-                    snap =
-                        GearSnap.solveGearSnap (\_ -> True) 12.0 Nothing draggedBevel draggedMatrix [ targetBevel ]
                 in
-                case snap of
+                case GearSnap.solveGearSnap (\_ -> True) 12.0 Nothing draggedBevel draggedMatrix [ targetBevel ] of
                     Just s ->
-                        Expect.within (Expect.Absolute 1.0e-3) 40.0 (Vec3.length s.targetWorldPosition)
+                        let
+                            facts =
+                                Detect.meshFacts (instanceOf targetBevel) (instanceOf { draggedBevel | matrix = s.snapMatrix })
+                        in
+                        Expect.all
+                            [ \_ -> expectNear (vec3 30 0 20) (Mat4.transform s.snapMatrix (vec3 0 0 0))
+                            , \_ -> Expect.within (Expect.Absolute 1.0e-3) 0 facts.absDot
+                            , \_ -> Expect.within (Expect.Absolute 1.0e-3) 0 facts.skew
+                            , \_ -> Expect.equal True (snapMeshes targetBevel draggedBevel s)
+                            ]
+                            ()
 
                     Nothing ->
-                        Expect.fail "Expected perpendicular gear snap for 12T and 20T bevel gears"
-        , test "snaps 8T spur (3647) to 24T crown (3650b) at 40 LDU distance when tipped 90 degrees" <|
+                        Expect.fail "Expected a crossed snap for 12T and 20T double bevels"
+        , test "snaps a tipped 8T spur (3647) onto the 24T crown (3650b) pitch circle, 12.5 above the crown" <|
             \_ ->
                 let
                     crownTarget =
                         makePlacement 1 "3650b.dat" Mat4.identity 16
 
                     draggedMatrix =
-                        Mat4.mul (Mat4.makeTranslate3 38 0 0) (Mat4.makeRotate (pi / 2) (vec3 1 0 0))
+                        Mat4.mul (Mat4.makeTranslate3 32 0 10) (Mat4.makeRotate (pi / 2) (vec3 1 0 0))
 
                     draggedSpur =
                         makePlacement 2 "3647.dat" draggedMatrix 16
-
-                    snap =
-                        GearSnap.solveGearSnap (\_ -> True) 12.0 Nothing draggedSpur draggedMatrix [ crownTarget ]
                 in
-                case snap of
+                case GearSnap.solveGearSnap (\_ -> True) 12.0 Nothing draggedSpur draggedMatrix [ crownTarget ] of
                     Just s ->
-                        Expect.within (Expect.Absolute 1.0e-3) 40.0 (Vec3.length s.targetWorldPosition)
+                        Expect.all
+                            [ \_ -> expectNear (vec3 30 0 12.5) (Mat4.transform s.snapMatrix (vec3 0 0 0))
+                            , \_ -> Expect.equal True (snapMeshes crownTarget draggedSpur s)
+                            ]
+                            ()
 
                     Nothing ->
-                        Expect.fail "Expected perpendicular gear snap for 8T spur and 24T crown"
+                        Expect.fail "Expected a crossed snap for 8T spur and 24T crown"
+        , test "a single bevel (6589) never snaps to a 24T spur, parallel or tipped" <|
+            \_ ->
+                let
+                    spurTarget =
+                        makePlacement 1 "3648.dat" Mat4.identity 16
+
+                    tryAt m =
+                        GearSnap.solveGearSnap (\_ -> True) 12.0 Nothing (makePlacement 2 "6589.dat" m 16) m [ spurTarget ]
+                in
+                Expect.equal [ Nothing, Nothing ]
+                    [ tryAt (Mat4.makeTranslate3 46 0 0)
+                    , tryAt (Mat4.mul (Mat4.makeTranslate3 30 0 17) (Mat4.makeRotate (pi / 2) (vec3 0 1 0)))
+                    ]
+        , test "a crown snaps next to a 24T spur on parallel axles at 60, in the same plane" <|
+            \_ ->
+                let
+                    spurTarget =
+                        makePlacement 1 "3648.dat" Mat4.identity 16
+
+                    crown =
+                        makePlacement 2 "3650b.dat" Mat4.identity 16
+
+                    draggedMatrix =
+                        Mat4.makeTranslate3 63 0 1
+                in
+                case GearSnap.solveGearSnap (\_ -> True) 12.0 Nothing crown draggedMatrix [ spurTarget ] of
+                    Just s ->
+                        Expect.all
+                            [ \_ -> expectNear (vec3 60 0 0) (Mat4.transform s.snapMatrix (vec3 0 0 0))
+                            , \_ -> Expect.equal True (snapMeshes spurTarget crown s)
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Expected a parallel snap of the crown next to the 24T"
+        , test "a vertical 8T snaps to an 18938 turntable at 85 with a vertical axle" <|
+            \_ ->
+                let
+                    turntable =
+                        makePlacement 1 "18938.dat" Mat4.identity 16
+
+                    -- 8T axle along world Y
+                    draggedMatrix =
+                        Mat4.mul (Mat4.makeTranslate3 88 0 2) (Mat4.makeRotate (-pi / 2) (vec3 1 0 0))
+
+                    pinion =
+                        makePlacement 2 "3647.dat" draggedMatrix 16
+                in
+                case GearSnap.solveGearSnap (\_ -> True) 12.0 Nothing pinion draggedMatrix [ turntable ] of
+                    Just s ->
+                        let
+                            axle =
+                                Vec3.sub (Mat4.transform s.snapMatrix (vec3 0 0 1)) (Mat4.transform s.snapMatrix (vec3 0 0 0))
+                        in
+                        Expect.all
+                            [ \_ -> expectNear (vec3 85 0 0) (Mat4.transform s.snapMatrix (vec3 0 0 0))
+                            , \_ -> Expect.within (Expect.Absolute 1.0e-3) 1 (abs (Vec3.getY axle))
+                            , \_ -> Expect.equal True (snapMeshes turntable pinion s)
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Expected the 8T to snap to the turntable"
+        , test "a crossed 6589 pair snaps with real collision boxes and the hub boxes do not overlap" <|
+            \_ ->
+                let
+                    target =
+                        makePlacement 1 "6589.dat" Mat4.identity 16
+
+                    -- Tipped so its axle runs along X, near the reference
+                    -- layout (-17, 0, 17).
+                    draggedMatrix =
+                        Mat4.mul (Mat4.makeTranslate3 -18 0 15) (Mat4.makeRotate (pi / 2) (vec3 0 1 0))
+
+                    dragged =
+                        makePlacement 2 "6589.dat" draggedMatrix 16
+
+                    hub part =
+                        Connectivity.knownCatalogPart part
+                            |> Maybe.andThen (.boundingBoxes >> List.head)
+                            |> Maybe.withDefault { min = vec3 0 0 0, max = vec3 0 0 0 }
+
+                    -- An artificial bystander sitting exactly where the
+                    -- target's hub is. `isSnapColliding` never checks the
+                    -- dragged gear against the snap target itself, so without
+                    -- it the real-box validity would pass trivially; the
+                    -- bystander makes the check see a 6589 hub box there.
+                    bystander =
+                        ( 3, Mat4.identity, hub "6589.dat" )
+
+                    isValid snap =
+                        not
+                            (Connectivity.isSnapColliding 0.5
+                                dragged.id
+                                draggedMatrix
+                                [ ( dragged.id, draggedMatrix, hub "6589.dat" ) ]
+                                [ ( target.id, target.matrix, hub "6589.dat" ), bystander ]
+                                snap
+                            )
+
+                    oldHub =
+                        Connectivity.makeGear 15.0 20.0 "6589.dat"
+                            |> .boundingBoxes
+                            |> List.head
+                            |> Maybe.withDefault { min = vec3 0 0 0, max = vec3 0 0 0 }
+                in
+                case GearSnap.solveGearSnap isValid 12.0 Nothing dragged draggedMatrix [ target ] of
+                    Just s ->
+                        Expect.all
+                            [ \_ -> expectNear (vec3 -17 0 17) (Mat4.transform s.snapMatrix (vec3 0 0 0))
+                            , \_ -> Expect.equal True (snapMeshes target dragged s)
+                            , \_ ->
+                                Connectivity.checkCollisions 0.5 [ ( 2, s.snapMatrix, oldHub ) ] [ ( 1, Mat4.identity, oldHub ) ]
+                                    |> List.isEmpty
+                                    |> Expect.equal False
+                            ]
+                            ()
+
+                    Nothing ->
+                        Expect.fail "Expected the crossed 6589 snap to pass real collision validity"
+        , test "every returned snap meshes by Gear.Detect" <|
+            \_ ->
+                let
+                    cases =
+                        [ ( "4019.dat", "3647.dat", Mat4.makeTranslate3 33 4 1 )
+                        , ( "3648.dat", "69778.dat", Mat4.makeTranslate3 -44 3 0 )
+                        , ( "32269.dat", "32269.dat", Mat4.mul (Mat4.makeTranslate3 0 31 -29) (Mat4.makeRotate (pi / 2) (vec3 1 0 0)) )
+                        , ( "32270.dat", "32270.dat", Mat4.mul (Mat4.makeTranslate3 21 0 19) (Mat4.makeRotate (pi / 2) (vec3 0 1 0)) )
+                        , ( "3650b.dat", "4019.dat", Mat4.mul (Mat4.makeTranslate3 0 -31 21) (Mat4.makeRotate (pi / 2) (vec3 1 0 0)) )
+                        , ( "3650b.dat", "3647.dat", Mat4.makeTranslate3 41 0 1 )
+                        , ( "32198a.dat", "32198a.dat", Mat4.mul (Mat4.makeTranslate3 26 0 -26) (Mat4.makeRotate (pi / 2) (vec3 0 1 0)) )
+                        , ( "4143.dat", "4143.dat", Mat4.mul (Mat4.makeTranslate3 17 0 -17) (Mat4.makeRotate (pi / 2) (vec3 0 1 0)) )
+                        ]
+
+                    check ( targetPart, dragPart, m ) =
+                        let
+                            target =
+                                makePlacement 1 targetPart Mat4.identity 16
+
+                            dragged =
+                                makePlacement 2 dragPart m 16
+                        in
+                        case GearSnap.solveGearSnap (\_ -> True) 12.0 Nothing dragged m [ target ] of
+                            Just s ->
+                                ( dragPart, snapMeshes target dragged s )
+
+                            Nothing ->
+                                ( dragPart ++ " did not snap", False )
+                in
+                Expect.equal
+                    (List.map (\( _, d, _ ) -> ( d, True )) cases)
+                    (List.map check cases)
         , test "snaps 1-start worm (4716, R=10) to 24T spur (3648, R=30) at 40 LDU (2 studs) grid distance" <|
             \_ ->
                 let
@@ -610,6 +770,32 @@ perpendicularGearSnapTests =
                     _ ->
                         Expect.fail "Missing catalog parts"
         ]
+
+
+{-| A placement as a gear instance (spec from `GearSnap.findGearSpec`).
+-}
+instanceOf : Placement -> GearInstance
+instanceOf p =
+    { id = p.id
+    , spec =
+        GearSnap.findGearSpec p.part
+            |> Maybe.withDefault { partFile = "", teeth = 1, pitchRadius = 1, kind = SpurGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
+    , color = p.color
+    , worldPosition = Mat4.transform p.matrix (vec3 0 0 0)
+    , worldMatrix = p.matrix
+    }
+
+
+{-| Whether the dragged gear, placed by the snap, meshes with the target.
+-}
+snapMeshes : Placement -> Placement -> SnapCandidate -> Bool
+snapMeshes target dragged snap =
+    Detect.meshing (instanceOf target) (instanceOf { dragged | matrix = snap.snapMatrix })
+
+
+expectNear : Vec3 -> Vec3 -> Expect.Expectation
+expectNear expected actual =
+    Expect.within (Expect.Absolute 1.0e-3) 0 (Vec3.distance expected actual)
 
 
 dummyCandidate : ConnectionType -> ConnectionType -> SnapCandidate

@@ -61,12 +61,16 @@ module I18n exposing
     , fromString
     , gearAllRotating
     , gearApartNeeds
+    , gearAxleOffset
+    , gearAxlesMustCross
+    , gearCannotMesh
     , gearMeshesWith
     , gearNoOtherGear
       -- Snapshot Modal
     , gearNotParallel
     , gearNotPerpendicular
     , gearNotSamePlane
+    , gearTeethFaceAway
     , headerBackToEditing
     , headerExport
     , headerExportHtml
@@ -3252,6 +3256,49 @@ gearNotSamePlane lang { gear, other, offset } =
 
         En ->
             gear ++ " ↔ " ++ other ++ ": not in the same plane (offset " ++ offset ++ ")"
+
+
+gearAxlesMustCross : Language -> { gear : String, other : String, gap : String } -> String
+gearAxlesMustCross lang { gear, other, gap } =
+    case lang of
+        Fi ->
+            gear ++ " ↔ " ++ other ++ ": akseleiden on kohdattava toisensa (siirtymä " ++ gap ++ ")"
+
+        En ->
+            gear ++ " ↔ " ++ other ++ ": axles must cross (offset " ++ gap ++ ")"
+
+
+gearTeethFaceAway : Language -> { gear : String, other : String } -> String
+gearTeethFaceAway lang { gear, other } =
+    case lang of
+        Fi ->
+            gear ++ " ↔ " ++ other ++ ": hampaat osoittavat poispäin toisistaan"
+
+        En ->
+            gear ++ " ↔ " ++ other ++ ": teeth face away from each other"
+
+
+gearCannotMesh : Language -> { gear : String, other : String } -> String
+gearCannotMesh lang { gear, other } =
+    case lang of
+        Fi ->
+            gear ++ " ↔ " ++ other ++ ": nämä rattaat eivät voi kytkeytyä toisiinsa"
+
+        En ->
+            gear ++ " ↔ " ++ other ++ ": these gears cannot mesh"
+
+
+{-| A crossed (bevel or crown) mesh where gear `x` sits `actual` LDU from the
+other gear's axle but needs `required`.
+-}
+gearAxleOffset : Language -> { gear : String, other : String, x : String, actual : String, required : String } -> String
+gearAxleOffset lang { gear, other, x, actual, required } =
+    case lang of
+        Fi ->
+            gear ++ " ↔ " ++ other ++ ": " ++ x ++ " on " ++ actual ++ " LDU:n päässä toisesta akselista — vaatii " ++ required
+
+        En ->
+            gear ++ " ↔ " ++ other ++ ": " ++ x ++ " is " ++ actual ++ " LDU from the other axle — needs " ++ required
 
 
 gearNoOtherGear : Language -> String -> String

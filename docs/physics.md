@@ -58,7 +58,17 @@ mesh edge. The 18938/99009/99010 axes are local +Y; ordinary gears use local
 
 The bevel counts are `32198`/`32198a` = 20T, `32269` = 20T, `32270` = 12T,
 `4143` = 14T, and `6589` = 12T. The catalog's `32198` title omits its count;
-the replacement geometry is explicitly registered as 20T.
+the replacement geometry is explicitly registered as 20T. `32270` and `32269`
+are double bevel gears (`DoubleBevelGear`): their teeth work as a spur gear on
+parallel axles and as a bevel gear at right angles. `6589`, `4143` and
+`32198`/`32198a` are single bevels (`BevelGear`) and mesh only at right angles.
+
+Pitch radii are `teeth × 1.25` LDU (module 1 mm = 2.5 LDU; worms, which have
+one start, use 10), checked against
+the outer tooth radius measured from the LDraw geometry (one addendum, about
+2.5 LDU, outside the pitch circle): 8T 12.45 / 10, 12T `69778` 17.71 / 15,
+24T 32.40 / 30, 40T 52.36 / 50, 12T double bevel 17.01 / 15, 20T double bevel
+27.01 / 25, crown 32.98 / 30, worm 12.70 / 10.
 
 The full tooth counts, kinds, axes, and hole positions are the executable
 reference in `src/Lib.hs`; `packages/brick-frame-data/src/Data.elm` is its
@@ -80,36 +90,87 @@ type alias GearInstance =
 `Gear.Detect.buildGearGraph` uses spatial indexes to enumerate possible
 meshing and co-axial pairs, then applies the exact tests below. Fixed gear
 features (`rotates = False`) do not form moving mesh edges. Two rotatable gears
-are considered **meshing** when both of the following hold:
+are considered **meshing** according to their mesh mode (`Gear.Detect.meshMode`):
 
-### 1. Distance test
+| Mode | Kinds |
+|------|-------|
+| `ParallelMesh` | any pair of spur, double bevel, crown (its rim teeth) and turntable gears |
+| `CrossedMesh` | crown + spur; double bevel + double bevel; single bevel + single bevel with the same tooth count |
+| `WormMesh` | a worm and any other rotating gear |
+
+Kinds that allow both a parallel and a crossed mesh (double bevel pairs, crown
+with spur) use the parallel mode when `absDot(axis1, axis2) ≥ 0.5`. Other pairs
+(single bevel with a spur or a double bevel, crown with a bevel or double bevel,
+single bevels with different tooth counts, two worms) never mesh. Crown with a
+bevel or double bevel and single with double bevels are rejected
+conservatively: they are not verified against real models.
+
+### Parallel and worm meshes: distance window
 
 ```
-|distance(g1.worldPosition, g2.worldPosition) − (g1.pitchRadius + g2.pitchRadius)| ≤ tolerance
+play = distance(g1.worldPosition, g2.worldPosition) − (g1.pitchRadius + g2.pitchRadius)
+−1.25 ≤ play ≤ +2.02   (meshPlayNear, meshPlayFar)
 ```
 
-The tolerance is computed as:
+All LEGO gears share module 1 mm (2.5 LDU), so the allowed play is absolute,
+not relative to the gear size. It is asymmetric because gears that are too close
+bind, while gears that are too far only have more backlash. On the stud/plate
+grid (20 / 8 LDU) the window accepts every layout from −1.18 (16T + 40T,
+2 studs × 7 plates) to +2.00 (for example 8T + 16T 4 plates straight up, where
+the 16T's small addendum still leaves about 2 LDU of tooth overlap) and rejects
+the next ones out (−1.92, 12T + 24T 2 studs × 2 plates, and +2.05, 12T + 40T
+1 stud × 8 plates). Examples newly accepted compared with the
+old relative tolerance (`clamp 0.8 2.0 (expected × 0.035)`): 12T + 24T 2 studs ×
+3 plates (+1.65), 8T + 8T 1 stud × 1 plate (+1.54), 8T + 16T / 12T + 12T 1 stud ×
+3 plates (+1.24), 8T + 12T 3 plates up (−1.00), worm + 12T 1 brick apart (−1.00,
+`wheeler.ldr`). Newly rejected: 16T + 40T 3 studs × 4 plates (−2.00, binds),
+40T + 40T 1 stud × 12 plates (−1.94), 12T + 40T studless 3 × 1 (−1.75), and on
+half-stud lattices a few tight layouts such as 12T + 40T at (30, 56) (−1.47),
+40T + 40T at (90, 40) (−1.51) and 24T + 40T at (30, 72) (−2.00).
 
-```elm
-meshToleranceFor expected =
-    clamp 0.8 2.0 (expected * 0.035)
-```
+Parallel meshes also need `absDot ≥ 0.9` and an axial offset (of the second
+centre along the first gear's axle) of at most 2 LDU, or 3 LDU when a crown is
+involved (its rim teeth span about z −5 … +4.6). Worm meshes need
+`absDot ≤ 0.35` and keep the skew layout of a real worm drive (the wheel at the
+sum of the pitch radii from the worm, on the common normal).
 
-This scales with the expected centre distance and is empirically derived from
-standard LEGO geometry.
+### Crossed meshes: crossing axles
 
-### 2. Axis alignment test
+1. `absDot(axis1, axis2) ≤ 0.35`.
+2. The closest points of the two axle lines, `P1 = C1 + s1·a1` and
+   `P2 = C2 + s2·a2`, are at most 2 LDU apart (the axles cross; skew layouts
+   are rejected). The crossing point is `O = (P1 + P2) / 2`.
+3. For each gear, `s` is the signed position of `O` along its own local axle
+   from its origin. Its sign must match the side its teeth face, and `|s|` must
+   be within a window of the required value:
 
-The rotation axis is the `GearSpec.axis` direction extracted from its world
-matrix. The test depends on the explicit gear kind:
+| Gear | Parts | Tooth side | Required offset (abs s) | Window on (abs s − required) |
+|------|-------|------------|----------------|----------------------------|
+| Double bevel | `32270`, `32269` | either | partner pitch radius + 5 | −1.5 … +2.5 |
+| Single bevel | `6589` | +z | partner pitch radius + 2 | −1.5 … +2.5 |
+| Single bevel | `32198`, `32198a` | −z | partner pitch radius + 2 | −1.5 … +2.5 |
+| Single bevel | `4143` (low confidence) | −z | partner pitch radius − 1.5 | −1.5 … +2.5 |
+| Crown | `3650`, `3650b`, `3650c` | +z | 2.5 + spur pitch radius | −1.0 … +2.5 |
+| Spur on a crown | any spur | either | crown pitch radius (30) | ±3 |
 
-| Gear type | Condition |
-|-----------|-----------|
-| Spur (default) | `absDot(axis1, axis2) ≥ 0.9` AND axial offset ≤ 2 LDU |
-| Crown (`3650.dat`, `3650b.dat`, `3650c.dat`) | `absDot(axis1, axis2) ≤ 0.35` (perpendicular) |
-| Bevel (`32198.dat`, `32198a.dat`, `32269.dat`, `32270.dat`, `4143.dat`, `6589.dat`) | `absDot(axis1, axis2) ≤ 0.35` (perpendicular) |
-| Worm (`4716.dat`, `32905.dat`) | `absDot(axis1, axis2) ≤ 0.35` (perpendicular) |
-| Turntable | parallel-axis gear rule; the part's explicit `GearAxis` still applies |
+The offsets come from the tooth tip radius by z of the LDraw geometry: a 45°
+pitch cone whose tips sit one addendum outside gives
+`|s| = partner pitch radius + f`. For the double bevels, `f = 5` matches the
+known grid layouts (12T + 12T each 1 stud from the other axle, 20T + 20T each
+1.5 studs, 12T + 20T at 1.5 / 1 stud). The single-bevel values are fitted the
+same way but have not been checked against real models. The crown's face teeth
+run from the disc at z = 0 to their tips at z = +5, so its pitch plane is at
+z = +2.5; the spur sits on the crown's pitch circle.
+
+`Gear.Detect.crossedLayouts` lists the reference offsets for a pair of parts;
+the studio's gear snap places crossed gears with them, so a snapped pair always
+satisfies `Detect.meshing`. `Detect.meshFacts` reports the measurements behind
+each rule (`mode`, `play`, `skew`, `axesCross`, `facesToward`,
+`crossOffsets`), which `Studio.GearFeedback` uses to explain a failed mesh.
+
+The mesh rule also decides which overlaps the build health check ignores
+(`Studio.Health`, meshing gears legitimately overlap their pitch circles), so
+newly rejected layouts can show up as overlaps there.
 
 ## Rotation propagation
 
@@ -189,8 +250,11 @@ pure geometry module and is not used by `propagate`.
   except bevel `32198.dat`, whose measured value (~+0.8°) is not trusted and is
   also treated as 0. Worms (`GearKind = WormGear`) have no phase (`Nothing`) and
   are never aligned; the kind, not a tooth-count sentinel, identifies worms.
-- `contactPoint` gives the pitch point `P`: on the centre line at the first
-  gear's pitch radius for spur pairs, or on the crown's rim toward the other gear.
+- `contactPoint` gives the pitch point `P` by mesh mode: on the centre line at the
+  first gear's pitch radius for parallel meshes (including crowns and double
+  bevels on parallel axles), or on the rim gear's pitch circle toward the other
+  gear for crossed meshes (the crown when there is one, otherwise the first
+  gear). Worms and pairs that cannot mesh have none.
 - `residual gear P Tooth|Gap` is the signed offset (radians, within half a pitch)
   of the nearest tooth from the target. A tooth targets `beta(P)`; a gap targets
   `beta(P) + pi/N`. `toothFraction` divides by the pitch, so `0.5` is half a tooth off.
@@ -292,12 +356,14 @@ The nearest intersected gear is selected as the new motor gear.
   static.
 - **No torque or force model.** All gears spin freely regardless of load. There is
   no simulation of mechanical advantage, torque multiplication, or stalling.
-- **Worm gear back-driving is not prevented.** In a real worm drive the worm gear
-  is self-locking (the output cannot back-drive the input). The simulator allows
-  rotation from either side.
-- **Pitch radii are empirically calibrated.** The values in `Data.gearParts` were
-  derived from measured LDraw geometry, not from the theoretical pitch circle
-  formula. They are accurate enough for mesh detection but should not be treated
-  as exact LEGO dimensions.
+- **Worm drives are modelled as self-locking.** The gear graph only has the
+  worm → wheel edge, so turning the wheel (for example by choosing it as the
+  motor) never turns the worm. No friction or efficiency is modelled beyond
+  that.
+- **Pitch radii follow module 1 mm.** The values in `Data.gearParts` are
+  `teeth × 1.25` LDU (worms: 10) and were checked against the measured outer tooth radius of
+  the LDraw geometry (see "Gear detection"). The crossed-mesh offsets of the
+  single bevels and the crown pitch plane are fitted from the same geometry and
+  are less certain than the spur and double-bevel values.
 - **No support for rack-and-pinion or differential gears.** These part types are
   not in the known gear list and will be ignored during detection.

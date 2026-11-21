@@ -353,7 +353,7 @@ suite =
                         [ Just 0.0, Just 0.0, Just 0.0 ]
                         [ Phase.phaseOf (spurSpec 8)
                         , Phase.phaseOf crownSpec
-                        , Phase.phaseOf { partFile = "32269.dat", teeth = 20, pitchRadius = 25, kind = BevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
+                        , Phase.phaseOf { partFile = "32269.dat", teeth = 20, pitchRadius = 25, kind = DoubleBevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
                         ]
             , test "bevel 32198 is treated as phase 0 (measured value not trusted)" <|
                 \_ ->
@@ -404,6 +404,49 @@ suite =
 
                         Nothing ->
                             Expect.fail "expected a contact point"
+            , test "crown on parallel axes: contact is on the centre line (rim teeth act as a spur)" <|
+                \_ ->
+                    let
+                        crown =
+                            gear 0 crownSpec (pose 0 0 0 False 0)
+
+                        spur =
+                            gear 1 (spurSpec 8) (pose 0 ((24 + 8) / (2 * pi)) 0 False 0)
+                    in
+                    case Phase.contactPoint crown spur of
+                        Just p ->
+                            Expect.all
+                                [ \_ -> Expect.within (Expect.Absolute 1.0e-9) 0 (Vec3.getX p)
+                                , \_ -> Expect.within (Expect.Absolute 1.0e-9) (24 / (2 * pi)) (Vec3.getY p)
+                                , \_ -> Expect.within (Expect.Absolute 1.0e-9) 0 (Vec3.getZ p)
+                                ]
+                                ()
+
+                        Nothing ->
+                            Expect.fail "expected a contact point"
+            , test "double bevels at right angles: contact on the first gear's pitch circle toward the other" <|
+                \_ ->
+                    let
+                        db12 =
+                            { partFile = "32270.dat", teeth = 12, pitchRadius = 15, kind = DoubleBevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
+
+                        a =
+                            gear 0 db12 (pose 0 0 20 False 0)
+
+                        b =
+                            gear 1 db12 (Mat4.mul (Mat4.makeTranslate3 20 0 0) (Mat4.makeRotate (pi / 2) (vec3 0 1 0)))
+                    in
+                    Phase.contactPoint a b
+                        |> Maybe.map (\p -> List.map (\c -> toFloat (round (c * 1000)) / 1000) [ Vec3.getX p, Vec3.getY p, Vec3.getZ p ])
+                        |> Expect.equal (Just [ 15, 0, 20 ])
+            , test "a single bevel and a spur (cannot mesh) have no contact point" <|
+                \_ ->
+                    let
+                        bevel =
+                            { partFile = "6589.dat", teeth = 12, pitchRadius = 15, kind = BevelGear, axis = AxisZ, motorCapable = True, rotates = True, holes = [] }
+                    in
+                    Phase.contactPoint (gear 0 bevel Mat4.identity) (gear 1 (spurSpec 24) (pose 45 0 0 False 0))
+                        |> Expect.equal Nothing
             , test "worm pairs have no contact point" <|
                 \_ ->
                     Phase.contactPoint (gear 0 wormSpec Mat4.identity) (gear 1 (spurSpec 24) (pose 3 0 0 False 0))

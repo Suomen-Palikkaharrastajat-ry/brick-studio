@@ -51,7 +51,7 @@ the moving group is considered; fixed gears are never moved.
 -}
 
 import Dict exposing (Dict)
-import Gear.Detect exposing (canonicalAxis, isBevelLike, isCrownLike, isWorm)
+import Gear.Detect as Detect exposing (MeshMode(..), canonicalAxis, isCrownLike, isWorm)
 import Gear.Types exposing (GearAxis(..), GearInstance, GearSpec)
 import Math.Matrix4 as Mat4
 import Math.Vector3 as Vec3 exposing (Vec3)
@@ -204,43 +204,39 @@ anyPerpendicular axis =
         Vec3.normalize (Vec3.cross axis (Vec3.vec3 0 1 0))
 
 
-{-| The pitch point `P` where two meshing gears touch.
+{-| The pitch point `P` where two meshing gears touch, by `Detect.meshMode`.
 
-  - Spur pairs (parallel axes): the point on the centre line, at the pitch
-    radius of the first gear.
-  - Crown or bevel pairs (perpendicular axes): the point on the crown's pitch
-    circle nearest the other gear's centre. If that centre lies on the crown
-    axis, the point lies along the other gear's axis (sign canonicalised).
+  - Parallel meshes (spur-like teeth on parallel axles, including crowns and
+    double bevels on parallel axles): the point on the centre line, at the
+    pitch radius of the first gear.
+  - Crossed meshes (crown or bevel teeth at right angles): the point on the
+    rim gear's pitch circle nearest the other gear's centre, where the rim
+    gear is the crown when there is one, otherwise the first gear. If that
+    centre lies on the rim gear's axis, the point lies along the other gear's
+    axis (sign canonicalised).
 
-Worms have no contact point (`Nothing`), as do coincident centres.
+Worms and pairs that can never mesh have no contact point (`Nothing`), nor do
+coincident centres.
 
 -}
 contactPoint : GearInstance -> GearInstance -> Maybe Vec3
 contactPoint a b =
-    if isWorm a.spec || isWorm b.spec then
-        Nothing
+    case Detect.meshMode a b of
+        Just ParallelMesh ->
+            parallelContact (gearFrame a) a.spec.pitchRadius (gearFrame b)
 
-    else
-        let
-            fa =
-                gearFrame a
+        Just CrossedMesh ->
+            if isCrownLike b.spec && not (isCrownLike a.spec) then
+                rimContact (gearFrame b) b.spec.pitchRadius (gearFrame a)
 
-            fb =
-                gearFrame b
-        in
-        if isPlaneGear a.spec then
-            rimContact fa a.spec.pitchRadius fb
+            else
+                rimContact (gearFrame a) a.spec.pitchRadius (gearFrame b)
 
-        else if isPlaneGear b.spec then
-            rimContact fb b.spec.pitchRadius fa
+        Just WormMesh ->
+            Nothing
 
-        else
-            parallelContact fa a.spec.pitchRadius fb
-
-
-isPlaneGear : GearSpec -> Bool
-isPlaneGear spec =
-    isCrownLike spec || isBevelLike spec
+        Nothing ->
+            Nothing
 
 
 parallelContact : Frame -> Float -> Frame -> Maybe Vec3

@@ -2109,7 +2109,7 @@ knownCatalogPart name =
             Just (makeGear 20.0 20.0 "4019.dat")
 
         "69778" ->
-            Just (makeGear 12.0 20.0 "69778.dat")
+            Just (makeGear 15.0 20.0 "69778.dat")
 
         "94925" ->
             Just (makeGear 20.0 20.0 "94925.dat")
@@ -2195,13 +2195,15 @@ knownCatalogPart name =
             Just (makeGear 25.0 20.0 "32269.dat")
 
         "6589" ->
-            Just (makeGear 15.0 20.0 "6589.dat")
+            -- Body z -3..7 with the teeth at z 0..7 (they face +z).
+            Just (makeGearSpan 15.0 { zMin = -3.0, zMax = 7.0 } { zMin = 0.0, zMax = 7.0 } "6589.dat")
 
         "32270" ->
             Just (makeGear 15.0 20.0 "32270.dat")
 
         "4143" ->
-            Just (makeGear 17.5 20.0 "4143.dat")
+            -- Body z -4..3 with the teeth at z -4..0 (they face -z).
+            Just (makeGearSpan 17.5 { zMin = -4.0, zMax = 3.0 } { zMin = -4.0, zMax = 0.0 } "4143.dat")
 
         "3650b" ->
             Just (makeGear 30.0 20.0 "3650b.dat")
@@ -3520,6 +3522,35 @@ makeGear radius thickness partName =
     { part = partName
     , connections = connections
     , boundingBoxes = boundingBoxes
+    }
+
+
+{-| Connectivity for a thin gear whose body does not span the usual ±10 LDU
+around its origin, such as the single bevel gears 6589 and 4143.
+
+The axle-hole connection points stay at ±10 exactly as `makeGear radius 20`
+places them, so axle placement does not change. Only the bounding boxes follow
+the real part: first a hub box (±8 LDU across, over the whole `body` z span),
+then a box of the given radius over the `teeth` z band. The hub box comes
+first because the studio's snap and drag collision checks use only the first
+box. With the old symmetric ±10 hub, two such gears at right angles on
+crossing axles overlap by about 1–2 LDU. `isSnapColliding` never checks the
+dragged part against the snap target itself, so this matters for other parts
+near the pair (and for overlap reports), not for the snap onto the partner.
+
+-}
+makeGearSpan : Float -> { zMin : Float, zMax : Float } -> { zMin : Float, zMax : Float } -> String -> PartConnectivity
+makeGearSpan radius body teeth partName =
+    { part = partName
+    , connections = makeAxleHolePoints 1 10.0 (vec3 0 0 0)
+    , boundingBoxes =
+        [ { min = vec3 -8.0 -8.0 body.zMin
+          , max = vec3 8.0 8.0 body.zMax
+          }
+        , { min = vec3 -radius -radius teeth.zMin
+          , max = vec3 radius radius teeth.zMax
+          }
+        ]
     }
 
 
