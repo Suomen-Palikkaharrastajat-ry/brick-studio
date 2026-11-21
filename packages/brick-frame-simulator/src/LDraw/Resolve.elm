@@ -25,7 +25,9 @@ fetched from a configurable base directory and optional fallback.
 Example bases:
 
   - `/ldraw` (local assets in Vite `public/ldraw`)
-  - `https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw`
+  - `https://catalog.palikkaharrastajat.fi/raw` (brick-catalog CDN)
+  - `https://raw.githubusercontent.com/kulits/ldraw-parts/master/ldraw`
+    (unofficial full-library mirror, only as an opt-in fallback)
 
 
 ## Directory structure on CDN
@@ -112,13 +114,13 @@ markLoading names cache =
 {-| Runtime default resolution strategy:
 
 1.  Local synced assets mounted by Vite at `/ldraw`
-2.  Remote fallback mirror
+2.  No fallback: a fallback base is opt-in, see `resolverConfig`
 
 -}
 defaultResolverConfig : ResolverConfig
 defaultResolverConfig =
     { primaryBase = "/ldraw"
-    , fallbackBase = Just "https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw"
+    , fallbackBase = Nothing
     , bundlesBase = Nothing
     }
 
