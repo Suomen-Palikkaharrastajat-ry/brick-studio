@@ -147,7 +147,7 @@ apparentWind wind ship =
             sqrt (appVx * appVx + appVz * appVz)
 
         appHeading =
-            headingFromVector appVx appVz
+            headingFromVector (0.0 - appVx) (0.0 - appVz)
 
         relAngle =
             relativeAngle appHeading ship.shipHeading
