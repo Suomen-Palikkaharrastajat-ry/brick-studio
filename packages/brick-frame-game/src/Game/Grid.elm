@@ -1,7 +1,9 @@
 module Game.Grid exposing
     ( GridShape
+    , Layout(..)
     , Orientation(..)
     , gridShape
+    , layoutFor
     , maxGridPlayers
     , orientation
     , selfFirst
@@ -51,6 +53,25 @@ type alias GridShape =
 maxGridPlayers : Int
 maxGridPlayers =
     8
+
+
+{-| What one screen shows: the single full view, or a grid of player views.
+-}
+type Layout
+    = SingleView
+    | Tiles GridShape
+
+
+{-| Layout for `players` player views on a screen in the given orientation:
+one player is the full view, two or more a grid.
+-}
+layoutFor : Orientation -> Int -> Layout
+layoutFor o players =
+    if players <= 1 then
+        SingleView
+
+    else
+        Tiles (gridShape o players)
 
 
 {-| Orientation of a screen of the given size in CSS pixels.

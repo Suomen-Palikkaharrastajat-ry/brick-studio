@@ -64,6 +64,17 @@ suite =
                 \_ ->
                     Expect.equal (shapeOf Portrait 1) (shapeOf Portrait 0)
             ]
+        , describe "layoutFor"
+            [ test "one player is the single full view" <|
+                \_ ->
+                    Expect.equal [ Grid.SingleView, Grid.SingleView ]
+                        [ Grid.layoutFor Landscape 1, Grid.layoutFor Portrait 0 ]
+            , test "two or more players are a grid of their views" <|
+                \_ ->
+                    Expect.equal
+                        [ Grid.Tiles { cols = 2, rows = 1 }, Grid.Tiles { cols = 1, rows = 2 }, Grid.Tiles { cols = 2, rows = 2 } ]
+                        [ Grid.layoutFor Landscape 2, Grid.layoutFor Portrait 2, Grid.layoutFor Landscape 4 ]
+            ]
         , describe "orientation"
             [ test "wider than tall is landscape, taller than wide is portrait" <|
                 \_ ->
