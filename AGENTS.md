@@ -30,7 +30,11 @@ brick-studio/
 │   │       ├── SideSnap.elm            # SNOT (studs not on top) approach matrix
 │   │       ├── Health.elm              # Build health diagnostics & overlap resolution
 │   │       └── GearAlign.elm           # Dynamic gear meshing tooth alignment
-│   ├── brick-frame-ui/                 # Design tokens, CameraGlobe, PartCard, theme.css
+│   ├── brick-frame-game/               # Shared layer of the games (brick-racer, brick-sails)
+│   │   ├── src/Game/                   # Ports, Multiplayer(UI), Leaderboard, PartLoading, Camera, Audio, Compass
+│   │   ├── runtime/                    # game-boot.js, game-runtime.js, tilt-steer.js, audio-engine.js, multiplayer.js
+│   │   └── Makefile.game               # Make targets every game includes after its bootstrap `vendor` target
+│   ├── brick-frame-ui/                 # Design tokens, CameraGlobe, PartCard, theme.css, game.css
 │   └── brick-frame-viewport/           # WebGL rendering engine and runtime worker
 │
 ├── generator/Main.hs                   # Haskell generator for Data.elm and ColorData.elm
