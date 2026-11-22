@@ -1,5 +1,9 @@
 module GridTest exposing (suite)
 
+{-| Tests for the player-view grid, its screen orientation and self-first
+order, the session modes, room codes and room capacity on the wire.
+-}
+
 import Expect
 import Game.Grid as Grid exposing (Orientation(..))
 import Game.Multiplayer as Multiplayer exposing (SessionMode(..))
