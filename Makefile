@@ -99,11 +99,16 @@ test-lib: ## Run shared package unit tests (simulator, viewport, simulation, ui,
 	cd packages/brick-frame-ui && elm-test
 	cd packages/brick-frame-studio && elm-test
 
+.PHONY: test-game-js
+test-game-js: ## Run the shared game runtime JS unit tests (multiplayer, vehicle registry)
+	node --test packages/brick-frame-game/runtime/*.test.mjs
+
 .PHONY: test
 test: check ## Run all tests (Haskell, studio-app, and shared packages)
 	cabal test
 	$(MAKE) elm-test
 	$(MAKE) test-lib
+	$(MAKE) test-game-js
 
 CATALOG ?= ../brick-catalog/data/curated-parts.json
 CURATED_PARTS_URL ?= https://catalog.palikkaharrastajat.fi/indices/parts-curated.json

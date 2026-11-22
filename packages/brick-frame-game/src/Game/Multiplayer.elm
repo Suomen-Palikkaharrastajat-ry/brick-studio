@@ -94,12 +94,22 @@ statusFromString str cd =
 
 
 {-| Real-time state of a remote participant in the room.
+
+`vehicleId` names the player's vehicle model by content (16 hex characters,
+empty when the player has none). Room updates never carry the model itself:
+`runtime/multiplayer.js` fetches it once and hands it to Elm through the
+`multiplayerVehicleLoaded` port as `{ id, payload }`. `vehicleLoaded` says
+whether this page already holds that payload; `vehicleReady` whether the host
+does.
+
 -}
 type alias RemotePlayer =
     { slot : Int -- 1..4
     , id : String
     , name : String
-    , vehicleHash : String
+    , vehicleId : String
+    , vehicleReady : Bool
+    , vehicleLoaded : Bool
     , position : Vec3
     , rotation : Vec3 -- yaw, pitch, roll in radians or degrees
     , speed : Float
@@ -142,19 +152,27 @@ slotColor : Int -> String
 slotColor slot =
     case slot of
         1 ->
-            "#0284c7" -- Sky Blue
+            "#0284c7"
 
+        -- Sky Blue
         2 ->
-            "#ef4444" -- Red
+            "#ef4444"
 
+        -- Red
         3 ->
-            "#eab308" -- Yellow
+            "#eab308"
 
+        -- Yellow
         4 ->
-            "#10b981" -- Emerald Green
+            "#10b981"
 
+        -- Emerald Green
         _ ->
-            "#94a3b8" -- Slate Gray
+            "#94a3b8"
+
+
+
+-- Slate Gray
 
 
 slotBadgeClass : Int -> String
@@ -220,11 +238,13 @@ decodeRoomState =
 decodePlayer : Decoder RemotePlayer
 decodePlayer =
     Decode.map8
-        (\slot id name vHash ( px, py, pz ) ( rx, ry, rz ) ( sp, pr ) ( fin, finT ) ->
+        (\slot id name ( vId, vReady, vLoaded ) ( px, py, pz ) ( rx, ry, rz ) ( sp, pr ) ( fin, finT ) ->
             { slot = slot
             , id = id
             , name = name
-            , vehicleHash = vHash
+            , vehicleId = vId
+            , vehicleReady = vReady
+            , vehicleLoaded = vLoaded
             , position = vec3 px py pz
             , rotation = vec3 rx ry rz
             , speed = sp
@@ -236,7 +256,7 @@ decodePlayer =
         (Decode.field "slot" Decode.int)
         (Decode.field "id" Decode.string)
         (Decode.field "name" Decode.string)
-        (Decode.field "vehicleHash" Decode.string)
+        decodeVehicleRef
         (Decode.field "position" decodeVec3Tuple)
         (Decode.field "rotation" decodeVec3Tuple)
         (Decode.map2 Tuple.pair
@@ -247,6 +267,23 @@ decodePlayer =
             (Decode.field "finished" Decode.bool)
             (Decode.maybe (Decode.field "finishTime" Decode.float))
         )
+
+
+{-| `vehicleId`, `vehicleReady` and `vehicleLoaded`; all optional so that room
+states from older runtimes (which sent `vehicleHash` instead) still decode.
+-}
+decodeVehicleRef : Decoder ( String, Bool, Bool )
+decodeVehicleRef =
+    Decode.map3 (\a b c -> ( a, b, c ))
+        (optionalField "vehicleId" Decode.string "")
+        (optionalField "vehicleReady" Decode.bool False)
+        (optionalField "vehicleLoaded" Decode.bool False)
+
+
+optionalField : String -> Decoder a -> a -> Decoder a
+optionalField name decoder fallback =
+    Decode.maybe (Decode.field name decoder)
+        |> Decode.map (Maybe.withDefault fallback)
 
 
 decodeVec3Tuple : Decoder ( Float, Float, Float )

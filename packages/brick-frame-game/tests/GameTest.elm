@@ -136,8 +136,46 @@ suite =
                                 [ \s -> Expect.equal "RACE99" s.roomId
                                 , \s -> Expect.equal HostCommentator s.role
                                 , \s -> Expect.equal 1 (List.length s.players)
+                                , \s -> Expect.equal [ "" ] (List.map .vehicleId s.players)
                                 ]
                                 st
+
+                        Err err ->
+                            Expect.fail (Decode.errorToString err)
+            , test "decodes vehicle ids and flags" <|
+                \_ ->
+                    let
+                        json =
+                            """
+                            {
+                              "roomId": "RACE99",
+                              "role": "player",
+                              "mySlot": 2,
+                              "status": "lobby",
+                              "countdown": 3,
+                              "players": [
+                                {
+                                  "slot": 1,
+                                  "id": "host",
+                                  "name": "Host",
+                                  "vehicleId": "0123456789abcdef",
+                                  "vehicleReady": true,
+                                  "vehicleLoaded": false,
+                                  "position": [0, 0, 0],
+                                  "rotation": [0, 0, 0],
+                                  "speed": 0,
+                                  "progress": 0,
+                                  "finished": false,
+                                  "finishTime": null
+                                }
+                              ]
+                            }
+                            """
+                    in
+                    case Decode.decodeString Multiplayer.decodeRoomState json of
+                        Ok st ->
+                            Expect.equal [ ( "0123456789abcdef", True, False ) ]
+                                (List.map (\p -> ( p.vehicleId, p.vehicleReady, p.vehicleLoaded )) st.players)
 
                         Err err ->
                             Expect.fail (Decode.errorToString err)
