@@ -22,6 +22,44 @@ export function createPinkNoiseBuffer(ctx, durationSec = 2) {
   return noiseBuffer
 }
 
+/**
+ * A continuous noise layer: `noiseBuffer` looping through a biquad filter
+ * into its own gain, which starts silent. Games raise `level.gain` and move
+ * `filter.frequency` per frame from their telemetry.
+ */
+export function createNoiseLoop(ctx, noiseBuffer, destination, { type, frequency, Q } = {}) {
+  const source = ctx.createBufferSource()
+  source.buffer = noiseBuffer
+  source.loop = true
+  const filter = ctx.createBiquadFilter()
+  filter.type = type
+  filter.frequency.value = frequency
+  if (typeof Q === 'number') filter.Q.value = Q
+  const level = ctx.createGain()
+  level.gain.value = 0
+  source.connect(filter)
+  filter.connect(level)
+  level.connect(destination)
+  source.start()
+  return { source, filter, level }
+}
+
+/**
+ * A continuous tone layer: an oscillator into its own gain, which starts
+ * silent. Games raise `level.gain` and move `osc.frequency` per frame.
+ */
+export function createOscillatorLoop(ctx, destination, { type, frequency } = {}) {
+  const osc = ctx.createOscillator()
+  osc.type = type
+  osc.frequency.value = frequency
+  const level = ctx.createGain()
+  level.gain.value = 0
+  osc.connect(level)
+  level.connect(destination)
+  osc.start()
+  return { osc, level }
+}
+
 export class BaseAudioEngine {
   constructor(initialMuted = false) {
     this.ctx = null
