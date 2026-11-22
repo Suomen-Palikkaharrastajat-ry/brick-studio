@@ -36,6 +36,15 @@ import { Broadcaster, Viewer, randomRoomId, DEFAULT_SIGNALING_URL } from './shar
 import { VehicleExchange, MAX_VEHICLE_PARTS, vehicleIdFor } from './vehicle-registry.js'
 
 const HOST_PEER = 'host'
+const DEFAULT_CAPACITY = 4 // rooms from hosts that did not say how many
+const MAX_CAPACITY = 8
+
+/** Players a room holds: 2 to 8, the default 4 when the host did not say. */
+export function clampCapacity(value) {
+  const n = Math.floor(Number(value))
+  if (!Number.isFinite(n)) return DEFAULT_CAPACITY
+  return Math.min(MAX_CAPACITY, Math.max(2, n))
+}
 
 function readPendingRoomId() {
   try {
@@ -58,6 +67,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
   let roomId = null
   let lastRoomId = ''
   let mySlot = 1
+  let roomCapacity = DEFAULT_CAPACITY
   let myName = 'Player'
   let myVehicleId = ''
   let myVehicleReady = Promise.resolve('')
@@ -185,6 +195,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
       roomId,
       status: roomStatus,
       countdown: countdownSeconds,
+      maxPlayers: roomCapacity,
       players: Array.from(players.values()).map(publicPlayer),
       ...extra,
     }
@@ -228,6 +239,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
       mySlot: mySlot,
       status: roomStatus,
       countdown: countdownSeconds,
+      maxPlayers: roomCapacity,
       players: playerList,
     })
   }
@@ -245,12 +257,13 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
 
   // ── Host ──────────────────────────────────────────────────────────────────
 
-  function startHost(requestedRoomId, courseId, hostName, hostVehicle) {
+  function startHost(requestedRoomId, courseId, hostName, hostVehicle, capacity) {
     cleanup()
     const mySession = session
     role = 'host'
     roomId = requestedRoomId || randomRoomId(6)
     lastRoomId = roomId
+    roomCapacity = clampCapacity(capacity ?? DEFAULT_CAPACITY)
     mySlot = 1
     myName = hostName || 'Host'
     roomStatus = 'lobby'
@@ -302,7 +315,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
   function allocateSlot(viewerId) {
     let assignedSlot = viewerSlotMap.get(viewerId)
     if (!assignedSlot) {
-      for (let s = 2; s <= 4; s++) {
+      for (let s = 2; s <= roomCapacity; s++) {
         if (!players.has(s)) {
           assignedSlot = s
           break
@@ -322,7 +335,11 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
   async function handleJoin(viewerId, msg) {
     const mySession = session
     const assignedSlot = allocateSlot(viewerId)
-    if (!assignedSlot) return // Room full
+    if (!assignedSlot) {
+      // Room full: tell this viewer, so it does not wait in the lobby forever.
+      send(viewerId, { type: 'error', message: `This room is full (${roomCapacity} players).` })
+      return
+    }
     const isNew = !viewerSlotMap.has(viewerId)
     viewerSlotMap.set(viewerId, assignedSlot)
     const record = players.get(assignedSlot) || {
@@ -620,6 +637,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     }
     players.clear()
     viewerSlotMap.clear()
+    roomCapacity = DEFAULT_CAPACITY
     legacyInline.clear()
     deliveredToElm.clear()
     exchange.resetSession()
@@ -631,8 +649,8 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
   }
 
   // Hook Elm ports
-  ports?.createMultiplayerRoom?.subscribe(({ roomId: rId, courseId, name, vehicle, vehicleHash }) => {
-    startHost(rId, courseId, name, vehicle ?? vehicleHash)
+  ports?.createMultiplayerRoom?.subscribe(({ roomId: rId, courseId, name, vehicle, vehicleHash, maxPlayers }) => {
+    startHost(rId, courseId, name, vehicle ?? vehicleHash, maxPlayers)
   })
 
   ports?.joinMultiplayerRoom?.subscribe(({ roomId: rId, name, vehicle, vehicleHash }) => {

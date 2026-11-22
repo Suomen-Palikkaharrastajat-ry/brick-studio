@@ -5,6 +5,7 @@ module Game.MultiplayerUI exposing
     , viewCommentatorHeader
     , viewCountdownOverlay
     , viewPlayerBadge
+    , viewRoster
     , viewWaitingSlotCard
     )
 
@@ -36,6 +37,9 @@ viewCommentatorHeader cfg =
         [ span
             [ Attr.class "font-mono font-extrabold text-sky-400 text-xs px-2.5 py-1 rounded-lg bg-sky-500/10 border border-sky-500/30" ]
             [ text ("ROOM: " ++ cfg.room.roomId) ]
+        , span
+            [ Attr.class "text-xs font-bold text-slate-300 tabular-nums" ]
+            [ text (playerCount cfg.room ++ " players") ]
         , button
             [ Attr.type_ "button"
             , onClick cfg.onCopyShareLink
@@ -66,6 +70,50 @@ viewCommentatorHeader cfg =
                     [ Attr.class "text-xs font-extrabold text-purple-400 uppercase tracking-wider px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20" ]
                     [ text "RACE FINISHED" ]
         ]
+
+
+{-| "2/8" style count of the players in a room against its capacity.
+-}
+playerCount : RoomState -> String
+playerCount room =
+    String.fromInt (List.length room.players) ++ "/" ++ String.fromInt room.maxPlayers
+
+
+{-| Roster strip for the lobby: every slot of the room, with the name of the
+player in it or an open seat.
+-}
+viewRoster : RoomState -> Html msg
+viewRoster room =
+    div
+        [ Attr.class "flex flex-wrap items-center justify-center gap-1.5" ]
+        (List.map (viewRosterSeat room) (List.range 1 room.maxPlayers))
+
+
+viewRosterSeat : RoomState -> Int -> Html msg
+viewRosterSeat room slot =
+    case List.filter (\p -> p.slot == slot) room.players |> List.head of
+        Just p ->
+            span
+                [ Attr.class ("px-2 py-0.5 rounded-lg text-xs font-bold border truncate max-w-[9rem] " ++ Multiplayer.slotBadgeClass slot)
+                , Attr.title ("Slot " ++ String.fromInt slot)
+                ]
+                [ text
+                    (p.name
+                        ++ (if slot == room.mySlot then
+                                " (you)"
+
+                            else
+                                ""
+                           )
+                    )
+                ]
+
+        Nothing ->
+            span
+                [ Attr.class "px-2 py-0.5 rounded-lg text-xs font-semibold border border-dashed border-slate-700 text-slate-500"
+                , Attr.title ("Slot " ++ String.fromInt slot)
+                ]
+                [ text ("Slot " ++ String.fromInt slot ++ " open") ]
 
 
 type alias SlotBadgeConfig =

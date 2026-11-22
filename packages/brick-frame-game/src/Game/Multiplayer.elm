@@ -3,11 +3,14 @@ module Game.Multiplayer exposing
     , Role(..)
     , RoomState
     , RoomStatus(..)
+    , SessionMode(..)
     , decodeRoomState
+    , defaultCapacity
     , emptyRoomState
     , encodeTelemetry
     , roleFromString
     , roleToString
+    , sessionCapacity
     , slotBadgeClass
     , slotBorderClass
     , slotColor
@@ -120,6 +123,10 @@ type alias RemotePlayer =
 
 
 {-| Synchronized room state received from `runtime/multiplayer.js`.
+
+`maxPlayers` is the room's capacity (2 to 8). Rooms from older hosts do not
+send it and hold `defaultCapacity` players.
+
 -}
 type alias RoomState =
     { roomId : String
@@ -128,7 +135,35 @@ type alias RoomState =
     , status : RoomStatus
     , countdown : Int
     , players : List RemotePlayer
+    , maxPlayers : Int
     }
+
+
+{-| How a host opens a room: a two-player split screen, or a grid session.
+-}
+type SessionMode
+    = TwoPlayers
+    | GridSession
+
+
+{-| Players a room of this mode holds.
+-}
+sessionCapacity : SessionMode -> Int
+sessionCapacity mode =
+    case mode of
+        TwoPlayers ->
+            2
+
+        GridSession ->
+            8
+
+
+{-| Capacity of a room whose host did not say (the 4-player room of older
+hosts).
+-}
+defaultCapacity : Int
+defaultCapacity =
+    4
 
 
 emptyRoomState : RoomState
@@ -139,6 +174,7 @@ emptyRoomState =
     , status = Lobby
     , countdown = 3
     , players = []
+    , maxPlayers = defaultCapacity
     }
 
 
@@ -217,14 +253,15 @@ slotBorderClass slot =
 -}
 decodeRoomState : Decoder RoomState
 decodeRoomState =
-    Decode.map6
-        (\rId rStr slot sStr cd pls ->
+    Decode.map7
+        (\rId rStr slot sStr cd pls cap ->
             { roomId = rId
             , role = roleFromString rStr
             , mySlot = slot
             , status = statusFromString sStr cd
             , countdown = cd
             , players = pls
+            , maxPlayers = cap
             }
         )
         (Decode.field "roomId" Decode.string)
@@ -233,6 +270,7 @@ decodeRoomState =
         (Decode.field "status" Decode.string)
         (Decode.field "countdown" Decode.int)
         (Decode.field "players" (Decode.list decodePlayer))
+        (optionalField "maxPlayers" Decode.int defaultCapacity)
 
 
 decodePlayer : Decoder RemotePlayer

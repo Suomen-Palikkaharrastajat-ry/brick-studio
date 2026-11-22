@@ -3,7 +3,7 @@
 // every message goes through JSON like it would on the wire.
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createMultiplayerManager } from './multiplayer.js'
+import { clampCapacity, createMultiplayerManager } from './multiplayer.js'
 import { vehicleIdFor } from './vehicle-registry.js'
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -312,4 +312,44 @@ test('a player asks again at most 3 times when the host never answers', async ()
   assert.equal(a.mgr.stats().retries, 3)
   assert.equal(a.errors.length, 1)
   a.mgr.cleanup()
+})
+
+test('clampCapacity keeps rooms between two and eight players, four by default', () => {
+  assert.equal(clampCapacity(undefined), 4)
+  assert.equal(clampCapacity(0), 2)
+  assert.equal(clampCapacity(2), 2)
+  assert.equal(clampCapacity('8'), 8)
+  assert.equal(clampCapacity(12), 8)
+  assert.equal(clampCapacity(NaN), 4)
+})
+
+test('a room holds the players its host asked for, and turns the rest away with an error', async () => {
+  for (const [capacity, expectedMax] of [[undefined, 4], [2, 2], [8, 8]]) {
+    const env = createHub()
+    const host = makePeer(env)
+    host.mgr.startHost('CAP' + expectedMax, 'course', 'Host', 'Cutter', capacity)
+    await settle()
+    const joiners = []
+    for (let i = 0; i < expectedMax - 1; i++) {
+      const j = makePeer(env)
+      joiners.push(j)
+      j.mgr.joinRoom('CAP' + expectedMax, `J${i + 1}`, 'Schooner')
+      await settle()
+    }
+    const last = joiners.at(-1)
+    assert.equal(last.errors.length, 0, 'the last seat is taken, not refused')
+    const extra = makePeer(env)
+    extra.mgr.joinRoom('CAP' + expectedMax, 'Late', 'Schooner')
+    await settle()
+    assert.equal(extra.errors.length, 1, `capacity ${expectedMax}: a joiner past the last seat is refused`)
+    assert.match(extra.errors[0], /full/)
+
+    const state = env.hub.wire.filter((w) => w.msg.type === 'room_state').at(-1).msg
+    assert.equal(state.maxPlayers, expectedMax)
+    assert.equal(state.players.length, expectedMax)
+    assert.deepEqual(state.players.map((p) => p.slot).sort((a, b) => a - b), Array.from({ length: expectedMax }, (_, i) => i + 1))
+    assert.equal(host.states.at(-1).maxPlayers, expectedMax)
+    host.mgr.cleanup()
+    for (const j of [...joiners, extra]) j.mgr.cleanup()
+  }
 })

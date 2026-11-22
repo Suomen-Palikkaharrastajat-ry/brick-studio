@@ -155,9 +155,17 @@ port saveLeaderboard : String -> Cmd msg
 port storeLanguage : String -> Cmd msg
 
 
-{-| Create a new multiplayer room as host/commentator.
+{-| Create a new multiplayer room as host/commentator. `maxPlayers` is the
+room's capacity (2 to 8); the runtime holds 4 when it is not given.
 -}
-port createMultiplayerRoom : { roomId : String, courseId : String, name : String, vehicleHash : String } -> Cmd msg
+port createMultiplayerRoom :
+    { roomId : String
+    , courseId : String
+    , name : String
+    , vehicleHash : String
+    , maxPlayers : Int
+    }
+    -> Cmd msg
 
 
 {-| Join an existing multiplayer room as a player.
