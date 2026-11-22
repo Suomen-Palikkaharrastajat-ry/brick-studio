@@ -1,5 +1,8 @@
 module GameTest exposing (suite)
 
+{-| Unit tests for Game Framework modules (Camera, Compass, Leaderboard, Multiplayer).
+-}
+
 import Expect
 import Game.Camera as Camera
 import Game.Compass as Compass exposing (PointOfSail(..))
