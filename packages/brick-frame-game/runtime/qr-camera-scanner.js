@@ -264,6 +264,9 @@ export function createQrCameraScanner(ports, options = {}) {
     document.body.appendChild(modalEl)
 
     header.querySelector('#qr-close-btn').onclick = () => stopScanner()
+    modalEl.onclick = (e) => {
+      if (e.target === modalEl) stopScanner()
+    }
 
     return modalEl
   }
