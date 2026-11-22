@@ -4,6 +4,8 @@ import Expect
 import Game.Camera as Camera
 import Game.Compass as Compass exposing (PointOfSail(..))
 import Game.Leaderboard as Leaderboard
+import Game.Multiplayer as Multiplayer exposing (Role(..), RoomStatus(..))
+import Json.Decode as Decode
 import Math.Vector3 exposing (vec3)
 import Test exposing (Test, describe, test)
 
@@ -96,5 +98,53 @@ suite =
                             Camera.damp 5.0 0.0 10.0 1.0
                     in
                     Expect.greaterThan 9.0 val
+            ]
+        , describe "Multiplayer"
+            [ test "decodes room state JSON correctly" <|
+                \_ ->
+                    let
+                        json =
+                            """
+                            {
+                              "roomId": "RACE99",
+                              "role": "host",
+                              "mySlot": 1,
+                              "status": "in_race",
+                              "countdown": 0,
+                              "players": [
+                                {
+                                  "slot": 1,
+                                  "id": "host",
+                                  "name": "Host Racer",
+                                  "vehicleHash": "#b/123",
+                                  "position": [10.0, 2.0, 30.0],
+                                  "rotation": [0.5, 0.0, 0.0],
+                                  "speed": 12.5,
+                                  "progress": 45.0,
+                                  "finished": false
+                                }
+                              ]
+                            }
+                            """
+                    in
+                    case Decode.decodeString Multiplayer.decodeRoomState json of
+                        Ok st ->
+                            Expect.all
+                                [ \s -> Expect.equal "RACE99" s.roomId
+                                , \s -> Expect.equal HostCommentator s.role
+                                , \s -> Expect.equal 1 (List.length s.players)
+                                ]
+                                st
+
+                        Err err ->
+                            Expect.fail (Decode.errorToString err)
+            , test "slotColor provides distinct colors" <|
+                \_ ->
+                    Expect.all
+                        [ \_ -> Expect.notEqual (Multiplayer.slotColor 1) (Multiplayer.slotColor 2)
+                        , \_ -> Expect.notEqual (Multiplayer.slotColor 2) (Multiplayer.slotColor 3)
+                        , \_ -> Expect.notEqual (Multiplayer.slotColor 3) (Multiplayer.slotColor 4)
+                        ]
+                        ()
             ]
         ]
