@@ -1,4 +1,7 @@
 import { decodeHash, isBinaryHash } from '../../brick-frame-viewport/runtime/url-hash-codec.js'
+import { getScreenTiltDegrees } from './tilt-steer.js'
+
+export { getScreenTiltDegrees }
 
 export const LANG_KEY = 'palikkakehys.language'
 
@@ -62,67 +65,6 @@ export function decodeHashToByteArray(rawHash) {
   } catch {
     return null
   }
-}
-
-export function getScreenTiltDegrees(betaDeg, gammaDeg) {
-  const degToRad = Math.PI / 180
-  const radToDeg = 180 / Math.PI
-  const b = betaDeg * degToRad
-  const g = gammaDeg * degToRad
-
-  // Earth "Up" unit vector in physical device coordinates (W3C Z-X'-Y'' rotation matrix row 3):
-  // +x = portrait right edge, +y = portrait top edge, +z = out of front screen
-  const ux = -Math.cos(b) * Math.sin(g)
-  const uy = Math.sin(b)
-  const uz = Math.cos(b) * Math.cos(g)
-
-  const legacyAngle = typeof window.orientation === 'number' ? window.orientation : null
-  const modernAngle =
-    typeof window.screen !== 'undefined' &&
-    window.screen.orientation &&
-    typeof window.screen.orientation.angle === 'number'
-      ? window.screen.orientation.angle
-      : null
-  const mediaLandscape =
-    typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches
-
-  const isLandscape =
-    mediaLandscape ||
-    window.innerWidth > window.innerHeight ||
-    legacyAngle === 90 ||
-    legacyAngle === -90 ||
-    modernAngle === 90 ||
-    modernAngle === 270
-
-  let negURight
-  let uTop
-  if (isLandscape) {
-    let topIsPosX
-    if (Math.abs(ux) > 0.14) {
-      topIsPosX = ux > 0
-    } else if (legacyAngle === 90 || legacyAngle === -90) {
-      topIsPosX = legacyAngle === 90
-    } else {
-      topIsPosX = modernAngle !== 270
-    }
-
-    if (topIsPosX) {
-      negURight = uy
-      uTop = Math.abs(ux)
-    } else {
-      negURight = -uy
-      uTop = Math.abs(ux)
-    }
-  } else if (legacyAngle === 180 || modernAngle === 180) {
-    negURight = ux
-    uTop = Math.abs(uy)
-  } else {
-    negURight = -ux
-    uTop = Math.abs(uy)
-  }
-
-  const denom = Math.max(0.35, Math.hypot(uTop, uz * 0.5))
-  return Math.atan2(negURight, denom) * radToDeg
 }
 
 /**
