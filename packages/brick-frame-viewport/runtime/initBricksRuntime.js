@@ -672,6 +672,10 @@ export function initBricksRuntime(options) {
     }
   }
 
+  // Elm replaces the mount node with its own root once the view renders, so the
+  // node itself can detach. Keep a stable in-document host to measure against.
+  const sizeHost = node.parentElement ?? node
+
   const app = elm.init({
     node,
     flags: {
@@ -754,8 +758,13 @@ export function initBricksRuntime(options) {
     if (!app.ports?.viewportResized) {
       return
     }
-    const width = Math.max(1, Math.round(Number(widthRaw) || 0))
-    const height = Math.max(1, Math.round(Number(heightRaw) || 0))
+    // A zero-size reading means the host is detached or not laid out yet; do not
+    // report it, or the canvas is stuck at 1x1 until the next real change.
+    if (!(Number(widthRaw) > 0) || !(Number(heightRaw) > 0)) {
+      return
+    }
+    const width = Math.max(1, Math.round(Number(widthRaw)))
+    const height = Math.max(1, Math.round(Number(heightRaw)))
     if (width === lastViewportWidth && height === lastViewportHeight) {
       return
     }
@@ -765,7 +774,8 @@ export function initBricksRuntime(options) {
   }
 
   function measureAndEmitViewportSize() {
-    const rect = node.getBoundingClientRect?.()
+    const target = node.isConnected ? node : sizeHost
+    const rect = target.getBoundingClientRect?.()
     if (rect) {
       emitViewportSize(rect.width, rect.height)
     }
@@ -1081,14 +1091,13 @@ export function initBricksRuntime(options) {
   let hasResizeObserver = false
 
   if (typeof ResizeObserver !== 'undefined') {
-    const resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries.find((candidate) => candidate.target === node) ?? entries[0]
-      if (!entry) {
-        return
-      }
-      emitViewportSize(entry.contentRect.width, entry.contentRect.height)
+    const resizeObserver = new ResizeObserver(() => {
+      measureAndEmitViewportSize()
     })
     resizeObserver.observe(node)
+    if (sizeHost !== node) {
+      resizeObserver.observe(sizeHost)
+    }
     cleanups.push(() => resizeObserver.disconnect())
     hasResizeObserver = true
   }
