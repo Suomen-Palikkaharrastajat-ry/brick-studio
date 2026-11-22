@@ -4,7 +4,7 @@
 // A Cloudflare Worker + Durable Object signaling service relays SDP offers/answers
 // and ICE candidates without seeing model data (DataChannels are DTLS-encrypted end-to-end).
 
-const DEFAULT_SIGNALING_URL = (
+export const DEFAULT_SIGNALING_URL = (
   typeof import.meta !== 'undefined' && import.meta.env?.VITE_SIGNALING_URL
     ? import.meta.env.VITE_SIGNALING_URL
     : 'https://broadcast-signaling.palikkaharrastajat.workers.dev'
