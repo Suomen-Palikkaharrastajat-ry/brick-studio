@@ -81,6 +81,20 @@ suite =
                     Expect.equal [ 1, 2 ]
                         (Grid.selfFirst identity 9 [ 1, 2 ])
             ]
+        , describe "room codes"
+            [ test "a bare code is kept, in upper case" <|
+                \_ ->
+                    Expect.equal "AB12CD" (Multiplayer.roomCodeFrom " ab12cd ")
+            , test "a room link gives its code" <|
+                \_ ->
+                    Expect.equal "XYZ987" (Multiplayer.roomCodeFrom "https://example.org/play/#room=xyz987")
+            , test "a join link gives its code too" <|
+                \_ ->
+                    Expect.equal "Q1W2E3" (Multiplayer.roomCodeFrom "#join=q1w2e3")
+            , test "stray characters are dropped and the code is capped" <|
+                \_ ->
+                    Expect.equal "ABCDEFGHIJKL" (Multiplayer.roomCodeFrom "abc-def gh ijk lmnop")
+            ]
         , describe "session modes"
             [ test "two-player rooms hold two, grid sessions up to eight" <|
                 \_ ->

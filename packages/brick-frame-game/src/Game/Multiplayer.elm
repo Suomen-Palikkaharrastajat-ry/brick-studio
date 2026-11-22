@@ -10,6 +10,7 @@ module Game.Multiplayer exposing
     , encodeTelemetry
     , roleFromString
     , roleToString
+    , roomCodeFrom
     , sessionCapacity
     , slotBadgeClass
     , slotBorderClass
@@ -22,6 +23,7 @@ module Game.Multiplayer exposing
 and WebRTC telemetry decoders/encoders.
 -}
 
+import Char
 import Dict exposing (Dict)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode
@@ -144,6 +146,38 @@ type alias RoomState =
 type SessionMode
     = TwoPlayers
     | GridSession
+
+
+{-| The room code in what a person typed: a bare code, or a room link such as
+`https://example.org/#room=ABC123`. Upper case, letters and digits only, at
+most twelve characters.
+-}
+roomCodeFrom : String -> String
+roomCodeFrom raw =
+    let
+        trimmed =
+            String.trim raw
+
+        lower =
+            String.toLower trimmed
+
+        afterKey key =
+            String.indexes key lower
+                |> List.head
+                |> Maybe.map (\i -> String.dropLeft (i + String.length key) trimmed)
+
+        tail =
+            case afterKey "room=" of
+                Just rest ->
+                    rest
+
+                Nothing ->
+                    afterKey "join=" |> Maybe.withDefault trimmed
+    in
+    tail
+        |> String.toUpper
+        |> String.filter Char.isAlphaNum
+        |> String.left 12
 
 
 {-| Players a room of this mode holds.
