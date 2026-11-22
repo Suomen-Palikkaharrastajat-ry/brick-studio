@@ -110,10 +110,12 @@ cardinalName deg =
 
 
 {-| Compute apparent wind vector from true wind and ship motion.
-- `windSpeed`: true wind velocity (m/s)
-- `windHeading`: true wind blowing TOWARDS this compass heading (degrees)
-- `shipSpeed`: ship velocity over water (m/s)
-- `shipHeading`: ship heading (degrees)
+
+  - `windSpeed`: true wind velocity (m/s)
+  - `windHeading`: true wind blowing TOWARDS this compass heading (degrees)
+  - `shipSpeed`: ship velocity over water (m/s)
+  - `shipHeading`: ship heading (degrees)
+
 -}
 apparentWind : { windSpeed : Float, windHeading : Float } -> { shipSpeed : Float, shipHeading : Float } -> ApparentWind
 apparentWind wind ship =

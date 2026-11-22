@@ -34,7 +34,7 @@ HS_SOURCES := $(shell find src generator -name '*.hs') brick-studio.cabal $(wild
 SHARED_ELM_SOURCES := $(shell find packages/brick-frame-viewport/src packages/brick-frame-simulation/src packages/brick-frame-simulator/src packages/brick-frame-ui/src packages/brick-frame-studio/src -name '*.elm' ! -name 'ColorData.elm')
 STUDIO_APP_SOURCES := $(shell find studio-app/src -name '*.elm') $(SHARED_ELM_SOURCES) packages/brick-frame-data/src/EmbeddedParts.elm
 VIEWPORT_JS_SOURCES := $(shell find packages/brick-frame-viewport/runtime -name '*.js') packages/brick-frame-viewport/geometry-worker.js
-SHARED_PACKAGE_DIRS := packages/brick-frame-data/src/EmbeddedParts.elm packages/brick-frame-viewport packages/brick-frame-simulation packages/brick-frame-ui packages/brick-frame-studio packages/brick-frame-simulator/src/LDraw/Document.elm packages/brick-frame-simulator/src/LDraw/Export.elm packages/brick-frame-simulator/src/LDraw/Export packages/brick-frame-simulator/src/LDraw/Format.elm packages/brick-frame-simulator/src/LDraw/Writer.elm packages/brick-frame-simulator/src/Render/Pick.elm packages/brick-frame-simulator/src/Render/Shader.elm packages/brick-frame-simulator/src/Render/Style.elm packages/brick-frame-simulator/tests/LDraw/DocumentTest.elm packages/brick-frame-simulator/tests/LDraw/ExportTest.elm packages/brick-frame-simulator/tests/LDraw/Fixtures.elm packages/brick-frame-simulator/tests/Render/PickTest.elm packages/brick-frame-simulator/tests/Render/StyleTest.elm packages/brick-frame-simulator/src/LDraw/Flex.elm packages/brick-frame-simulator/src/LDraw/Steps.elm packages/brick-frame-simulator/src/Gear/Joint.elm packages/brick-frame-simulator/src/Gear/Physics.elm packages/brick-frame-simulator/src/LDraw/Connectivity.elm packages/brick-frame-simulator/src/LDraw/ColorAvailability.elm packages/brick-frame-simulator/tests/LDraw/StepsTest.elm packages/brick-frame-simulator/tests/LDraw/FlexTest.elm packages/brick-frame-simulator/tests/LDraw/ConnectivityTest.elm packages/brick-frame-simulator/tests/LDraw/CuratedCoverageTest.elm packages/brick-frame-simulator/tests/LDraw/CuratedParts.elm packages/brick-frame-simulator/tests/LDraw/ColorAvailabilityTest.elm packages/brick-frame-simulator/tests/Gear/JointTest.elm packages/brick-frame-simulator/tests/Gear/PhysicsTest.elm packages/brick-frame-simulator/src/LDraw/Catalog.elm packages/brick-frame-simulator/src/LDraw/BOM.elm packages/brick-frame-simulator/tests/LDraw/BOMTest.elm
+SHARED_PACKAGE_DIRS := packages/brick-frame-data/src/EmbeddedParts.elm packages/brick-frame-game packages/brick-frame-viewport packages/brick-frame-simulation packages/brick-frame-ui packages/brick-frame-studio packages/brick-frame-simulator/src/LDraw/Document.elm packages/brick-frame-simulator/src/LDraw/Export.elm packages/brick-frame-simulator/src/LDraw/Export packages/brick-frame-simulator/src/LDraw/Format.elm packages/brick-frame-simulator/src/LDraw/Writer.elm packages/brick-frame-simulator/src/Render/Pick.elm packages/brick-frame-simulator/src/Render/Shader.elm packages/brick-frame-simulator/src/Render/Style.elm packages/brick-frame-simulator/tests/LDraw/DocumentTest.elm packages/brick-frame-simulator/tests/LDraw/ExportTest.elm packages/brick-frame-simulator/tests/LDraw/Fixtures.elm packages/brick-frame-simulator/tests/Render/PickTest.elm packages/brick-frame-simulator/tests/Render/StyleTest.elm packages/brick-frame-simulator/src/LDraw/Flex.elm packages/brick-frame-simulator/src/LDraw/Steps.elm packages/brick-frame-simulator/src/Gear/Joint.elm packages/brick-frame-simulator/src/Gear/Physics.elm packages/brick-frame-simulator/src/LDraw/Connectivity.elm packages/brick-frame-simulator/src/LDraw/ColorAvailability.elm packages/brick-frame-simulator/tests/LDraw/StepsTest.elm packages/brick-frame-simulator/tests/LDraw/FlexTest.elm packages/brick-frame-simulator/tests/LDraw/ConnectivityTest.elm packages/brick-frame-simulator/tests/LDraw/CuratedCoverageTest.elm packages/brick-frame-simulator/tests/LDraw/CuratedParts.elm packages/brick-frame-simulator/tests/LDraw/ColorAvailabilityTest.elm packages/brick-frame-simulator/tests/Gear/JointTest.elm packages/brick-frame-simulator/tests/Gear/PhysicsTest.elm packages/brick-frame-simulator/src/LDraw/Catalog.elm packages/brick-frame-simulator/src/LDraw/BOM.elm packages/brick-frame-simulator/tests/LDraw/BOMTest.elm
 ELM_PACKAGE_SOURCES := $(shell find vendor/master-builder/packages -name '*.elm' -o -name '*.css' 2>/dev/null)
 
 brick-data-generator: $(HS_SOURCES)
@@ -92,15 +92,16 @@ elm-test: elm-tailwind-gen ## Run studio-app unit tests
 	cd studio-app && elm-test
 
 .PHONY: test-lib
-test-lib: ## Run shared package unit tests (simulator, viewport, simulation, ui, studio)
+test-lib: ## Run shared package unit tests (simulator, viewport, simulation, ui, studio, game)
 	cd packages/brick-frame-simulator && elm-test
 	cd packages/brick-frame-viewport && elm-test
 	cd packages/brick-frame-simulation && elm-test
 	cd packages/brick-frame-ui && elm-test
 	cd packages/brick-frame-studio && elm-test
+	cd packages/brick-frame-game && elm-test
 
 .PHONY: test-game-js
-test-game-js: ## Run the shared game runtime JS unit tests (multiplayer, vehicle registry)
+test-game-js: ## Run the shared game runtime JS unit tests (multiplayer, vehicle registry, tilt, audio)
 	node --test packages/brick-frame-game/runtime/*.test.mjs
 
 .PHONY: test
