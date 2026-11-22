@@ -1,0 +1,21 @@
+/* Game shell shared by the Brick Frame games (brick-racer, brick-sails).
+   Each game's main.css imports this after tailwindcss (and, if it uses the
+   brand look, theme.css), then adds its own colours and HUD styles. */
+
+/* The Elm app owns the whole viewport and never scrolls the page. */
+#app {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* On-screen touch controls: shown only where the primary pointer is a finger. */
+.touch-only {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .touch-only {
+    display: flex;
+  }
+}
