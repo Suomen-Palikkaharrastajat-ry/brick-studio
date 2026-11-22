@@ -3,7 +3,8 @@
     "source-directories": [
         "src",
         "tests",
-        "../brick-frame-simulator/src"
+        "../brick-frame-simulator/src",
+        "../brick-frame-simulator/tests"
     ],
     "elm-version": "0.19.1",
     "dependencies": {
