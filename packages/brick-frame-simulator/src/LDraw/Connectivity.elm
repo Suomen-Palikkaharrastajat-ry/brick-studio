@@ -1978,6 +1978,10 @@ knownCatalogPart name =
             -- Plate 1 x 1 Round with open stud
             Just (makeBrick 1 1 8 "85861.dat")
 
+        "32828" ->
+            -- Plate 1 x 1 Round with Horizontal 3.2 Shaft / Bar 1L with Hollow Stud
+            Just (makeBrick 1 1 8 "32828.dat")
+
         "3062" ->
             -- Brick 1 x 1 Round
             Just (makeBrick 1 1 24 "3062.dat")
