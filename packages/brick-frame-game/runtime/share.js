@@ -366,6 +366,19 @@ export class Broadcaster {
     }
   }
 
+  /**
+   * Send one message to a single viewer (chunked like snapshots when large).
+   * The viewer receives it through `onSnapshot`. Unlike `push`, it is not
+   * replayed to viewers that connect later. Returns false if that viewer's
+   * channel is not open.
+   */
+  sendTo(viewerId, msg) {
+    const dc = this.dcs.get(viewerId)
+    if (!dc || dc.readyState !== 'open') return false
+    this.sendSnapshot(dc, msg)
+    return true
+  }
+
   pushAnimation(playing) {
     this.latestAnimation = Boolean(playing)
     for (const dc of this.dcs.values()) {
@@ -629,6 +642,7 @@ export class Viewer {
     this.onAnimation = opts.onAnimation || (() => {})
     this.onStatus = opts.onStatus || (() => {})
     this.onError = opts.onError || (() => {})
+    this.onChannelOpen = opts.onChannelOpen || (() => {})
     this.WebSocketClass = opts.WebSocket || (typeof globalThis !== 'undefined' ? globalThis.WebSocket : undefined)
     this.RTCPeerConnectionClass = opts.RTCPeerConnection || (typeof globalThis !== 'undefined' ? globalThis.RTCPeerConnection : undefined)
 
@@ -730,6 +744,11 @@ export class Viewer {
 
       const flush = () => {
         this.onStatus('live')
+        try {
+          this.onChannelOpen()
+        } catch {
+          // ignore callback error
+        }
         this.flushPendingParticipantSnapshot()
       }
       if (dc.readyState === 'open') {
@@ -913,6 +932,32 @@ export class Viewer {
 
   push(snapshot) {
     return this.sendParticipantSnapshot(snapshot)
+  }
+
+  /**
+   * Send a typed message to the broadcaster as is (chunked when large). The
+   * broadcaster receives it through `onParticipantMessage`. Returns false
+   * when the channel is not open; nothing is queued.
+   */
+  sendMessage(msg) {
+    if (!msg || typeof msg !== 'object') return false
+    if (!this.dc || this.dc.readyState !== 'open') return false
+    const raw = JSON.stringify(msg)
+    try {
+      if (raw.length <= CHUNK_SIZE) {
+        this.dc.send(raw)
+        return true
+      }
+      const id = this.nextChunkId++
+      if (this.nextChunkId > 0x7fffffff) this.nextChunkId = 1
+      for (const chunk of splitChunks(raw, id, CHUNK_SIZE)) {
+        if (this.dc.readyState !== 'open') return false
+        this.dc.send(JSON.stringify(chunk))
+      }
+      return true
+    } catch {
+      return false
+    }
   }
 
   send(msg) {
