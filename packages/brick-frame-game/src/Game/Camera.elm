@@ -39,7 +39,7 @@ damp : Float -> Float -> Float -> Float -> Float
 damp lambda current target dt =
     let
         t =
-            clamp 0.0 1.0 (1.0 - exp (-lambda * dt))
+            clamp 0.0 1.0 (1.0 - (e ^ (0.0 - (lambda * dt))))
     in
     current + (target - current) * t
 
