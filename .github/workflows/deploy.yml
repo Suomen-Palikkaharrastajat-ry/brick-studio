@@ -17,6 +17,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test-game-js:
+    # Shared game runtime JS tests (multiplayer, vehicle registry). They use
+    # only Node built-ins, so a plain Node 22 (as in devenv.nix) is enough.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run shared game runtime JS tests
+        run: make test-game-js
+
   build:
     runs-on: ubuntu-latest
     steps:
