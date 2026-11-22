@@ -1,7 +1,7 @@
 // Language defaults to Finnish for the games; a link or a saved choice overrides it.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readLanguage, LANG_KEY } from './game-runtime.js'
+import { readLanguage, LANG_KEY } from './language.js'
 
 function withWindow({ search = '', hash = '', stored = null }, fn) {
   const previous = globalThis.window
