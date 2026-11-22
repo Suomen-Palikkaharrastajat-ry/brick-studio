@@ -92,6 +92,37 @@ suite =
 
                         Nothing ->
                             Expect.fail "Expected best entry"
+            , test "formats a delta with its unit" <|
+                \_ ->
+                    Expect.all
+                        [ \_ -> Expect.equal "-0.62 s" (Leaderboard.formatDeltaSeconds -0.62)
+                        , \_ -> Expect.equal "+12.41 s" (Leaderboard.formatDeltaSeconds 12.41)
+                        , \_ -> Expect.equal "-0.00 s" (Leaderboard.formatDeltaSeconds 0)
+                        , \_ -> Expect.equal "+1.05 s" (Leaderboard.formatDeltaSeconds 1.05)
+                        ]
+                        ()
+            , test "keepTopPer keeps the first entries of each key in order" <|
+                \_ ->
+                    [ ( "a", 1 ), ( "b", 2 ), ( "a", 3 ), ( "a", 4 ), ( "b", 5 ), ( "c", 6 ) ]
+                        |> Leaderboard.keepTopPer Tuple.first 2
+                        |> Expect.equal [ ( "a", 1 ), ( "b", 2 ), ( "a", 3 ), ( "b", 5 ), ( "c", 6 ) ]
+            , test "a board survives toJson and fromJson" <|
+                \_ ->
+                    let
+                        board =
+                            Leaderboard.recordRun
+                                { courseId = "regatta", player = "You", timeSeconds = 42.5, isoDate = "", vehicleName = "Sloop" }
+                                Leaderboard.empty
+                    in
+                    Leaderboard.fromJson (Leaderboard.toJson board)
+                        |> Expect.equal board
+            , test "unreadable JSON starts an empty board" <|
+                \_ ->
+                    Expect.all
+                        [ \_ -> Expect.equal Leaderboard.empty (Leaderboard.fromJson "[]")
+                        , \_ -> Expect.equal Leaderboard.empty (Leaderboard.fromJson "not json")
+                        ]
+                        ()
             ]
         , describe "Camera"
             [ test "damp reaches target over time" <|

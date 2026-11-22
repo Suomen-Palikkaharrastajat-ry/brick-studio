@@ -6,9 +6,13 @@ module Game.Leaderboard exposing
     , empty
     , encodeLeaderboard
     , entriesForCourse
+    , formatDeltaSeconds
     , formatRaceTime
     , formatSplitDelta
+    , fromJson
+    , keepTopPer
     , recordRun
+    , toJson
     )
 
 {-| Universal high score and course record storage, timing formatting, and JSON codecs.
@@ -115,6 +119,58 @@ formatRaceTime seconds =
         padZero mins ++ ":" ++ padZero secs ++ "." ++ padZero centis
 
 
+{-| Format a split or personal-best delta with its unit (e.g. `-0.62 s` or
+`+12.41 s`). Zero counts as a gain.
+-}
+formatDeltaSeconds : Float -> String
+formatDeltaSeconds delta =
+    let
+        signStr =
+            if delta <= 0.0 then
+                "-"
+
+            else
+                "+"
+
+        absCentis =
+            round (abs delta * 100.0)
+
+        whole =
+            absCentis // 100
+
+        frac =
+            modBy 100 absCentis
+
+        pad2 n =
+            if n < 10 then
+                "0" ++ String.fromInt n
+
+            else
+                String.fromInt n
+    in
+    signStr ++ String.fromInt whole ++ "." ++ pad2 frac ++ " s"
+
+
+{-| Keep at most `maxPerKey` entries for each key, in list order. Sort the
+list first to keep the best ones, e.g. `List.sortBy .timeSeconds`.
+-}
+keepTopPer : (entry -> key) -> Int -> List entry -> List entry
+keepTopPer keyOf maxPerKey entries =
+    let
+        step e kept =
+            let
+                c =
+                    List.filter (\x -> keyOf x == keyOf e) kept |> List.length
+            in
+            if c < maxPerKey then
+                kept ++ [ e ]
+
+            else
+                kept
+    in
+    List.foldl step [] entries
+
+
 {-| Format a split delta in seconds (e.g. `+00.23` or `-01.12`).
 -}
 formatSplitDelta : Float -> String
@@ -147,6 +203,22 @@ formatSplitDelta delta =
                 String.fromInt n
     in
     sign ++ padZero secs ++ "." ++ padZero centis
+
+
+{-| Read the leaderboard JSON that `game-runtime.js` hands over in the
+`savedLeaderboardJson` flag. Anything unreadable starts an empty board.
+-}
+fromJson : String -> Leaderboard
+fromJson raw =
+    Decode.decodeString decodeLeaderboard raw
+        |> Result.withDefault empty
+
+
+{-| The leaderboard as the JSON string `Game.Ports.saveLeaderboard` stores.
+-}
+toJson : Leaderboard -> String
+toJson board =
+    Encode.encode 0 (encodeLeaderboard board)
 
 
 {-| JSON encoder for Leaderboard.
