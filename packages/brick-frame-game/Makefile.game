@@ -46,11 +46,14 @@ elm-tailwind-gen: .elm-tailwind/.stamp ## Generate typed Tailwind Elm modules
 	touch $@
 
 .PHONY: $(GAME_NAME)-dev
-$(GAME_NAME)-dev: elm-tailwind-gen
+$(GAME_NAME)-dev: elm-tailwind-gen ## Start the $(GAME_NAME) Vite dev server (http://localhost:WATCH_PORT)
 	$(VITE) --host 0.0.0.0 --port $(WATCH_PORT)
 
 .PHONY: dev
 dev: $(GAME_NAME)-dev ## Start Vite dev server (WATCH_PORT)
+
+.PHONY: watch
+watch: dev ## Alias for dev (start Vite dev server on WATCH_PORT)
 
 build/.stamp: elm-tailwind-gen index.html main.css vite.config.mjs $(GAME_JS_SOURCES) $(SHARED_CSS_SOURCES) $(GAME_SOURCES) $(ELM_PACKAGE_SOURCES)
 	mkdir -p build
@@ -58,10 +61,13 @@ build/.stamp: elm-tailwind-gen index.html main.css vite.config.mjs $(GAME_JS_SOU
 	touch $@
 
 .PHONY: $(GAME_NAME)-build
-$(GAME_NAME)-build: build/.stamp
+$(GAME_NAME)-build: build/.stamp ## Production build of brick-$(GAME_NAME) → build/
 
 .PHONY: build
 build: $(GAME_NAME)-build ## Production build → build/
+
+.PHONY: all
+all: clean build ## Clean and rebuild everything
 
 .PHONY: preview
 preview: build ## Preview production build locally (PREVIEW_PORT)
@@ -95,9 +101,15 @@ elm-format: ## Auto-format Elm source files
 elm-review: ## Run elm-review rules
 	elm-review
 
+.PHONY: review
+review: elm-review ## Alias for elm-review
+
 .PHONY: elm-review-fix
 elm-review-fix: ## Run elm-review with auto-fix
 	elm-review --fix
+
+.PHONY: review-fix
+review-fix: elm-review-fix ## Alias for elm-review-fix
 
 .PHONY: check
 check: elm-check elm-review ## Validate Elm formatting and review rules
@@ -105,6 +117,9 @@ check: elm-check elm-review ## Validate Elm formatting and review rules
 .PHONY: format
 format: elm-format ## Auto-format source files
 	treefmt
+
+.PHONY: fmt
+fmt: format ## Alias for format
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 

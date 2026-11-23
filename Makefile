@@ -2,19 +2,30 @@ HLINT ?= hlint
 FOURMOLU ?= fourmolu
 GENERATOR_NIX ?= generator-nix
 VITE ?= vite --configLoader native
-WATCH_PORT ?= 5173
-PREVIEW_PORT ?= 4173
+WATCH_PORT ?= 5174
+PREVIEW_PORT ?= 4174
+
+.DEFAULT_GOAL := help
 
 .PHONY: help
 help: ## Show available targets
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; !seen[$$1]++ {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 # ── Vendor / submodules ──────────────────────────────────────────────────────
 
 .PHONY: vendor
-vendor: ## Init and update all git submodules to their pinned commits
+vendor: ## Init and update all git submodules and configure symlinks
 	@[ -z "$$CI" ] || git config --global url."https://github.com/".insteadOf "git@github.com:"
-	@if [ -d .git ]; then git submodule update --init; elif [ ! -d vendor/master-builder ]; then mkdir -p vendor && git clone https://github.com/Suomen-Palikkaharrastajat-ry/master-builder.git vendor/master-builder; fi
+	@if [ -d .git ]; then \
+		if [ -z "$$CI" ] && [ -d ../master-builder/.git ]; then \
+			git -c submodule."vendor/master-builder".url="$(abspath ../master-builder)" -c protocol.file.allow=always submodule update --init; \
+		else \
+			git submodule update --init; \
+		fi; \
+	elif [ ! -d vendor/master-builder ]; then \
+		mkdir -p vendor && git clone https://github.com/Suomen-Palikkaharrastajat-ry/master-builder.git vendor/master-builder; \
+	fi
+	mkdir -p studio-app/review/src
 	ln -sfn ../vendor/master-builder/packages studio-app/packages
 	ln -sfn ../../../vendor/master-builder/review/src/LlmAgent studio-app/review/src/LlmAgent
 
@@ -57,7 +68,10 @@ studio-dev: studio-app/.elm-tailwind/.stamp ## Start the studio Vite dev server 
 	cd studio-app && $(VITE) --host 0.0.0.0 --port $(WATCH_PORT)
 
 .PHONY: dev
-dev: studio-dev ## Alias for studio-dev
+dev: studio-dev ## Start Vite dev server (WATCH_PORT)
+
+.PHONY: watch
+watch: dev ## Alias for dev (start Vite dev server on WATCH_PORT)
 
 .PHONY: elm-tailwind-gen
 elm-tailwind-gen: studio-app/.elm-tailwind/.stamp ## Generate typed Tailwind Elm modules into studio-app
@@ -78,8 +92,11 @@ studio-build: build/.studio-stamp ## Production build of studio-app → build/st
 .PHONY: build
 build: studio-build ## Build studio-app
 
+.PHONY: all
+all: clean build ## Clean and rebuild everything
+
 .PHONY: preview
-preview: build ## Preview production build locally
+preview: build ## Preview production build locally (PREVIEW_PORT)
 	cd studio-app && $(VITE) preview --outDir ../build/studio --host 0.0.0.0 --port $(PREVIEW_PORT)
 
 .PHONY: serve
@@ -104,12 +121,15 @@ test-lib: ## Run shared package unit tests (simulator, viewport, simulation, ui,
 test-game-js: ## Run the shared game runtime JS unit tests (multiplayer, vehicle registry, tilt, audio)
 	node --test packages/brick-frame-game/runtime/*.test.mjs
 
+.PHONY: js-test
+js-test: test-game-js ## Run JS unit tests (alias for test-game-js)
+
 .PHONY: test
-test: check ## Run all tests (Haskell, studio-app, and shared packages)
+test: check ## Run all tests (Haskell, studio-app, shared packages, and JS)
 	cabal test
 	$(MAKE) elm-test
 	$(MAKE) test-lib
-	$(MAKE) test-game-js
+	$(MAKE) js-test
 
 CATALOG ?= ../brick-catalog/data/curated-parts.json
 CURATED_PARTS_URL ?= https://catalog.palikkaharrastajat.fi/indices/parts-curated.json
@@ -140,9 +160,15 @@ elm-format: ## Auto-format Elm source files
 elm-review: ## Run elm-review on studio-app
 	cd studio-app && elm-review
 
+.PHONY: review
+review: elm-review ## Alias for elm-review
+
 .PHONY: elm-review-fix
 elm-review-fix: ## Run elm-review with auto-fix
 	cd studio-app && elm-review --fix
+
+.PHONY: review-fix
+review-fix: elm-review-fix ## Alias for elm-review-fix
 
 .PHONY: check
 check: ## Check formatting, hlint, and elm-review
@@ -156,7 +182,10 @@ format: ## Auto-format Haskell and Elm source files
 	$(MAKE) elm-format
 	treefmt
 
+.PHONY: fmt
+fmt: format ## Alias for format
+
 .PHONY: clean
 clean: ## Remove build artifacts
 	cabal clean
-	rm -rf build brick-data-generator .hpc studio-app/.elm-tailwind studio-app/elm-stuff studio-app/.vite packages/brick-frame-studio/elm-stuff packages/brick-frame-data/src/.data-nix-stamp build/.studio-stamp
+	rm -rf build brick-data-generator .hpc studio-app/.elm-tailwind studio-app/elm-stuff studio-app/.vite packages/*/elm-stuff packages/brick-frame-data/src/.data-nix-stamp build/.studio-stamp
