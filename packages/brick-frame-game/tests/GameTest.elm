@@ -9,6 +9,7 @@ import Game.Compass as Compass exposing (PointOfSail(..))
 import Game.Leaderboard as Leaderboard
 import Game.Multiplayer as Multiplayer exposing (Role(..), RoomStatus(..))
 import Json.Decode as Decode
+import Json.Encode as Encode
 import Math.Vector3 exposing (vec3)
 import Test exposing (Test, describe, test)
 
@@ -210,6 +211,55 @@ suite =
 
                         Err err ->
                             Expect.fail (Decode.errorToString err)
+            , test "decodes the room's events and skips unreadable ones" <|
+                \_ ->
+                    let
+                        json =
+                            """
+                            {
+                              "roomId": "RACE99",
+                              "role": "player",
+                              "mySlot": 2,
+                              "status": "in_race",
+                              "countdown": 0,
+                              "players": [],
+                              "events": [
+                                { "slot": 1, "id": "ab1", "kind": "smash", "at": 12.5, "pos": [1, 2, 3], "obstacleId": 7 },
+                                { "slot": 3, "id": 4, "kind": "bump" },
+                                { "id": "no-slot", "kind": "smash" }
+                              ]
+                            }
+                            """
+
+                        obstacleOf ev =
+                            Decode.decodeValue (Decode.field "obstacleId" Decode.int) ev.data |> Result.toMaybe
+                    in
+                    case Decode.decodeString Multiplayer.decodeRoomState json of
+                        Ok st ->
+                            Expect.equal
+                                [ ( ( 1, "ab1", "smash" ), ( 12.5, vec3 1 2 3, Just 7 ) )
+                                , ( ( 3, "4", "bump" ), ( 0.0, vec3 0 0 0, Nothing ) )
+                                ]
+                                (List.map (\ev -> ( ( ev.slot, ev.id, ev.kind ), ( ev.at, ev.position, obstacleOf ev ) )) st.events)
+
+                        Err err ->
+                            Expect.fail (Decode.errorToString err)
+            , test "a room state without events has none" <|
+                \_ ->
+                    Decode.decodeString Multiplayer.decodeRoomState
+                        """{"roomId":"R","role":"host","mySlot":1,"status":"lobby","countdown":3,"players":[]}"""
+                        |> Result.map .events
+                        |> Expect.equal (Ok [])
+            , test "an encoded event carries its kind, time, position and fields" <|
+                \_ ->
+                    Multiplayer.encodeEvent
+                        { kind = "smash"
+                        , at = 4.0
+                        , position = vec3 1 2 3
+                        , fields = [ ( "obstacleId", Encode.int 9 ) ]
+                        }
+                        |> Encode.encode 0
+                        |> Expect.equal """{"kind":"smash","at":4,"pos":[1,2,3],"obstacleId":9}"""
             , test "slotColor provides distinct colors" <|
                 \_ ->
                     Expect.all

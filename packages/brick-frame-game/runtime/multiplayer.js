@@ -23,12 +23,24 @@
  *   createMultiplayerRoom { roomId, courseId, name, vehicleHash }
  *   joinMultiplayerRoom { roomId, name, vehicleHash }
  *   setMultiplayerVehicle payload        change the local vehicle in a room
- *   sendMultiplayerTelemetry { pos, rot, speed, progress, finished, finishTime? }
+ *   sendMultiplayerTelemetry { pos, rot, speed, progress, finished, finishTime?, events? }
+ *   sendMultiplayerEvents [ { kind, at, pos, ... } ]   this player's new events
  *   startMultiplayerCountdown ()
  *   leaveMultiplayerRoom ()
  *   multiplayerRoomStateChanged <- room state with players[].vehicleId
  *   multiplayerVehicleLoaded <- { id, payload }
  *   multiplayerError <- message
+ *
+ * Events (a smash, a bump) are told, not inferred: each player adds its own
+ * new events to its telemetry as `events`, a list the host passes on as is
+ * inside that player's `room_state` entry. An event is a small object
+ * `{ kind, id, at, pos, ... }` whose `id` this runtime gives it (unique per
+ * sender and session); the rest is the game's own. A sender repeats each event
+ * for `EVENT_TTL_MS` (at most `MAX_EVENTS` at once), the host keeps each one
+ * for as long after it first saw it, and every page hands each event of the
+ * other players to Elm once, in `multiplayerRoomStateChanged` as
+ * `events: [{ slot, ...event }]`, deduplicated by (slot, id). Events travel
+ * over the same DataChannels as telemetry, never through the signalling.
  *
  * All multiplayer state is kept in memory.
  */
@@ -38,6 +50,114 @@ import { VehicleExchange, MAX_VEHICLE_PARTS, vehicleIdFor } from './vehicle-regi
 const HOST_PEER = 'host'
 const DEFAULT_CAPACITY = 4 // rooms from hosts that did not say how many
 const MAX_CAPACITY = 8
+
+/** How long a sender repeats an event, and the host keeps it (ms). */
+export const EVENT_TTL_MS = 2000
+/** Most events one player's telemetry or room entry carries at once. */
+export const MAX_EVENTS = 8
+/** How long a page remembers an event id, to apply each event once (ms). */
+export const EVENT_SEEN_MS = 10000
+const MAX_EVENT_BYTES = 512
+
+/**
+ * A copy of one event as it may travel, or null: an object with a short
+ * string `kind` and an `id`, at most `MAX_EVENT_BYTES` of JSON. Everything
+ * else in it is passed on unchanged.
+ */
+export function cleanEvent(ev) {
+  if (!ev || typeof ev !== 'object' || Array.isArray(ev)) return null
+  if (typeof ev.kind !== 'string' || !ev.kind || ev.kind.length > 16) return null
+  const id = typeof ev.id === 'number' && Number.isFinite(ev.id) ? String(ev.id) : ev.id
+  if (typeof id !== 'string' || !id || id.length > 40) return null
+  let raw
+  try {
+    raw = JSON.stringify({ ...ev, id })
+  } catch {
+    return null
+  }
+  if (raw.length > MAX_EVENT_BYTES) return null
+  return JSON.parse(raw)
+}
+
+/**
+ * One player's recent events, newest last: each is kept `ttlMs` after it was
+ * added, at most `max` at once, and an id is added only once (it is
+ * remembered for `seenMs`, so a late repeat of an expired event stays out).
+ */
+export class EventLog {
+  constructor({ ttlMs = EVENT_TTL_MS, max = MAX_EVENTS, seenMs = EVENT_SEEN_MS, now = () => Date.now() } = {}) {
+    this.ttlMs = ttlMs
+    this.max = max
+    this.seenMs = seenMs
+    this.now = now
+    this.entries = []
+    this.seen = new Map()
+  }
+
+  prune() {
+    const t = this.now()
+    this.entries = this.entries.filter((e) => t - e.t < this.ttlMs)
+    if (this.entries.length > this.max) this.entries = this.entries.slice(-this.max)
+    for (const [id, at] of this.seen) if (t - at >= this.seenMs) this.seen.delete(id)
+  }
+
+  /** Add an event (cleaned first); false when it is invalid or already seen. */
+  add(ev) {
+    const clean = cleanEvent(ev)
+    if (!clean) return false
+    this.prune()
+    if (this.seen.has(clean.id)) return false
+    const t = this.now()
+    this.seen.set(clean.id, t)
+    this.entries.push({ ev: clean, t })
+    this.prune()
+    return true
+  }
+
+  /** The events still current, oldest first. */
+  list() {
+    this.prune()
+    return this.entries.map((e) => e.ev)
+  }
+
+  clear() {
+    this.entries = []
+    this.seen.clear()
+  }
+}
+
+/**
+ * What a page has applied: `take(slot, events)` returns the events of that
+ * player it has not seen before, each with its `slot`, and remembers their
+ * (slot, id) for `seenMs`, so each event is handed on once per page.
+ */
+export class EventInbox {
+  constructor({ seenMs = EVENT_SEEN_MS, now = () => Date.now() } = {}) {
+    this.seenMs = seenMs
+    this.now = now
+    this.seen = new Map()
+  }
+
+  take(slot, events) {
+    if (!Array.isArray(events) || !events.length) return []
+    const t = this.now()
+    for (const [key, at] of this.seen) if (t - at >= this.seenMs) this.seen.delete(key)
+    const fresh = []
+    for (const ev of events.slice(-MAX_EVENTS)) {
+      const clean = cleanEvent(ev)
+      if (!clean) continue
+      const key = `${slot}:${clean.id}`
+      if (this.seen.has(key)) continue
+      this.seen.set(key, t)
+      fresh.push({ ...clean, slot })
+    }
+    return fresh
+  }
+
+  clear() {
+    this.seen.clear()
+  }
+}
 
 /** Players a room holds: 2 to 8, the default 4 when the host did not say. */
 export function clampCapacity(value) {
@@ -77,6 +197,18 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
   let session = 0
   let joinSent = false
   let lastTelemetryKey = ''
+  let lastTelemetry = null
+
+  const now = options.now || (() => Date.now())
+  const eventOptions = { now }
+  // This player's own recent events (sent with every telemetry while current).
+  const myEvents = new EventLog(eventOptions)
+  // Host only: slot -> EventLog of what that player told the host.
+  const eventLogs = new Map()
+  // The other players' events this page has already handed to Elm.
+  const inbox = new EventInbox(eventOptions)
+  let eventPrefix = ''
+  let eventCounter = 0
 
   // Slot (1..4) -> player record. On the host this is authoritative; on a
   // player it mirrors the latest room_state.
@@ -186,7 +318,51 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
       progress: Number(p.progress) || 0,
       finished: Boolean(p.finished),
       finishTime: p.finishTime !== undefined && p.finishTime !== null ? Number(p.finishTime) : undefined,
+      events: eventsOf(p),
     }
+  }
+
+  /** A player's current events: from the host's own logs, or as received. */
+  function eventsOf(p) {
+    if (role === 'host') {
+      const log = p.slot === mySlot ? myEvents : eventLogs.get(p.slot)
+      return log ? log.list() : []
+    }
+    return Array.isArray(p.events) ? p.events : []
+  }
+
+  /** The other players' events this page has not handed to Elm yet. */
+  function freshEvents() {
+    const fresh = []
+    for (const p of players.values()) {
+      if (p.slot === mySlot) continue
+      fresh.push(...inbox.take(p.slot, eventsOf(p)))
+    }
+    return fresh
+  }
+
+  /** Host: keep what a player told about its own events. */
+  function storeEvents(slot, events) {
+    if (!Array.isArray(events) || !events.length) return
+    let log = eventLogs.get(slot)
+    if (!log) {
+      log = new EventLog(eventOptions)
+      eventLogs.set(slot, log)
+    }
+    for (const ev of events.slice(-MAX_EVENTS)) log.add(ev)
+  }
+
+  /** Give this player's new events their ids and keep them to send. */
+  function addLocalEvents(events) {
+    if (!Array.isArray(events)) return false
+    if (!eventPrefix) eventPrefix = Math.random().toString(36).slice(2, 8) || 'e'
+    let added = false
+    for (const ev of events) {
+      if (!ev || typeof ev !== 'object') continue
+      eventCounter++
+      if (myEvents.add({ ...ev, id: `${eventPrefix}${eventCounter}` })) added = true
+    }
+    return added
   }
 
   function roomStateMessage(extra = {}) {
@@ -232,6 +408,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
         finishTime: pub.finishTime !== undefined ? pub.finishTime : null,
       }
     })
+    const events = freshEvents()
 
     ports.multiplayerRoomStateChanged.send({
       roomId: roomId || '',
@@ -241,6 +418,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
       countdown: countdownSeconds,
       maxPlayers: roomCapacity,
       players: playerList,
+      events,
     })
   }
 
@@ -399,6 +577,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     if (!slot) return
     const current = players.get(slot) || { slot, id: viewerId }
     applyTelemetry(current, msg)
+    storeEvents(slot, msg.events)
     if (msg.name) current.name = msg.name
     players.set(slot, current)
     if (typeof msg.vehicleId === 'string' && msg.vehicleId && msg.vehicleId !== current.vehicleId) {
@@ -451,6 +630,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     if (slot) {
       viewerSlotMap.delete(viewerId)
       players.delete(slot)
+      eventLogs.delete(slot)
       broadcastRoomState()
     }
   }
@@ -497,6 +677,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
       for (const p of msg.players) {
         if (!p || typeof p !== 'object') continue
         const record = { ...p }
+        record.events = Array.isArray(p.events) ? p.events.slice(-MAX_EVENTS).map(cleanEvent).filter(Boolean) : []
         if (!record.vehicleId && typeof p.vehicleHash === 'string' && p.vehicleHash) {
           // Older host: inline payloads in room_state.
           record.vehicleId = await registerInline(`slot${p.slot}`, p.vehicleHash)
@@ -573,6 +754,8 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
 
   function sendTelemetry(telemetry) {
     if (!telemetry || typeof telemetry !== 'object') return
+    if (Array.isArray(telemetry.events)) addLocalEvents(telemetry.events)
+    lastTelemetry = { ...telemetry, events: undefined }
 
     const lean = {
       pos: telemetry.pos,
@@ -582,6 +765,9 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
       finished: Boolean(telemetry.finished),
       finishTime: telemetry.finishTime,
     }
+    // This player's recent events, passed on as they are (see the header).
+    const events = myEvents.list()
+    if (events.length) lean.events = events
     // Unchanged telemetry (e.g. waiting on the start line) is not resent.
     const key = JSON.stringify(lean)
     if (key === lastTelemetryKey) return
@@ -595,6 +781,13 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     } else if (role === 'player' && viewer && joinSent) {
       if (viewer.sendMessage({ type: 'telemetry', ...lean })) lastTelemetryKey = key
     }
+  }
+
+  /** This player's new events: sent at once with the latest telemetry. */
+  function sendEvents(events) {
+    if (!addLocalEvents(events)) return
+    if (lastTelemetry) sendTelemetry(lastTelemetry)
+    else if (role === 'host') broadcastRoomState()
   }
 
   function startCountdown() {
@@ -643,6 +836,11 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     exchange.resetSession()
     joinSent = false
     lastTelemetryKey = ''
+    lastTelemetry = null
+    myEvents.clear()
+    eventLogs.clear()
+    inbox.clear()
+    eventPrefix = ''
     role = null
     roomId = null
     roomStatus = 'lobby'
@@ -674,6 +872,10 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     sendTelemetry(telemetry)
   })
 
+  ports?.sendMultiplayerEvents?.subscribe((events) => {
+    sendEvents(events)
+  })
+
   ports?.startMultiplayerCountdown?.subscribe(() => {
     startCountdown()
   })
@@ -688,6 +890,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     joinRoom,
     setVehicle,
     sendTelemetry,
+    sendEvents,
     startCountdown,
     cleanup,
     /** Debug counters: payloads sent per peer, `need` messages, retries. */

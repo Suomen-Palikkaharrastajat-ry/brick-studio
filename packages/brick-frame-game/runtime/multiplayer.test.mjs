@@ -3,7 +3,7 @@
 // every message goes through JSON like it would on the wire.
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { clampCapacity, createMultiplayerManager } from './multiplayer.js'
+import { EVENT_TTL_MS, EventInbox, EventLog, MAX_EVENTS, clampCapacity, createMultiplayerManager } from './multiplayer.js'
 import { vehicleIdFor } from './vehicle-registry.js'
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -352,4 +352,126 @@ test('a room holds the players its host asked for, and turns the rest away with 
     host.mgr.cleanup()
     for (const j of [...joiners, extra]) j.mgr.cleanup()
   }
+})
+
+test('an event log keeps events for 2 s, at most 8, and each id once', () => {
+  let t = 1000
+  const log = new EventLog({ now: () => t })
+  assert.equal(log.add({ kind: 'smash', id: 'a1', at: 1.5, pos: [0, 0, 0], obstacle: 4 }), true)
+  assert.equal(log.add({ kind: 'smash', id: 'a1', at: 1.5, pos: [0, 0, 0], obstacle: 4 }), false, 'same id twice')
+  assert.equal(log.add({ kind: 'bump', at: 1 }), false, 'no id')
+  assert.equal(log.add({ id: 'x' }), false, 'no kind')
+  assert.deepEqual(log.list(), [{ kind: 'smash', id: 'a1', at: 1.5, pos: [0, 0, 0], obstacle: 4 }])
+  t += EVENT_TTL_MS - 1
+  assert.equal(log.list().length, 1)
+  t += 1
+  assert.equal(log.list().length, 0, 'expired after 2 s')
+  assert.equal(log.add({ kind: 'smash', id: 'a1' }), false, 'an expired id does not come back')
+  for (let i = 0; i < 12; i++) log.add({ kind: 'bump', id: `b${i}` })
+  assert.equal(log.list().length, MAX_EVENTS)
+  assert.equal(log.list().at(-1).id, 'b11', 'the newest are kept')
+})
+
+test('an inbox hands each (slot, id) on once and forgets it later', () => {
+  let t = 0
+  const inbox = new EventInbox({ now: () => t, seenMs: 10000 })
+  const ev = { kind: 'smash', id: 'k1', pos: [1, 2, 3] }
+  assert.deepEqual(inbox.take(2, [ev]), [{ ...ev, slot: 2 }])
+  assert.deepEqual(inbox.take(2, [ev]), [], 'seen already')
+  assert.equal(inbox.take(3, [ev]).length, 1, 'the same id from another slot is another event')
+  assert.deepEqual(inbox.take(2, [{ kind: 'smash' }, null, 'x']), [], 'invalid events are skipped')
+  t = 10000
+  assert.equal(inbox.take(2, [ev]).length, 1)
+})
+
+test('events reach every other page once, through the host, and expire', async () => {
+  let t = 0
+  const now = () => t
+  const env = createHub()
+  const host = makePeer(env, { now })
+  const a = makePeer(env, { now })
+  const b = makePeer(env, { now })
+  host.mgr.startHost('EVT1', 'course', 'Host', 'Cutter')
+  await settle()
+  a.mgr.joinRoom('EVT1', 'A', 'Sloop')
+  b.mgr.joinRoom('EVT1', 'B', 'Schooner')
+  await settle()
+  const smash = { kind: 'smash', at: 12.5, pos: [10, 0, 20], obstacleId: 7, impactSpeed: 9, direction: [0, 0, 1] }
+  const bump = { kind: 'bump', at: 3, pos: [0, 0, 0], target: 3, impulse: [1, 0, 0], damage: 12 }
+  for (let i = 0; i < 10; i++) {
+    t += 50
+    host.mgr.sendTelemetry(telemetry(i))
+    a.mgr.sendTelemetry({ ...telemetry(i), events: i === 2 ? [smash] : undefined })
+    b.mgr.sendTelemetry(telemetry(i))
+    if (i === 4) host.mgr.sendEvents([bump])
+    await settle(2)
+  }
+  await settle()
+
+  const all = (peer) => peer.states.flatMap((s) => s.events)
+  // A's smash: once on the host and once on B, never back on A.
+  for (const peer of [host, b]) {
+    const got = all(peer).filter((e) => e.kind === 'smash')
+    assert.equal(got.length, 1)
+    assert.equal(got[0].slot, 2)
+    assert.equal(got[0].obstacleId, 7)
+    assert.deepEqual(got[0].pos, [10, 0, 20])
+    assert.equal(typeof got[0].id, 'string')
+  }
+  assert.equal(all(a).filter((e) => e.kind === 'smash').length, 0)
+  // The host's bump: once on A and once on B, never on the host.
+  for (const peer of [a, b]) {
+    const got = all(peer).filter((e) => e.kind === 'bump')
+    assert.equal(got.length, 1)
+    assert.equal(got[0].slot, 1)
+    assert.deepEqual(got[0].impulse, [1, 0, 0])
+  }
+  assert.equal(all(host).filter((e) => e.kind === 'bump').length, 0)
+  // A repeated its smash with each telemetry while it was current.
+  const fromA = env.hub.wire.filter((w) => w.from === 'v1' && w.msg.type === 'telemetry' && w.msg.events)
+  assert.ok(fromA.length > 1)
+  assert.ok(fromA.every((w) => w.msg.events.length === 1 && w.msg.events[0].obstacleId === 7))
+
+  // After 2 s nobody sends or relays them any more.
+  t += EVENT_TTL_MS
+  for (let i = 0; i < 3; i++) {
+    t += 50
+    host.mgr.sendTelemetry(telemetry(100 + i))
+    a.mgr.sendTelemetry(telemetry(100 + i))
+    await settle(2)
+  }
+  await settle()
+  const lastState = env.hub.wire.filter((w) => w.msg.type === 'room_state').at(-1).msg
+  assert.ok(lastState.players.every((p) => p.events.length === 0))
+  const lastFromA = env.hub.wire.filter((w) => w.from === 'v1' && w.msg.type === 'telemetry').at(-1).msg
+  assert.equal('events' in lastFromA, false)
+  assert.equal(all(b).filter((e) => e.kind === 'smash').length, 1)
+
+  host.mgr.cleanup()
+  a.mgr.cleanup()
+  b.mgr.cleanup()
+})
+
+test('a late repeat of an expired event is not applied again', async () => {
+  let t = 0
+  const env = createHub()
+  const host = makePeer(env, { now: () => t })
+  const a = makePeer(env, { now: () => t })
+  host.mgr.startHost('EVT2', 'course', 'Host', 'Cutter')
+  await settle()
+  a.mgr.joinRoom('EVT2', 'A', 'Sloop')
+  await settle()
+  const v = env.hub.viewers.get('v1')
+  const ev = { kind: 'smash', id: 'zz1', at: 1, pos: [0, 0, 0], obstacleId: 3 }
+  v.sendMessage({ type: 'telemetry', ...telemetry(1), events: [ev] })
+  await settle()
+  t += EVENT_TTL_MS + 100
+  // The sender's clock runs behind: it still repeats the event.
+  v.sendMessage({ type: 'telemetry', ...telemetry(2), events: [ev] })
+  await settle()
+  assert.equal(host.states.flatMap((s) => s.events).length, 1)
+  const last = env.hub.wire.filter((w) => w.msg.type === 'room_state').at(-1).msg
+  assert.deepEqual(last.players.find((p) => p.slot === 2).events, [])
+  host.mgr.cleanup()
+  a.mgr.cleanup()
 })

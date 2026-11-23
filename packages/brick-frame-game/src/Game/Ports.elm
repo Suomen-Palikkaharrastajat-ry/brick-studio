@@ -22,6 +22,7 @@ port module Game.Ports exposing
     , requestGeometryFlatten
     , requestTiltPermission
     , saveLeaderboard
+    , sendMultiplayerEvents
     , sendMultiplayerTelemetry
     , setAudioMuted
     , setMultiplayerVehicle
@@ -48,6 +49,7 @@ Port names are global, so `main.js` sees the same `app.ports` either way.
 -}
 
 import Json.Decode
+import Json.Encode
 
 
 {-| Request the browser file picker for `.ldr`, `.mpd`, `.dat`, or `.io`.
@@ -183,6 +185,14 @@ port sendMultiplayerTelemetry :
     , finished : Bool
     }
     -> Cmd msg
+
+
+{-| This player's new events (a smash, a bump), each made with
+`Game.Multiplayer.encodeEvent`. The runtime sends them with the next telemetry,
+and every other page in the room gets each one once, in its room state's
+`events`.
+-}
+port sendMultiplayerEvents : List Json.Encode.Value -> Cmd msg
 
 
 {-| Trigger the synchronized 3-second race countdown.

@@ -1,12 +1,14 @@
 module Game.Multiplayer exposing
     ( RemotePlayer
     , Role(..)
+    , RoomEvent
     , RoomState
     , RoomStatus(..)
     , SessionMode(..)
     , decodeRoomState
     , defaultCapacity
     , emptyRoomState
+    , encodeEvent
     , encodeTelemetry
     , roleFromString
     , roleToString
@@ -124,10 +126,30 @@ type alias RemotePlayer =
     }
 
 
+{-| Something another player's game told the room had happened, such as a
+smash or a bump: its `kind`, the sender's race time `at` and position, and the
+whole event as sent in `data`, for the game to read its own fields from.
+
+`runtime/multiplayer.js` hands each event to Elm once (it deduplicates by
+`slot` and `id`, and drops events older than two seconds), so a game applies
+the events of a room state as they come.
+
+-}
+type alias RoomEvent =
+    { slot : Int
+    , id : String
+    , kind : String
+    , at : Float
+    , position : Vec3
+    , data : Decode.Value
+    }
+
+
 {-| Synchronized room state received from `runtime/multiplayer.js`.
 
 `maxPlayers` is the room's capacity (2 to 8). Rooms from older hosts do not
-send it and hold `defaultCapacity` players.
+send it and hold `defaultCapacity` players. `events` are the other players'
+events this page has not seen before (see `RoomEvent`).
 
 -}
 type alias RoomState =
@@ -138,6 +160,7 @@ type alias RoomState =
     , countdown : Int
     , players : List RemotePlayer
     , maxPlayers : Int
+    , events : List RoomEvent
     }
 
 
@@ -209,6 +232,7 @@ emptyRoomState =
     , countdown = 3
     , players = []
     , maxPlayers = defaultCapacity
+    , events = []
     }
 
 
@@ -287,8 +311,8 @@ slotBorderClass slot =
 -}
 decodeRoomState : Decoder RoomState
 decodeRoomState =
-    Decode.map7
-        (\rId rStr slot sStr cd pls cap ->
+    Decode.map8
+        (\rId rStr slot sStr cd pls cap evs ->
             { roomId = rId
             , role = roleFromString rStr
             , mySlot = slot
@@ -296,6 +320,7 @@ decodeRoomState =
             , countdown = cd
             , players = pls
             , maxPlayers = cap
+            , events = evs
             }
         )
         (Decode.field "roomId" Decode.string)
@@ -305,6 +330,26 @@ decodeRoomState =
         (Decode.field "countdown" Decode.int)
         (Decode.field "players" (Decode.list decodePlayer))
         (optionalField "maxPlayers" Decode.int defaultCapacity)
+        (optionalField "events" decodeEvents [])
+
+
+{-| The room's events, skipping any this page cannot read.
+-}
+decodeEvents : Decoder (List RoomEvent)
+decodeEvents =
+    Decode.list Decode.value
+        |> Decode.map (List.filterMap (Decode.decodeValue decodeEvent >> Result.toMaybe))
+
+
+decodeEvent : Decoder RoomEvent
+decodeEvent =
+    Decode.map6 RoomEvent
+        (Decode.field "slot" Decode.int)
+        (Decode.field "id" (Decode.oneOf [ Decode.string, Decode.map String.fromFloat Decode.float ]))
+        (Decode.field "kind" Decode.string)
+        (optionalField "at" Decode.float 0.0)
+        (optionalField "pos" decodeVec3Tuple ( 0.0, 0.0, 0.0 ) |> Decode.map (\( x, y, z ) -> vec3 x y z))
+        Decode.value
 
 
 decodePlayer : Decoder RemotePlayer
@@ -370,6 +415,30 @@ decodeVec3Tuple =
                     _ ->
                         Decode.succeed ( 0.0, 0.0, 0.0 )
             )
+
+
+{-| Encode one of this player's events for `Game.Ports.sendMultiplayerEvents`:
+its `kind`, race time `at`, position and the game's own `fields`. The runtime
+gives it its `id` and sends it to the room with this player's telemetry.
+-}
+encodeEvent :
+    { kind : String
+    , at : Float
+    , position : Vec3
+    , fields : List ( String, Encode.Value )
+    }
+    -> Encode.Value
+encodeEvent ev =
+    let
+        p =
+            Math.Vector3.toRecord ev.position
+    in
+    Encode.object
+        (( "kind", Encode.string ev.kind )
+            :: ( "at", Encode.float ev.at )
+            :: ( "pos", Encode.list Encode.float [ p.x, p.y, p.z ] )
+            :: ev.fields
+        )
 
 
 {-| Encode outgoing player telemetry for transmission over WebRTC data channel.
