@@ -1,6 +1,6 @@
 module Game.BrickModels exposing
     ( ArchBrick, Turn(..), all, archBricks, singlePart
-    , leafyTree, pineTree, bush, fence, rock, signpost, hayBale, hayStack, cottage, barn
+    , leafyTree, pineTree, bush, fence, rock, signpost, hayBale, hayStack, cottage, barn, tireBarrier
     , buoy, beacon, floatingTarget, island, lighthouse, cannonball, splash
     )
 
@@ -22,7 +22,7 @@ Which side is the front: LDraw -Z, which is +Z once drawn (the doors of the
 cottage and the barn, the face of a sign). Fences run along Z.
 
 @docs ArchBrick, Turn, all, archBricks, singlePart
-@docs leafyTree, pineTree, bush, fence, rock, signpost, hayBale, hayStack, cottage, barn
+@docs leafyTree, pineTree, bush, fence, rock, signpost, hayBale, hayStack, cottage, barn, tireBarrier
 @docs buoy, beacon, floatingTarget, island, lighthouse, cannonball, splash
 
 -}
@@ -114,6 +114,7 @@ all =
     , ( "hayStack", hayStack )
     , ( "cottage", cottage )
     , ( "barn", barn )
+    , ( "tireBarrier", tireBarrier )
     , ( "buoy", buoy )
     , ( "beacon", beacon )
     , ( "floatingTarget", floatingTarget )
@@ -361,19 +362,35 @@ barn =
         )
 
 
+{-| A tire barrier for trackside runoffs: two racing tires on rims stacked
+together.
+-}
+tireBarrier : String
+tireBarrier =
+    model "Tire barrier"
+        [ part 0 ( 0, onLayer 0, 0 ) Straight "6015.dat"
+        , part white ( 0, onLayer 0, 0 ) Straight "6014b.dat"
+        , part 0 ( 0, onLayer 1, 0 ) Straight "6015.dat"
+        , part white ( 0, onLayer 1, 0 ) Straight "6014b.dat"
+        ]
+
+
 
 -- SEA
 
 
-{-| A buoy: a 2 x 2 round brick with a column of two 1 x 1 round bricks, the
-lower one white. The coloured parts take the buoy's colour.
+{-| A buoy: an inverted 2 x 2 dish hull, a 2 x 2 round brick, a column of two
+1 x 1 round bricks (the lower one white) and a cone lantern top. The coloured
+parts take the buoy's colour.
 -}
 buoy : String
 buoy =
     model "Buoy"
-        [ part 16 ( 0, onLayer 0, 0 ) Straight "3941.dat"
+        [ part 71 ( 0, 0, 0 ) Straight "4740.dat"
+        , part 16 ( 0, onLayer 0, 0 ) Straight "3941.dat"
         , part white ( 0, onLayer 1, 0 ) Straight "3062b.dat"
         , part 16 ( 0, onLayer 2, 0 ) Straight "3062b.dat"
+        , part 14 ( 0, onLayer 3, 0 ) Straight "4589.dat"
         ]
 
 
@@ -389,16 +406,19 @@ beacon =
         ]
 
 
-{-| A floating target: a raft of two brown 2 x 4 bricks with a red round
-tile and a white round tile on top.
+{-| A floating target: a raft of two reddish-brown 2 x 2 barrels, a dark tan
+plank deck, an upright bullseye target and a flag on a mast.
 -}
 floatingTarget : String
 floatingTarget =
     model "Floating target"
-        [ part reddishBrown ( 0, onLayer 0, -20 ) Straight "3001.dat"
-        , part reddishBrown ( 0, onLayer 0, 20 ) Straight "3001.dat"
-        , part red ( 0, -32, 0 ) Straight "14769.dat"
-        , part white ( 0, -40, 0 ) Straight "98138.dat"
+        [ part reddishBrown ( 0, onLayer 0, -20 ) Straight "2489.dat"
+        , part reddishBrown ( 0, onLayer 0, 20 ) Straight "2489.dat"
+        , part darkTan ( 0, onLayer 1, 0 ) Straight "3001.dat"
+        , part red ( -10, onLayer 2, 0 ) Straight "14769.dat"
+        , part white ( -10, onLayer 2 - 8, 0 ) Straight "98138.dat"
+        , part white ( 20, -60, 0 ) Straight "30374.dat"
+        , part 14 ( 20, -60, 0 ) Quarter "2335.dat"
         ]
 
 
