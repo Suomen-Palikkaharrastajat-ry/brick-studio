@@ -156,12 +156,21 @@ surfaceFragmentShader =
                 light *= mix(1.0, mix(0.68, 1.0, smoothstep(0.03, 0.1, edge)), tileFade);
             }
 
+            float wallFactor = 1.0 - upward;
+            if (wallFactor > 0.05) {
+                float brickH = 0.192;
+                float brickY = mod(v_worldPos.y, brickH) / brickH;
+                float mortar = smoothstep(0.04, 0.08, brickY) * (1.0 - smoothstep(0.92, 0.96, brickY));
+                light *= mix(1.0, 0.78 + 0.22 * mortar, wallFactor);
+            }
+
             vec3 viewDir = normalize(u_eyePos - v_worldPos);
             float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
             vec3 amb = mix(u_groundAmbient, u_skyAmbient, hemi) * 0.44;
             float diff = max(dot(n, sun), 0.0) * 0.72;
             vec3 halfDir = normalize(sun + viewDir);
-            float spec = pow(max(dot(n, halfDir), 0.0), 24.0 + 176.0 * u_gloss) * (0.08 + 0.5 * u_gloss);
+            float ndoth = max(dot(n, halfDir), 0.0);
+            float spec = pow(ndoth, 96.0) * 0.35 + pow(ndoth, 16.0) * 0.15;
             vec3 lit = col * (amb + vec3(0.32 + diff)) * light + vec3(highlight + spec);
 
             float fresnel = u_gloss * pow(1.0 - max(dot(n, viewDir), 0.0), 4.0);
