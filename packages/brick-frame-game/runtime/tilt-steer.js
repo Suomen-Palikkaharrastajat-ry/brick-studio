@@ -9,11 +9,13 @@
 //   "straight ahead". Rotating the screen re-calibrates.
 // - Dead zone of a few degrees, full helm at about 22 degrees.
 // - On by default on phones (`(pointer: coarse)`), off elsewhere.
+// - `forceOnPhones`: phones always steer by tilt; no toggle is needed.
 // - On/off toggle: any element with `data-tilt-toggle`. The choice is saved
 //   in localStorage under the game's `storageKey` and overrides the default.
-//   On iOS the permission prompt must run inside a tap,
-//   so the toggle and the start button (`data-tilt-start`) are handled here,
-//   in the click itself, not through an Elm command.
+//   On iOS the permission prompt must run inside a tap, so the toggle is
+//   handled here, in the click itself, not through an Elm command. While
+//   tilt is wanted but not yet listening, the next tap anywhere (the race
+//   start button included) asks for the permission.
 // - If permission is denied or no sensor exists, tilt quietly switches off
 //   and the on-screen buttons keep working.
 //
@@ -69,7 +71,7 @@ export function steerFromAngle(angleDeg, neutralDeg) {
  * `storageKey` is the localStorage key that remembers the player's choice
  * (`'tilt'` or `'touch'`), e.g. `'sails.steerMode'`.
  */
-export function setupTiltSteer(ports, { storageKey } = {}) {
+export function setupTiltSteer(ports, { storageKey, forceOnPhones = false } = {}) {
   const hasApi = typeof window !== 'undefined' && 'DeviceOrientationEvent' in window
   const hasTouch =
     (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0) ||
@@ -78,8 +80,13 @@ export function setupTiltSteer(ports, { storageKey } = {}) {
   const needsPermission =
     hasApi && typeof window.DeviceOrientationEvent.requestPermission === 'function'
 
-  let enabled = available && readMode(storageKey)
+  // `forceOnPhones`: on phones tilt is always on (the saved choice is ignored)
+  // and there is no toggle. Only when permission is denied or no sensor
+  // reports does tilt switch off, and then the on-screen buttons take over.
+  const forced = forceOnPhones && defaultTiltOn()
+  let enabled = available && (forced || readMode(storageKey))
   let permitted = !needsPermission
+  let requesting = false
   let listening = false
   let lastAngle = null
   let neutral = null
@@ -128,15 +135,19 @@ export function setupTiltSteer(ports, { storageKey } = {}) {
       sendStatus()
       return
     }
+    if (requesting) return
+    requesting = true
     let request
     try {
       request = window.DeviceOrientationEvent.requestPermission()
     } catch {
+      requesting = false
       turnOff()
       return
     }
     Promise.resolve(request)
       .then((result) => {
+        requesting = false
         if (result === 'granted') {
           permitted = true
           enabled = true
@@ -148,7 +159,10 @@ export function setupTiltSteer(ports, { storageKey } = {}) {
           turnOff()
         }
       })
-      .catch(turnOff)
+      .catch(() => {
+        requesting = false
+        turnOff()
+      })
   }
 
   document.addEventListener(
@@ -162,7 +176,11 @@ export function setupTiltSteer(ports, { storageKey } = {}) {
         } else {
           enable()
         }
-      } else if (target.closest('[data-tilt-start]') && enabled && !listening) {
+      } else if (enabled && !listening) {
+        // Tilt is wanted but the sensor is not listening yet (iOS: the
+        // permission has not been granted). Any tap, the race start button
+        // included, asks for it, so the player never has to toggle tilt off
+        // and on again. `enable` runs synchronously inside this tap.
         enable()
       }
     },
