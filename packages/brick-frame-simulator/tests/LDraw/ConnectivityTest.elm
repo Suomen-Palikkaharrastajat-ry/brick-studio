@@ -4434,4 +4434,36 @@ microscaleCatalogTests =
                         |> Maybe.map (.connections >> List.filter (\c -> c.connType == ClipMale { width = 4.0 }) >> List.map (\c -> abs (Vec3.getY c.normal) < 0.3))
                         |> Expect.equal (Just [ True ])
             ]
+        , describe "microscale bar and clip connectors"
+            [ test "32828 (plate 1x1 round with bar handle) has BarFemale connection on handle" <|
+                \_ ->
+                    knownCatalogPart "32828.dat"
+                        |> Maybe.map (.connections >> List.filter (\c -> c.connType == BarFemale { diameter = 4.0 }))
+                        |> Maybe.map List.length
+                        |> Expect.equal (Just 1)
+            , test "15712 (tile 1x1 with clip) has ClipMale connection" <|
+                \_ ->
+                    knownCatalogPart "15712.dat"
+                        |> Maybe.map (.connections >> List.filter (\c -> c.connType == ClipMale { width = 4.0 }))
+                        |> Maybe.map List.length
+                        |> Expect.equal (Just 1)
+            , test "15712 clip can connect to 32828 bar handle" <|
+                \_ ->
+                    let
+                        clip =
+                            knownCatalogPart "15712.dat"
+                                |> Maybe.andThen (.connections >> List.filter (\c -> c.connType == ClipMale { width = 4.0 }) >> List.head)
+
+                        bar =
+                            knownCatalogPart "32828.dat"
+                                |> Maybe.andThen (.connections >> List.filter (\c -> c.connType == BarFemale { diameter = 4.0 }) >> List.head)
+                    in
+                    case ( clip, bar ) of
+                        ( Just c, Just b ) ->
+                            Connectivity.isCompatible c.connType b.connType
+                                |> Expect.equal True
+
+                        _ ->
+                            Expect.fail "Missing clip or bar connection point"
+            ]
         ]

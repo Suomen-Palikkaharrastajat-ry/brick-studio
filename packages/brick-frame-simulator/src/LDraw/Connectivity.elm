@@ -866,6 +866,12 @@ isBidirectionalAxis conn =
         TechnicPinFemale _ ->
             True
 
+        ClipMale _ ->
+            True
+
+        BarFemale _ ->
+            True
+
         WheelRim _ ->
             True
 
@@ -1980,7 +1986,7 @@ knownCatalogPart name =
 
         "32828" ->
             -- Plate 1 x 1 Round with Horizontal 3.2 Shaft / Bar 1L with Hollow Stud
-            Just (makeBrick 1 1 8 "32828.dat")
+            Just (withConnections [ barAt 20 (vec3 24 2 0) (vec3 1 0 0) ] (makeBrick 1 1 8 "32828.dat"))
 
         "3062" ->
             -- Brick 1 x 1 Round
@@ -3782,6 +3788,14 @@ and a bar's normal runs along the bar, so this seats the bar inside the clip.
 clipAt : Int -> Vec3 -> Vec3 -> ConnectionPoint
 clipAt id position barAxis =
     technicAt id (ClipMale { width = 4.0 }) position barAxis
+
+
+{-| A bar connection point (`BarFemale`, 4 LDU diameter) at `position` with its
+axis along `barAxis`.
+-}
+barAt : Int -> Vec3 -> Vec3 -> ConnectionPoint
+barAt id position barAxis =
+    technicAt id (BarFemale { diameter = 4.0 }) position barAxis
 
 
 {-| A connection point with an explicit type, position and normal; the tangent
