@@ -97,7 +97,7 @@ view config =
     in
     div []
         [ row labels.biome
-            (anyChip config.onBiome (selection.biome == Any) labels.any
+            (anyChip (config.onBiome Any) (selection.biome == Any) labels.any
                 :: List.map
                     (\b ->
                         chip (selection.biome == Exactly b) False (config.onBiome (Exactly b)) (labels.biomeName b)
@@ -105,7 +105,7 @@ view config =
                     Map.allBiomes
             )
         , row labels.season
-            (anyChip config.onSeason (selection.season == Any) labels.any
+            (anyChip (config.onSeason Any) (selection.season == Any) labels.any
                 :: List.map
                     (\s ->
                         chip (selection.season == Exactly s) False (config.onSeason (Exactly s)) (labels.seasonName s)
@@ -113,7 +113,7 @@ view config =
                     Map.allSeasons
             )
         , row labels.weather
-            (anyChip config.onWeather (selection.weather == Any) labels.any
+            (anyChip (config.onWeather Any) (selection.weather == Any) labels.any
                 :: List.map
                     (\w ->
                         chip
