@@ -1,7 +1,7 @@
 module Game.BrickModels exposing
     ( ArchBrick, Turn(..), all, archBricks, singlePart
     , leafyTree, pineTree, bush, fence, rock, signpost, hayBale, hayStack, cottage, barn, tireBarrier
-    , buoy, beacon, floatingTarget, island, lighthouse, cannonball, splash
+    , buoy, beacon, floatingTarget, island, lighthouse, cannonball, splash, palmTree
     )
 
 {-| The props of the Brick Frame games, as LDraw models built from parts of
@@ -23,7 +23,7 @@ cottage and the barn, the face of a sign). Fences run along Z.
 
 @docs ArchBrick, Turn, all, archBricks, singlePart
 @docs leafyTree, pineTree, bush, fence, rock, signpost, hayBale, hayStack, cottage, barn, tireBarrier
-@docs buoy, beacon, floatingTarget, island, lighthouse, cannonball, splash
+@docs buoy, beacon, floatingTarget, island, lighthouse, cannonball, splash, palmTree
 
 -}
 
@@ -100,6 +100,78 @@ singlePart file =
     model ("Single " ++ file) [ part 16 ( 0, 0, 0 ) Straight file ]
 
 
+{-| Matrices of a part placed without a quarter turn: upright, half turned,
+and lying along Z (the palm's trunk and fronds use these and tilted ones).
+-}
+uprightM : String
+uprightM =
+    "1 0 0 0 1 0 0 0 1"
+
+
+turnedM : String
+turnedM =
+    "-1 0 0 0 1 0 0 0 -1"
+
+
+alongZM : String
+alongZM =
+    "0 0 1 0 1 0 -1 0 0"
+
+
+{-| One type-1 line with a raw matrix, for parts that are not quarter turns.
+-}
+placed : Int -> ( Float, Float, Float ) -> String -> String -> String
+placed colour ( x, y, z ) matrix file =
+    String.join " "
+        [ "1"
+        , String.fromInt colour
+        , String.fromFloat x
+        , String.fromFloat y
+        , String.fromFloat z
+        , matrix
+        , file
+        ]
+
+
+{-| A palm tree: a leaning trunk of reddish-brown 1 x 1 bricks, coconuts of
+dark tan round bricks under the crown, and eight green 2 x 2 slopes drooping
+out from a green plate as the fronds.
+-}
+palmTree : String
+palmTree =
+    let
+        crownX =
+            18
+
+        frond colour ( x, y, z ) matrix =
+            placed colour ( crownX + x, y, z ) matrix "3039.dat"
+    in
+    model "Palm tree"
+        [ "0 // Trunk"
+        , placed 70 ( 0, -24, 0 ) uprightM "3005.dat"
+        , placed 70 ( 0, -48, 0 ) uprightM "3005.dat"
+        , placed 70 ( 3, -72, 0 ) uprightM "3005.dat"
+        , placed 70 ( 7, -96, 0 ) uprightM "3005.dat"
+        , placed 70 ( 12, -120, 0 ) uprightM "3005.dat"
+        , placed 70 ( crownX, -144, 0 ) uprightM "3005.dat"
+        , "0 // Coconuts"
+        , placed 28 ( crownX, -128, -20 ) uprightM "3062b.dat"
+        , placed 28 ( crownX + 20, -128, 0 ) uprightM "3062b.dat"
+        , placed 28 ( crownX - 20, -128, 0 ) uprightM "3062b.dat"
+        , "0 // Crown and fronds"
+        , placed 2 ( crownX, -152, 0 ) uprightM "3022.dat"
+        , frond 2 ( 0, -152, -40 ) uprightM
+        , frond 2 ( 0, -152, 40 ) turnedM
+        , frond 2 ( -40, -152, 0 ) alongZM
+        , frond 2 ( 40, -152, 0 ) "0 0 -1 0 1 0 1 0 0"
+        , frond 10 ( -28, -144, -28 ) "0.7071 0 0.7071 0 1 0 -0.7071 0 0.7071"
+        , frond 10 ( -28, -144, 28 ) "-0.7071 0 0.7071 0 1 0 -0.7071 0 -0.7071"
+        , frond 10 ( 28, -144, -28 ) "0.7071 0 -0.7071 0 1 0 0.7071 0 0.7071"
+        , frond 10 ( 28, -144, 28 ) "-0.7071 0 -0.7071 0 1 0 0.7071 0 -0.7071"
+        , placed 10 ( crownX, -160, 0 ) uprightM "3024.dat"
+        ]
+
+
 {-| Every model with its name, for loading them all and for the tests.
 -}
 all : List ( String, String )
@@ -122,6 +194,7 @@ all =
     , ( "lighthouse", lighthouse )
     , ( "cannonball", cannonball )
     , ( "splash", splash )
+    , ( "palmTree", palmTree )
     ]
 
 
