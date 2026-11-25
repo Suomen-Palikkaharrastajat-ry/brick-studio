@@ -1,6 +1,6 @@
 module Game.BrickModels exposing
     ( ArchBrick, Turn(..), all, archBricks, singlePart
-    , leafyTree, pineTree, bush, fence, rock, signpost, hayBale, hayStack, cottage, barn, tireBarrier
+    , leafyTree, leafyTreeIn, pineTree, pineTreeIn, bush, fence, rock, signpost, hayBale, hayStack, cottage, barn, tireBarrier
     , buoy, beacon, floatingTarget, island, lighthouse, cannonball, splash, palmTree
     )
 
@@ -22,7 +22,7 @@ Which side is the front: LDraw -Z, which is +Z once drawn (the doors of the
 cottage and the barn, the face of a sign). Fences run along Z.
 
 @docs ArchBrick, Turn, all, archBricks, singlePart
-@docs leafyTree, pineTree, bush, fence, rock, signpost, hayBale, hayStack, cottage, barn, tireBarrier
+@docs leafyTree, leafyTreeIn, pineTree, pineTreeIn, bush, fence, rock, signpost, hayBale, hayStack, cottage, barn, tireBarrier
 @docs buoy, beacon, floatingTarget, island, lighthouse, cannonball, splash, palmTree
 
 -}
@@ -177,7 +177,9 @@ palmTree =
 all : List ( String, String )
 all =
     [ ( "leafyTree", leafyTree )
+    , ( "autumnLeafyTree", leafyTreeIn { leaves = darkOrange } )
     , ( "pineTree", pineTree )
+    , ( "snowyPineTree", pineTreeIn { needles = darkGreen, cap = Just white } )
     , ( "bush", bush )
     , ( "fence", fence )
     , ( "rock", rock )
@@ -222,6 +224,11 @@ darkGreen =
     288
 
 
+darkOrange : Int
+darkOrange =
+    484
+
+
 tan : Int
 tan =
     19
@@ -257,27 +264,63 @@ lightBluishGrey =
 
 
 {-| A leafy tree: a trunk of three 1 x 1 bricks under a crown of 1 x 4 bricks
-laid crosswise, topped with a 2 x 2 brick.
+laid crosswise, topped with a 2 x 2 brick. The summer tree, in green leaves
+(`leafyTreeIn { leaves = 2 }`).
 -}
 leafyTree : String
 leafyTree =
+    leafyTreeIn { leaves = green }
+
+
+{-| The leafy tree with its crown in another colour, such as dark orange
+(484) for autumn. The 2 x 4 brick in the crown is bright green on a green
+tree and the leaf colour on any other.
+-}
+leafyTreeIn : { leaves : Int } -> String
+leafyTreeIn { leaves } =
+    let
+        accent =
+            if leaves == green then
+                brightGreen
+
+            else
+                leaves
+    in
     model "Leafy tree"
         (List.map (\layer -> part reddishBrown ( 0, onLayer layer, 0 ) Straight "3005.dat") [ 0, 1, 2 ]
-            ++ List.map (\z -> part green ( 0, onLayer 3, z ) Straight "3010.dat") [ -30, -10, 10, 30 ]
-            ++ List.map (\x -> part green ( x, onLayer 4, 0 ) Quarter "3010.dat") [ -30, -10, 10, 30 ]
-            ++ [ part brightGreen ( 0, onLayer 5, 0 ) Straight "3001.dat"
-               , part green ( 0, onLayer 6, 0 ) Straight "3003.dat"
+            ++ List.map (\z -> part leaves ( 0, onLayer 3, z ) Straight "3010.dat") [ -30, -10, 10, 30 ]
+            ++ List.map (\x -> part leaves ( x, onLayer 4, 0 ) Quarter "3010.dat") [ -30, -10, 10, 30 ]
+            ++ [ part accent ( 0, onLayer 5, 0 ) Straight "3001.dat"
+               , part leaves ( 0, onLayer 6, 0 ) Straight "3003.dat"
                ]
         )
 
 
-{-| A pine tree: the catalog's large pine.
+{-| A pine tree: the catalog's large pine, in dark green
+(`pineTreeIn { needles = 288, cap = Nothing }`).
 -}
 pineTree : String
 pineTree =
+    pineTreeIn { needles = darkGreen, cap = Nothing }
+
+
+{-| The pine in other colours. `cap = Just colour` puts a 2 x 2 x 2 cone in
+that colour over the top tier, such as white (15) for snow in winter: the
+cone's foot sits 112 LDU up the 136 LDU pine and its tip 24 LDU above the
+pine's, so the snow covers the top of the tree.
+-}
+pineTreeIn : { needles : Int, cap : Maybe Int } -> String
+pineTreeIn { needles, cap } =
     model "Pine tree"
-        [ part darkGreen ( 0, 0, 0 ) Straight "3471.dat"
-        ]
+        (part needles ( 0, 0, 0 ) Straight "3471.dat"
+            :: (case cap of
+                    Just colour ->
+                        [ part colour ( 0, -160, 0 ) Straight "3942c.dat" ]
+
+                    Nothing ->
+                        []
+               )
+        )
 
 
 {-| A bush: a 2 x 4 brick with a 1 x 2 brick and a flower on top.

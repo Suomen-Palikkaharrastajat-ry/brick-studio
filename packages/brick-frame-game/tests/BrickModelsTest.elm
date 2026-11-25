@@ -40,6 +40,20 @@ partsOf ldraw =
             )
 
 
+colouredPartsOf : String -> List ( Int, String )
+colouredPartsOf ldraw =
+    Parser.parseFile ldraw
+        |> List.filterMap
+            (\line ->
+                case line of
+                    SubFileRef ref ->
+                        Just ( ref.color, ref.file )
+
+                    _ ->
+                        Nothing
+            )
+
+
 {-| A stand-in part: one triangle spanning a 40 x 24 x 20 LDU box.
 -}
 fakeBrick : List LDrawLine
@@ -67,6 +81,22 @@ suite =
                 )
                 BrickModels.all
             )
+        , test "the summer trees are the green variants" <|
+            \_ ->
+                Expect.equal
+                    ( BrickModels.leafyTreeIn { leaves = 2 }, BrickModels.pineTreeIn { needles = 288, cap = Nothing } )
+                    ( BrickModels.leafyTree, BrickModels.pineTree )
+        , test "an autumn leafy tree has no green left in its crown" <|
+            \_ ->
+                colouredPartsOf (BrickModels.leafyTreeIn { leaves = 484 })
+                    |> List.map Tuple.first
+                    |> List.filter (\c -> c == 2 || c == 10)
+                    |> Expect.equal []
+        , test "a snow cap adds one cone in the cap colour on top of the pine" <|
+            \_ ->
+                Expect.equal
+                    [ ( 288, "3471.dat" ), ( 15, "3942c.dat" ) ]
+                    (colouredPartsOf (BrickModels.pineTreeIn { needles = 288, cap = Just 15 }))
         , test "a single-part model takes the tint" <|
             \_ ->
                 BrickModels.singlePart "3001.dat"
