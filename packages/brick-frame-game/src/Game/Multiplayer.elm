@@ -154,6 +154,7 @@ events this page has not seen before (see `RoomEvent`).
 -}
 type alias RoomState =
     { roomId : String
+    , courseId : String
     , role : Role
     , mySlot : Int
     , status : RoomStatus
@@ -226,6 +227,7 @@ defaultCapacity =
 emptyRoomState : RoomState
 emptyRoomState =
     { roomId = ""
+    , courseId = ""
     , role = JoinedPlayer
     , mySlot = 1
     , status = Lobby
@@ -311,9 +313,20 @@ slotBorderClass slot =
 -}
 decodeRoomState : Decoder RoomState
 decodeRoomState =
+    Decode.map2
+        (\room course -> { room | courseId = course })
+        decodeRoomCore
+        (optionalField "courseId" Decode.string "")
+
+
+{-| The room's fields without its course, which `decodeRoomState` adds.
+-}
+decodeRoomCore : Decoder RoomState
+decodeRoomCore =
     Decode.map8
         (\rId rStr slot sStr cd pls cap evs ->
             { roomId = rId
+            , courseId = ""
             , role = roleFromString rStr
             , mySlot = slot
             , status = statusFromString sStr cd

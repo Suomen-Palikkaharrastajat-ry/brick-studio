@@ -185,6 +185,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
   let viewer = null
   let role = null // 'host' | 'player'
   let roomId = null
+  let roomCourseId = ''
   let lastRoomId = ''
   let mySlot = 1
   let roomCapacity = DEFAULT_CAPACITY
@@ -369,6 +370,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     return {
       type: 'room_state',
       roomId,
+      courseId: roomCourseId,
       status: roomStatus,
       countdown: countdownSeconds,
       maxPlayers: roomCapacity,
@@ -412,6 +414,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
 
     ports.multiplayerRoomStateChanged.send({
       roomId: roomId || '',
+      courseId: roomCourseId,
       role: role || '',
       mySlot: mySlot,
       status: roomStatus,
@@ -440,6 +443,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     const mySession = session
     role = 'host'
     roomId = requestedRoomId || randomRoomId(6)
+    roomCourseId = typeof courseId === 'string' ? courseId : ''
     lastRoomId = roomId
     roomCapacity = clampCapacity(capacity ?? DEFAULT_CAPACITY)
     mySlot = 1
@@ -667,6 +671,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
 
     if (msg.type !== 'room_state') return
     const mySession = session
+    if (typeof msg.courseId === 'string') roomCourseId = msg.courseId
     if (msg.assignedSlot && msg.targetViewerId) {
       mySlot = msg.assignedSlot
     }
@@ -843,6 +848,7 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     eventPrefix = ''
     role = null
     roomId = null
+    roomCourseId = ''
     roomStatus = 'lobby'
   }
 
