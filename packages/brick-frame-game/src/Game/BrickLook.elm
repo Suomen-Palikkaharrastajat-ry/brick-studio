@@ -141,8 +141,9 @@ surfaceFragmentShader =
                 float shadow = (1.0 - smoothstep(0.27, 0.33, length(c + sunXZ * 0.14))) * (1.0 - top);
                 float rim = smoothstep(0.17, 0.29, d) * top;
                 float towards = dot(c / max(d, 0.001), sunXZ);
+                float rimKick = max(0.0, towards);
                 light *= 1.0 - 0.28 * shadow * studFade;
-                highlight = top * (0.05 + 0.16 * rim * towards) * studFade;
+                highlight = top * (0.05 + 0.22 * rim * rimKick) * studFade;
                 light *= 1.0 - 0.18 * smoothstep(0.26, 0.3, d) * (1.0 - smoothstep(0.3, 0.34, d)) * studFade;
             } else {
                 // 2 x 4 tiles in running bond.
