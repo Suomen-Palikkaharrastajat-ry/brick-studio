@@ -6,6 +6,7 @@ module Game.Multiplayer exposing
     , RoomStatus(..)
     , SessionMode(..)
     , decodeRoomState
+    , decodeRoomUpdate
     , defaultCapacity
     , emptyRoomState
     , encodeEvent
@@ -307,6 +308,26 @@ slotBorderClass slot =
 
         _ ->
             "border-slate-500"
+
+
+{-| A `multiplayerRoomStateChanged` message: `Just` the room this page is
+in, or `Nothing` when it is in none. `runtime/multiplayer.js` sends a room
+state with an empty room id and role after `leaveMultiplayerRoom`;
+`decodeRoomState` reads that as a joined room with code "", so a game that
+takes it for one shows a room the player has just left, whose Leave button only
+brings the same message back.
+-}
+decodeRoomUpdate : Decoder (Maybe RoomState)
+decodeRoomUpdate =
+    decodeRoomState
+        |> Decode.map
+            (\room ->
+                if String.isEmpty (String.trim room.roomId) then
+                    Nothing
+
+                else
+                    Just room
+            )
 
 
 {-| JSON Decoder for synchronized RoomState from JS port.

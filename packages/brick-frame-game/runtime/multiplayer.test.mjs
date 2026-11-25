@@ -475,3 +475,26 @@ test('a late repeat of an expired event is not applied again', async () => {
   host.mgr.cleanup()
   a.mgr.cleanup()
 })
+
+test('leaving a room tells Elm it is in no room, and a host start that ends late says nothing', async () => {
+  const env = createHub()
+  let resolveStart
+  class SlowBroadcaster extends env.FakeBroadcaster {
+    start() {
+      return new Promise((resolve) => { resolveStart = resolve })
+    }
+  }
+  const p = fakePorts()
+  let leave = null
+  p.ports.leaveMultiplayerRoom = { subscribe: (fn) => { leave = fn } }
+  const mgr = createMultiplayerManager(p.ports, 'http://signalling.invalid', { Broadcaster: SlowBroadcaster, Viewer: env.FakeViewer })
+  mgr.startHost('ROOM7', 'quarry', 'Host', '', 2)
+  await settle()
+  p.states.length = 0
+  leave()
+  assert.deepEqual(p.states.map((s) => [s.roomId, s.role]), [['', '']])
+  // The signalling start of the room just left resolves now: no room state for it.
+  resolveStart()
+  await settle()
+  assert.deepEqual(p.states.map((s) => [s.roomId, s.role]), [['', '']])
+})
