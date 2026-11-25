@@ -133,7 +133,20 @@ suite =
                             List.range 1 40
                                 |> List.map (\seed -> (Map.resolve { anyWith | seed = seed }).biome)
                     in
-                    Expect.greaterThan 1 (List.length (List.foldl (\b acc -> if List.member b acc then acc else b :: acc) [] biomes))
+                    Expect.greaterThan 1
+                        (List.length
+                            (List.foldl
+                                (\b acc ->
+                                    if List.member b acc then
+                                        acc
+
+                                    else
+                                        b :: acc
+                                )
+                                []
+                                biomes
+                            )
+                        )
             , test "every resolved Any map is allowed" <|
                 \_ ->
                     Expect.equal []
