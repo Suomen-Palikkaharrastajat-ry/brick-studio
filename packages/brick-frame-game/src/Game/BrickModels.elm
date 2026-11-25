@@ -198,13 +198,12 @@ leafyTree =
         )
 
 
-{-| A pine tree: the catalog's large pine on a 1 x 1 brick trunk.
+{-| A pine tree: the catalog's large pine.
 -}
 pineTree : String
 pineTree =
     model "Pine tree"
-        [ part reddishBrown ( 0, onLayer 0, 0 ) Straight "3005.dat"
-        , part darkGreen ( 0, -32, 0 ) Straight "3471.dat"
+        [ part darkGreen ( 0, 0, 0 ) Straight "3471.dat"
         ]
 
 
