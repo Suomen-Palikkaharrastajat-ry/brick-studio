@@ -363,6 +363,20 @@ skyFragmentShader =
                 }
             }
 
+            // High cirrus brick tile streaks drifting across the upper sky.
+            if (el > 0.38 && el < 0.7) {
+                float hx = mod((atan(dir.z, dir.x) / 6.28318 + 0.5) * 120.0 + u_time * 0.18, 120.0);
+                float hSlot = floor(hx / 20.0);
+                if (hash(vec2(hSlot, 8.4)) < 0.65) {
+                    float hy = (el - 0.48) / 0.024;
+                    if (abs(hy) < 1.0) {
+                        float hFade = smoothstep(0.38, 0.44, el) * (1.0 - smoothstep(0.62, 0.7, el));
+                        float streak = (1.0 - abs(hy)) * smoothstep(7.0, 3.0, abs(fract(hx / 20.0) * 20.0 - 10.0));
+                        col = mix(col, vec3(0.96, 0.98, 1.0), streak * hFade * 0.35);
+                    }
+                }
+            }
+
             gl_FragColor = vec4(col, 1.0);
         }
     |]
