@@ -174,6 +174,18 @@ suite =
 
                         Err err ->
                             Expect.fail (Decode.errorToString err)
+            , test "the state sent after leaving a room is no room" <|
+                \_ ->
+                    -- What runtime/multiplayer.js sends after leaveMultiplayerRoom.
+                    Decode.decodeString Multiplayer.decodeRoomUpdate
+                        """{"roomId":"","role":"","mySlot":1,"status":"lobby","countdown":3,"maxPlayers":4,"players":[],"events":[]}"""
+                        |> Expect.equal (Ok Nothing)
+            , test "a room update with a room code is that room" <|
+                \_ ->
+                    Decode.decodeString Multiplayer.decodeRoomUpdate
+                        """{"roomId":"RACE99","role":"host","mySlot":1,"status":"lobby","countdown":3,"players":[]}"""
+                        |> Result.map (Maybe.map (\st -> ( st.roomId, st.role )))
+                        |> Expect.equal (Ok (Just ( "RACE99", HostCommentator )))
             , test "decodes vehicle ids and flags" <|
                 \_ ->
                     let

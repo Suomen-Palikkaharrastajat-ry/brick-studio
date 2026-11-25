@@ -484,8 +484,12 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     })
 
     broadcaster.start().then(() => {
+      // Left (or hosting another room) before signalling was up: say nothing,
+      // or Elm would hear of a room it is no longer in.
+      if (session !== mySession) return
       emitRoomState()
     }).catch((err) => {
+      if (session !== mySession) return
       reportError(err?.message || 'Could not start host session')
     })
   }
@@ -880,6 +884,10 @@ export function createMultiplayerManager(ports, signalingUrl = DEFAULT_SIGNALING
     startCountdown()
   })
 
+  // Tells Elm the page is in no room: a room state with an empty room id and
+  // role. Read it with `Game.Multiplayer.decodeRoomUpdate` (`Nothing`), not as
+  // a room, or the menu shows a room with no code whose Leave only sends this
+  // again.
   ports?.leaveMultiplayerRoom?.subscribe(() => {
     cleanup()
     emitRoomState()
