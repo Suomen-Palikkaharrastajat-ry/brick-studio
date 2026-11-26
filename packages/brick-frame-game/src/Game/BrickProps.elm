@@ -3,6 +3,9 @@ module Game.BrickProps exposing
     , View
     , arePartsBfcCertified
     , build
+    , buildStatic
+    , buildWith
+    , defaultDetailOptions
     , draw
     , fitBox
     , fitHeight
@@ -10,6 +13,7 @@ module Game.BrickProps exposing
     , fitWidth
     , progress
     , refresh
+    , refreshWith
     , size
     , surfaceSettings
     )
@@ -69,13 +73,35 @@ progress ldraw cache =
     PartLoading.progress (Resolve.pendingParts (Parser.parseFile ldraw) Dict.empty) Document.empty cache
 
 
+{-| Default geometry detail for prop models: Y-up conversion, colour-16 tint
+tracking, full studs, underside hollows, edge lines, and no conditional lines.
+-}
+defaultDetailOptions : Geometry.DetailOptions
+defaultDetailOptions =
+    { flipYZ = True
+    , trackInherit = True
+    , studs = Geometry.FullStuds
+    , includeHollows = True
+    , includeLines = True
+    , includeConditionals = False
+    }
+
+
 {-| Build every model of `sources` (name, LDraw text) that is not built yet
 and whose parts have all arrived, and list the part files the others still
 need. The returned cache has those marked as loading: fetch them with
 `Game.PartLoading.fetchParts` and call this again after each one arrives.
 -}
 refresh : List ( String, String ) -> PartCache -> Dict String PropModel -> { props : Dict String PropModel, cache : PartCache, fetch : List String }
-refresh sources cache props =
+refresh =
+    refreshWith (always defaultDetailOptions)
+
+
+{-| Like `refresh`, selecting custom `LDraw.Geometry.DetailOptions` per prop
+name (for instance omitting studs and edge lines on distant terrain props).
+-}
+refreshWith : (String -> Geometry.DetailOptions) -> List ( String, String ) -> PartCache -> Dict String PropModel -> { props : Dict String PropModel, cache : PartCache, fetch : List String }
+refreshWith optionsFor sources cache props =
     let
         states =
             sources
@@ -86,7 +112,7 @@ refresh sources cache props =
             List.foldl
                 (\( name, ldraw, p ) acc ->
                     if List.isEmpty p.needed && p.inFlight == 0 then
-                        Dict.insert name (build ldraw cache) acc
+                        Dict.insert name (buildWith (optionsFor name) ldraw cache) acc
 
                     else
                         acc
@@ -105,17 +131,43 @@ refresh sources cache props =
     }
 
 
-{-| Flatten a model whose parts are all in the cache. Missing parts are
-skipped, as everywhere in the brick pipeline.
+{-| Flatten a model whose parts are all in the cache using full detail. Missing
+parts are skipped, as everywhere in the brick pipeline.
 -}
 build : String -> PartCache -> PropModel
-build ldraw cache =
+build =
+    buildWith defaultDetailOptions
+
+
+{-| Convenience wrapper around `buildWith` for static props whose undersides
+are hidden (`includeHollows = False`, `includeConditionals = False`), keeping
+Y-up conversion and colour-16 tint tracking enabled while controlling stud
+detail and edge lines.
+-}
+buildStatic : Geometry.StudDetail -> Bool -> String -> PartCache -> PropModel
+buildStatic studs includeLines =
+    buildWith
+        { flipYZ = True
+        , trackInherit = True
+        , studs = studs
+        , includeHollows = False
+        , includeLines = includeLines
+        , includeConditionals = False
+        }
+
+
+{-| Flatten a model whose parts are all in the cache using explicit
+`LDraw.Geometry.DetailOptions`. When `options.includeLines` is `False`, uses
+`Render.Scene.buildStaticScene` to skip edge mesh construction.
+-}
+buildWith : Geometry.DetailOptions -> String -> PartCache -> PropModel
+buildWith options ldraw cache =
     let
         parsed =
             Parser.parseFile ldraw
 
         geom =
-            Geometry.flattenWith { flipYZ = True, trackInherit = True } parsed cache 16 Mat4.identity
+            Geometry.flattenWithDetail options parsed cache 16 Mat4.identity
 
         bfcCertified =
             fileBfcCertified parsed
@@ -145,14 +197,20 @@ build ldraw cache =
 
             else
                 ( vec3 b.minX b.minY b.minZ, vec3 b.maxX b.maxY b.maxZ )
+
+        scene =
+            if options.includeLines then
+                Scene.buildScene
+                    { triangles = geom.triangles
+                    , lines = geom.lines
+                    , conditionalLines = geom.conditionalLines
+                    }
+                    bfcCertified
+
+            else
+                Scene.buildStaticScene geom.triangles bfcCertified
     in
-    { scene =
-        Scene.buildScene
-            { triangles = geom.triangles
-            , lines = geom.lines
-            , conditionalLines = []
-            }
-            bfcCertified
+    { scene = scene
     , boundsMin = boundsMin
     , boundsMax = boundsMax
     , triangleCount = List.length geom.triangles

@@ -1,4 +1,4 @@
-module LDraw.Geometry exposing (ConditionalEdge, FlatGeometry, Options, flatten, flattenWith, localOptions, worldOptions)
+module LDraw.Geometry exposing (ConditionalEdge, DetailOptions, FlatGeometry, Options, StudDetail(..), defaultDetailOptions, flatten, flattenWith, flattenWithDetail, localOptions, toDetailOptions, worldOptions)
 
 {-| Flatten an LDraw part tree into WebGL-ready vertex buffers.
 
@@ -40,7 +40,7 @@ outward winding and back-face culling is safe on BFC-certified parts.
   - `bfcCertified` — whether the top-level file declared BFC CCW winding.
     When true, back-face culling can safely be enabled.
 
-@docs ConditionalEdge, FlatGeometry, Options, flatten, flattenWith, localOptions, worldOptions
+@docs ConditionalEdge, DetailOptions, FlatGeometry, Options, StudDetail, defaultDetailOptions, flatten, flattenWith, flattenWithDetail, localOptions, toDetailOptions, worldOptions
 
 -}
 
@@ -96,6 +96,41 @@ type alias Options =
     }
 
 
+{-| Level of geometric detail to emit for LDraw top stud primitives (`stud.dat`,
+`stud2.dat`, `stud2a.dat`, `stud10.dat`, `stud15.dat`, etc.):
+
+  - `FullStuds` — expand the catalog stud subfile at full detail.
+  - `BoxStuds` — replace each top stud with a 10-triangle box approximation
+    (open underside omitted), preserving bounding box and per-instance colour.
+  - `NoStuds` — omit top studs completely.
+
+-}
+type StudDetail
+    = FullStuds
+    | BoxStuds
+    | NoStuds
+
+
+{-| Flattening options with explicit geometry detail controls.
+
+  - `flipYZ` — negate output Y and Z to convert LDraw (`-Y` up) to WebGL (`+Y` up).
+  - `trackInherit` — mark colour-16 vertices with `inherit = 1.0`.
+  - `studs` — detail level for top stud primitives (`FullStuds`, `BoxStuds`, `NoStuds`).
+  - `includeHollows` — when `False`, skips `stud3*` and `stud4*` underside hollows/tubes.
+  - `includeLines` — when `False`, skips type-2 edge lines.
+  - `includeConditionals` — when `False`, skips type-5 conditional lines.
+
+-}
+type alias DetailOptions =
+    { flipYZ : Bool
+    , trackInherit : Bool
+    , studs : StudDetail
+    , includeHollows : Bool
+    , includeLines : Bool
+    , includeConditionals : Bool
+    }
+
+
 {-| Convert to Y-up on output, with colours fully resolved. The default for
 directly rendered geometry.
 -}
@@ -110,6 +145,27 @@ reused across placements and colours.
 localOptions : Options
 localOptions =
     { flipYZ = False, trackInherit = True }
+
+
+{-| Full-detail Y-up world options (all studs, hollows, edge lines, and
+conditional lines included).
+-}
+defaultDetailOptions : DetailOptions
+defaultDetailOptions =
+    toDetailOptions worldOptions
+
+
+{-| Upgrade simple `Options` into `DetailOptions` with full geometric detail.
+-}
+toDetailOptions : Options -> DetailOptions
+toDetailOptions options =
+    { flipYZ = options.flipYZ
+    , trackInherit = options.trackInherit
+    , studs = FullStuds
+    , includeHollows = True
+    , includeLines = True
+    , includeConditionals = True
+    }
 
 
 
@@ -140,7 +196,16 @@ flatten =
 
 -}
 flattenWith : Options -> List LDrawLine -> PartCache -> Int -> Mat4 -> FlatGeometry
-flattenWith options lines cache parentColor worldTransform =
+flattenWith options =
+    flattenWithDetail (toDetailOptions options)
+
+
+{-| Flatten a parsed LDraw file with explicit control over coordinate
+conversion, colour inheritance tracking, stud detail, underside hollows, edge
+lines, and conditional lines.
+-}
+flattenWithDetail : DetailOptions -> List LDrawLine -> PartCache -> Int -> Mat4 -> FlatGeometry
+flattenWithDetail options lines cache parentColor worldTransform =
     let
         bfc =
             hasBfcCertify lines
@@ -198,7 +263,7 @@ The `Bool` threaded through the fold is `invertNext`: a pending
 
 -}
 flattenLines :
-    Options
+    DetailOptions
     -> List LDrawLine
     -> PartCache
     -> Int
@@ -212,7 +277,7 @@ flattenLines options lines cache parentColor transform inherited acc =
 
 
 flattenLine :
-    Options
+    DetailOptions
     -> PartCache
     -> Int
     -> Mat4
@@ -228,6 +293,9 @@ flattenLine options cache parentColor transform inherited line ( acc, invertNext
     case line of
         SubFileRef ref ->
             let
+                base =
+                    baseFileName ref.file
+
                 inheritsHere =
                     ref.color == 16 || ref.color == -1
 
@@ -242,24 +310,54 @@ flattenLine options cache parentColor transform inherited line ( acc, invertNext
                 -- does INVERTNEXT; the two cancel when they occur together.
                 childFlipped =
                     xor flipped (xor invertNext (determinant3 ref.transform < 0))
-            in
-            case Dict.get ref.file cache of
-                Just (Loaded subLines) ->
-                    ( flattenLines options
-                        subLines
-                        cache
-                        childColor
-                        (Mat4.mul transform ref.transform)
-                        { flipped = childFlipped
-                        , inheriting = inherited.inheriting && inheritsHere
-                        }
-                        acc
-                    , False
-                    )
 
-                _ ->
-                    -- Not loaded or failed — skip silently
-                    ( acc, False )
+                childTransform =
+                    Mat4.mul transform ref.transform
+
+                childInherited =
+                    { flipped = childFlipped
+                    , inheriting = inherited.inheriting && inheritsHere
+                    }
+            in
+            if not options.includeHollows && isHollowSubfile base then
+                ( acc, False )
+
+            else if isTopStudSubfile base && options.studs /= FullStuds then
+                case options.studs of
+                    NoStuds ->
+                        ( acc, False )
+
+                    BoxStuds ->
+                        let
+                            studColor =
+                                surfaceColor options inherited parentColor ref.color
+                        in
+                        ( { acc
+                            | triangles =
+                                emitBoxStud options childTransform childFlipped studColor acc.triangles
+                          }
+                        , False
+                        )
+
+                    FullStuds ->
+                        ( acc, False )
+
+            else
+                case Dict.get ref.file cache of
+                    Just (Loaded subLines) ->
+                        ( flattenLines options
+                            subLines
+                            cache
+                            childColor
+                            childTransform
+                            childInherited
+                            acc
+                        , False
+                        )
+
+                    _ ->
+                        -- Not loaded or failed — skip silently
+                        ( acc, False )
 
         Triangle tri ->
             let
@@ -308,15 +406,19 @@ flattenLine options cache parentColor transform inherited line ( acc, invertNext
             )
 
         LineSegment seg ->
-            ( { acc
-                | lines =
-                    ( transformPoint options transform seg.p1
-                    , transformPoint options transform seg.p2
-                    )
-                        :: acc.lines
-              }
-            , False
-            )
+            if options.includeLines then
+                ( { acc
+                    | lines =
+                        ( transformPoint options transform seg.p1
+                        , transformPoint options transform seg.p2
+                        )
+                            :: acc.lines
+                  }
+                , False
+                )
+
+            else
+                ( acc, False )
 
         Comment text ->
             -- Only BFC INVERTNEXT produces state; other comments leave a
@@ -330,17 +432,103 @@ flattenLine options cache parentColor transform inherited line ( acc, invertNext
             )
 
         ConditionalLine cond ->
-            ( { acc
-                | conditionalLines =
-                    { p1 = transformPoint options transform cond.p1
-                    , p2 = transformPoint options transform cond.p2
-                    , c1 = transformPoint options transform cond.c1
-                    , c2 = transformPoint options transform cond.c2
-                    }
-                        :: acc.conditionalLines
-              }
-            , False
-            )
+            if options.includeConditionals then
+                ( { acc
+                    | conditionalLines =
+                        { p1 = transformPoint options transform cond.p1
+                        , p2 = transformPoint options transform cond.p2
+                        , c1 = transformPoint options transform cond.c1
+                        , c2 = transformPoint options transform cond.c2
+                        }
+                            :: acc.conditionalLines
+                  }
+                , False
+                )
+
+            else
+                ( acc, False )
+
+
+baseFileName : String -> String
+baseFileName raw =
+    let
+        norm =
+            raw
+                |> String.toLower
+                |> String.replace "\\" "/"
+    in
+    case List.reverse (String.split "/" norm) of
+        last :: _ ->
+            last
+
+        [] ->
+            norm
+
+
+isHollowSubfile : String -> Bool
+isHollowSubfile base =
+    String.startsWith "stud3" base || String.startsWith "stud4" base
+
+
+isTopStudSubfile : String -> Bool
+isTopStudSubfile base =
+    String.startsWith "stud" base
+        && not (isHollowSubfile base)
+        && not (String.startsWith "studel" base)
+        && not (String.startsWith "studtube" base)
+        && not (String.startsWith "studholder" base)
+
+
+{-| Emit a 10-triangle box approximation of a standard LDraw stud primitive
+(top quad plus four side quads; bottom face at `y = 0` omitted).
+-}
+emitBoxStud :
+    DetailOptions
+    -> Mat4
+    -> Bool
+    -> ( Vec4.Vec4, Float )
+    -> List ( Vertex, Vertex, Vertex )
+    -> List ( Vertex, Vertex, Vertex )
+emitBoxStud options transform flipped color accTriangles =
+    let
+        pt =
+            transformPoint options transform
+
+        tNW =
+            pt (vec3 -6 -4 -6)
+
+        tNE =
+            pt (vec3 6 -4 -6)
+
+        tSE =
+            pt (vec3 6 -4 6)
+
+        tSW =
+            pt (vec3 -6 -4 6)
+
+        bNW =
+            pt (vec3 -6 0 -6)
+
+        bNE =
+            pt (vec3 6 0 -6)
+
+        bSE =
+            pt (vec3 6 0 6)
+
+        bSW =
+            pt (vec3 -6 0 6)
+
+        addQuad a b c d tris =
+            windTriangle flipped color a b c
+                :: windTriangle flipped color a c d
+                :: tris
+    in
+    accTriangles
+        |> addQuad tSW tNW tNE tSE
+        |> addQuad tNW bNW bNE tNE
+        |> addQuad tSE bSE bSW tSW
+        |> addQuad tNE bNE bSE tSE
+        |> addQuad tSW bSW bNW tNW
 
 
 {-| Resolve a surface's colour, and note whether it is still inheriting.
@@ -351,7 +539,7 @@ resolved colour is still written to the vertex, so a mesh drawn without an
 `instanceColor` override looks exactly as it did before.
 
 -}
-surfaceColor : Options -> Inherited -> Int -> Int -> ( Vec4.Vec4, Float )
+surfaceColor : DetailOptions -> Inherited -> Int -> Int -> ( Vec4.Vec4, Float )
 surfaceColor options inherited parentColor lineColor =
     ( Colors.toVec4 (Colors.resolveColor parentColor lineColor)
     , if options.trackInherit && inherited.inheriting && (lineColor == 16 || lineColor == -1) then
@@ -404,7 +592,7 @@ With `flipYZ` set, negates Y and Z to convert LDraw (X-right, Y-down, Z-away) �
 WebGL right-handed (X-right, Y-up, Z-toward-viewer).
 
 -}
-transformPoint : Options -> Mat4 -> Vec3 -> Vec3
+transformPoint : DetailOptions -> Mat4 -> Vec3 -> Vec3
 transformPoint options mat p =
     let
         tp =

@@ -6,7 +6,7 @@ module LDraw.GeometryTest exposing (suite)
 import Dict
 import Expect
 import LDraw.Colors as Colors
-import LDraw.Geometry exposing (flatten)
+import LDraw.Geometry exposing (StudDetail(..), defaultDetailOptions, flatten, flattenWithDetail)
 import LDraw.Resolve exposing (PartStatus(..))
 import LDraw.Types exposing (LDrawLine(..))
 import Math.Matrix4 as Mat4
@@ -422,5 +422,233 @@ suite =
                             flatten [ xzTriangle 4 ] emptyCache 15 Mat4.identity
                     in
                     Expect.equal False result.bfcCertified
+            ]
+        , describe "flattenWithDetail"
+            [ test "NoStuds skips top studs including variants and prefixes, while keeping studel/studtube and body geometry" <|
+                \_ ->
+                    let
+                        detailStud =
+                            [ xzTriangle 16, xzQuad 16 ]
+
+                        cache =
+                            Dict.fromList
+                                [ ( "stud.dat", Loaded detailStud )
+                                , ( "stud2.dat", Loaded detailStud )
+                                , ( "stud2a.dat", Loaded detailStud )
+                                , ( "stud10.dat", Loaded detailStud )
+                                , ( "stud15.dat", Loaded detailStud )
+                                , ( "48/stud.dat", Loaded detailStud )
+                                , ( "studel.dat", Loaded [ xzTriangle 16 ] )
+                                , ( "studtube.dat", Loaded [ xzTriangle 16 ] )
+                                ]
+
+                        partLines =
+                            [ xzQuad 16
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "stud.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "stud2.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "stud2a.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "stud10.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "stud15.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "48/stud.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "studel.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "studtube.dat" }
+                            ]
+
+                        full =
+                            flattenWithDetail defaultDetailOptions partLines cache 15 Mat4.identity
+
+                        noStuds =
+                            flattenWithDetail { defaultDetailOptions | studs = NoStuds } partLines cache 15 Mat4.identity
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal 22 (List.length full.triangles)
+                        , \_ -> Expect.equal 4 (List.length noStuds.triangles)
+                        ]
+                        ()
+            , test "BoxStuds emits 10 outward-wound triangles per top stud with expected bounds and inheritance" <|
+                \_ ->
+                    let
+                        result =
+                            flattenWithDetail
+                                { defaultDetailOptions | studs = BoxStuds, trackInherit = True }
+                                [ SubFileRef { color = 16, transform = Mat4.identity, file = "stud.dat" }
+                                , SubFileRef { color = 4, transform = Mat4.makeTranslate3 20 0 0, file = "48/stud2a.dat" }
+                                ]
+                                emptyCache
+                                15
+                                Mat4.identity
+
+                        ys =
+                            allVertices result.triangles |> List.map (.position >> Vec3.getY)
+
+                        topTris =
+                            List.filter (\( a, _, _ ) -> abs (Vec3.getY a.normal - 1.0) < 1.0e-5) result.triangles
+
+                        singleOriginStud =
+                            flattenWithDetail
+                                { defaultDetailOptions | studs = BoxStuds }
+                                [ SubFileRef { color = 16, transform = Mat4.identity, file = "stud.dat" } ]
+                                emptyCache
+                                15
+                                Mat4.identity
+
+                        allOriginFacesOutward =
+                            List.all
+                                (\( a, b, c ) ->
+                                    let
+                                        centroid =
+                                            Vec3.scale (1 / 3) (Vec3.add a.position (Vec3.add b.position c.position))
+                                    in
+                                    Vec3.dot (Vec3.sub centroid (vec3 0 0 0)) a.normal > 0
+                                )
+                                singleOriginStud.triangles
+
+                        inheritedCount =
+                            allVertices result.triangles
+                                |> List.filter (\v -> v.inherit > 0.5)
+                                |> List.length
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal 20 (List.length result.triangles)
+                        , \_ -> Expect.within (Expect.Absolute 1.0e-5) 0 (List.minimum ys |> Maybe.withDefault 99)
+                        , \_ -> Expect.within (Expect.Absolute 1.0e-5) 4 (List.maximum ys |> Maybe.withDefault -99)
+                        , \_ -> Expect.equal 4 (List.length topTris)
+                        , \_ -> Expect.equal True allOriginFacesOutward
+                        , \_ -> Expect.equal 30 inheritedCount
+                        ]
+                        ()
+            , test "BoxStuds matches FullStuds winding under INVERTNEXT and negative-determinant transforms" <|
+                \_ ->
+                    let
+                        reflMat =
+                            Mat4.makeScale3 -1 1 1
+
+                        flatTopStud =
+                            Dict.fromList
+                                [ ( "stud.dat"
+                                  , Loaded
+                                        [ Quad
+                                            { color = 16
+                                            , p1 = vec3 -6 -4 6
+                                            , p2 = vec3 -6 -4 -6
+                                            , p3 = vec3 6 -4 -6
+                                            , p4 = vec3 6 -4 6
+                                            }
+                                        ]
+                                  )
+                                ]
+
+                        runStud studs invert mat =
+                            flattenWithDetail
+                                { defaultDetailOptions | studs = studs }
+                                (if invert then
+                                    [ Comment "BFC INVERTNEXT"
+                                    , SubFileRef { color = 16, transform = mat, file = "stud.dat" }
+                                    ]
+
+                                 else
+                                    [ SubFileRef { color = 16, transform = mat, file = "stud.dat" } ]
+                                )
+                                flatTopStud
+                                15
+                                Mat4.identity
+
+                        countTopSign sign res =
+                            List.filter (\( a, _, _ ) -> (sign * Vec3.getY a.normal) > 0.9) res.triangles
+                                |> List.length
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal 2 (countTopSign 1 (runStud BoxStuds False Mat4.identity))
+                        , \_ -> Expect.equal 2 (countTopSign 1 (runStud FullStuds False Mat4.identity))
+                        , \_ -> Expect.equal 2 (countTopSign -1 (runStud BoxStuds True Mat4.identity))
+                        , \_ -> Expect.equal 2 (countTopSign -1 (runStud FullStuds True Mat4.identity))
+                        , \_ -> Expect.equal 2 (countTopSign 1 (runStud BoxStuds False reflMat))
+                        , \_ -> Expect.equal 2 (countTopSign 1 (runStud FullStuds False reflMat))
+                        , \_ -> Expect.equal 2 (countTopSign -1 (runStud BoxStuds True reflMat))
+                        , \_ -> Expect.equal 2 (countTopSign -1 (runStud FullStuds True reflMat))
+                        ]
+                        ()
+            , test "includeHollows = False skips stud3* and stud4* (including path prefixes) and consumes INVERTNEXT" <|
+                \_ ->
+                    let
+                        hollow =
+                            [ xzTriangle 16 ]
+
+                        cache =
+                            Dict.fromList
+                                [ ( "stud3.dat", Loaded hollow )
+                                , ( "stud3a.dat", Loaded hollow )
+                                , ( "stud4.dat", Loaded hollow )
+                                , ( "s/stud4.dat", Loaded hollow )
+                                , ( "stud4od.dat", Loaded hollow )
+                                , ( "sub.dat", Loaded [ xzTriangle 16 ] )
+                                ]
+
+                        partLines =
+                            [ SubFileRef { color = 16, transform = Mat4.identity, file = "stud3.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "stud3a.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "stud4.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "s/stud4.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "stud4od.dat" }
+                            , Comment "BFC INVERTNEXT"
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "s/stud4.dat" }
+                            , SubFileRef { color = 16, transform = Mat4.identity, file = "sub.dat" }
+                            ]
+
+                        withHollows =
+                            flattenWithDetail defaultDetailOptions partLines cache 15 Mat4.identity
+
+                        withoutHollows =
+                            flattenWithDetail { defaultDetailOptions | includeHollows = False } partLines cache 15 Mat4.identity
+
+                        expectedNormalY =
+                            case (flatten [ xzTriangle 16 ] emptyCache 15 Mat4.identity).triangles of
+                                ( v, _, _ ) :: _ ->
+                                    Vec3.getY v.normal
+
+                                [] ->
+                                    0
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal 7 (List.length withHollows.triangles)
+                        , \_ -> Expect.equal 1 (List.length withoutHollows.triangles)
+                        , \_ ->
+                            case withoutHollows.triangles of
+                                ( v, _, _ ) :: _ ->
+                                    Vec3.getY v.normal |> Expect.within (Expect.Absolute 1.0e-5) expectedNormalY
+
+                                [] ->
+                                    Expect.fail "Expected sub.dat triangle"
+                        ]
+                        ()
+            , test "includeLines = False and includeConditionals = False omit lines and conditionalLines" <|
+                \_ ->
+                    let
+                        partLines =
+                            [ xzTriangle 4
+                            , LineSegment { color = 24, p1 = vec3 0 0 0, p2 = vec3 10 0 0 }
+                            , ConditionalLine
+                                { color = 24
+                                , p1 = vec3 0 0 0
+                                , p2 = vec3 10 0 0
+                                , c1 = vec3 0 0 1
+                                , c2 = vec3 0 1 1
+                                }
+                            ]
+
+                        stripped =
+                            flattenWithDetail
+                                { defaultDetailOptions | includeLines = False, includeConditionals = False }
+                                partLines
+                                emptyCache
+                                15
+                                Mat4.identity
+                    in
+                    Expect.all
+                        [ \_ -> Expect.equal 1 (List.length stripped.triangles)
+                        , \_ -> Expect.equal 0 (List.length stripped.lines)
+                        , \_ -> Expect.equal 0 (List.length stripped.conditionalLines)
+                        ]
+                        ()
             ]
         ]

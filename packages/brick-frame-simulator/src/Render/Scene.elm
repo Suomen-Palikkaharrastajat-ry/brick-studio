@@ -1,6 +1,7 @@
 module Render.Scene exposing
     ( Scene
     , buildScene
+    , buildStaticScene
     , conditionalLineVisible
     , conditionalToQuad
     , renderScene
@@ -83,6 +84,20 @@ buildScene geom bfc =
     , conditionalMesh = WebGL.triangles (List.concatMap conditionalToQuad geom.conditionalLines)
     , bfcCertified = bfc
     , surface = geom.triangles
+    }
+
+
+{-| Build a `Scene` containing only surface triangles and empty edge /
+conditional-line meshes, avoiding line quad expansion for static props drawn
+without outlines.
+-}
+buildStaticScene : List ( Vertex, Vertex, Vertex ) -> Bool -> Scene
+buildStaticScene triangles bfc =
+    { triangleMesh = WebGL.triangles triangles
+    , lineMesh = WebGL.triangles []
+    , conditionalMesh = WebGL.triangles []
+    , bfcCertified = bfc
+    , surface = triangles
     }
 
 

@@ -11,6 +11,7 @@ carries the identical control data, so the shader can never tear the quad.
 
 import Expect
 import Math.Vector3 as Vec3 exposing (Vec3, vec3)
+import Math.Vector4 exposing (vec4)
 import Render.Scene as Scene
 import Test exposing (Test, describe, test)
 
@@ -67,5 +68,24 @@ suite =
                     in
                     List.all ok quadVertices
                         |> Expect.equal True
+            ]
+        , describe "buildStaticScene"
+            [ test "retains triangles and BFC flag while skipping edge meshes" <|
+                \_ ->
+                    let
+                        tri =
+                            ( { position = vec3 0 0 0, normal = vec3 0 1 0, color = vec4 1 0 0 1, inherit = 0 }
+                            , { position = vec3 1 0 0, normal = vec3 0 1 0, color = vec4 1 0 0 1, inherit = 0 }
+                            , { position = vec3 0 0 1, normal = vec3 0 1 0, color = vec4 1 0 0 1, inherit = 0 }
+                            )
+
+                        scene =
+                            Scene.buildStaticScene [ tri ] True
+                    in
+                    Expect.all
+                        [ \s -> Expect.equal 1 (List.length s.surface)
+                        , \s -> Expect.equal True s.bfcCertified
+                        ]
+                        scene
             ]
         ]
