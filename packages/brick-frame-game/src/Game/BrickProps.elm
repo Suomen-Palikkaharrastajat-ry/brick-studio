@@ -1,6 +1,7 @@
 module Game.BrickProps exposing
     ( PropModel
     , View
+    , arePartsBfcCertified
     , build
     , draw
     , fitBox
@@ -10,6 +11,7 @@ module Game.BrickProps exposing
     , progress
     , refresh
     , size
+    , surfaceSettings
     )
 
 {-| Brick-built props (trees, fences, buildings, buoys, ...) for the Brick
@@ -34,14 +36,17 @@ import Game.PartLoading as PartLoading exposing (PartProgress)
 import LDraw.Document as Document
 import LDraw.Geometry as Geometry
 import LDraw.Parser as Parser
-import LDraw.Resolve as Resolve exposing (PartCache)
+import LDraw.Resolve as Resolve exposing (PartCache, PartStatus(..))
+import LDraw.Types exposing (LDrawLine(..))
 import Math.Matrix4 as Mat4 exposing (Mat4)
 import Math.Vector3 as Vec3 exposing (Vec3, vec3)
 import Math.Vector4 exposing (Vec4)
 import Render.EdgeShader as EdgeShader
 import Render.Mesh exposing (Vertex)
 import Render.Scene as Scene exposing (Scene)
+import Set exposing (Set)
 import WebGL
+import WebGL.Settings
 import WebGL.Settings.Blend as Blend
 import WebGL.Settings.DepthTest as DepthTest
 
@@ -106,8 +111,15 @@ skipped, as everywhere in the brick pipeline.
 build : String -> PartCache -> PropModel
 build ldraw cache =
     let
+        parsed =
+            Parser.parseFile ldraw
+
         geom =
-            Geometry.flattenWith { flipYZ = True, trackInherit = True } (Parser.parseFile ldraw) cache 16 Mat4.identity
+            Geometry.flattenWith { flipYZ = True, trackInherit = True } parsed cache 16 Mat4.identity
+
+        bfcCertified =
+            fileBfcCertified parsed
+                && Tuple.first (linesSubfilesBfc cache Set.empty parsed Dict.empty)
 
         grow p acc =
             let
@@ -140,11 +152,131 @@ build ldraw cache =
             , lines = geom.lines
             , conditionalLines = []
             }
-            False
+            bfcCertified
     , boundsMin = boundsMin
     , boundsMax = boundsMax
     , triangleCount = List.length geom.triangles
     }
+
+
+{-| Whether every part in `partNames` and all of its transitive subfiles in
+`cache` are loaded and BFC CCW certified without disabling or inverting
+certification (`BFC CERTIFY CW`, `BFC NOCERTIFY`, `BFC NOCLIP`).
+-}
+arePartsBfcCertified : PartCache -> List String -> Bool
+arePartsBfcCertified cache partNames =
+    List.foldl
+        (\name ( ok, memo ) ->
+            if not ok then
+                ( False, memo )
+
+            else
+                subfileBfc cache Set.empty name memo
+        )
+        ( True, Dict.empty )
+        partNames
+        |> Tuple.first
+
+
+fileBfcCertified : List LDrawLine -> Bool
+fileBfcCertified lines =
+    let
+        step line ( hasCcw, clean ) =
+            case line of
+                Comment text ->
+                    if
+                        String.contains "BFC CERTIFY CW" text
+                            || String.contains "BFC NOCERTIFY" text
+                            || String.contains "BFC NOCLIP" text
+                    then
+                        ( hasCcw, False )
+
+                    else if String.contains "BFC CERTIFY CCW" text then
+                        ( True, clean )
+
+                    else
+                        ( hasCcw, clean )
+
+                _ ->
+                    ( hasCcw, clean )
+
+        ( ccw, ok ) =
+            List.foldl step ( False, True ) lines
+    in
+    ccw && ok
+
+
+linesSubfilesBfc : PartCache -> Set String -> List LDrawLine -> Dict String Bool -> ( Bool, Dict String Bool )
+linesSubfilesBfc cache visiting lines memo =
+    List.foldl
+        (\line ( ok, accMemo ) ->
+            if not ok then
+                ( False, accMemo )
+
+            else
+                case line of
+                    SubFileRef ref ->
+                        subfileBfc cache visiting ref.file accMemo
+
+                    _ ->
+                        ( True, accMemo )
+        )
+        ( True, memo )
+        lines
+
+
+subfileBfc : PartCache -> Set String -> String -> Dict String Bool -> ( Bool, Dict String Bool )
+subfileBfc cache visiting name memo =
+    if Set.member name visiting then
+        ( True, memo )
+
+    else
+        case Dict.get name memo of
+            Just cached ->
+                ( cached, memo )
+
+            Nothing ->
+                case Dict.get name cache of
+                    Just (Loaded subLines) ->
+                        if fileBfcCertified subLines then
+                            let
+                                ( childrenOk, nextMemo ) =
+                                    linesSubfilesBfc cache (Set.insert name visiting) subLines memo
+                            in
+                            ( childrenOk, Dict.insert name childrenOk nextMemo )
+
+                        else
+                            ( False, Dict.insert name False memo )
+
+                    _ ->
+                        ( False, Dict.insert name False memo )
+
+
+{-| WebGL surface settings for a triangle mesh: adds back-face culling (or
+front-face culling when the model matrix has a negative determinant) whenever
+the scene is `bfcCertified`.
+-}
+surfaceSettings : Bool -> Mat4 -> List WebGL.Settings.Setting
+surfaceSettings bfcCertified modelMatrix =
+    if not bfcCertified then
+        [ DepthTest.default ]
+
+    else if determinant3 modelMatrix < 0 then
+        [ DepthTest.default, WebGL.Settings.cullFace WebGL.Settings.front ]
+
+    else
+        [ DepthTest.default, WebGL.Settings.cullFace WebGL.Settings.back ]
+
+
+determinant3 : Mat4 -> Float
+determinant3 mat =
+    let
+        m =
+            Mat4.toRecord mat
+    in
+    (m.m11 * ((m.m22 * m.m33) - (m.m23 * m.m32)))
+        - (m.m12 * ((m.m21 * m.m33) - (m.m23 * m.m31)))
+        + (m.m13 * ((m.m21 * m.m32) - (m.m22 * m.m31)))
 
 
 {-| Width (X), height (Y) and depth (Z) of a prop, in LDraw units.
@@ -254,7 +386,7 @@ draw : View -> Mat4 -> Vec4 -> Float -> PropModel -> List WebGL.Entity
 draw v modelMatrix tint edgeWidth prop =
     let
         surface =
-            WebGL.entityWith [ DepthTest.default ]
+            WebGL.entityWith (surfaceSettings prop.scene.bfcCertified modelMatrix)
                 vertexShader
                 fragmentShader
                 prop.scene.triangleMesh

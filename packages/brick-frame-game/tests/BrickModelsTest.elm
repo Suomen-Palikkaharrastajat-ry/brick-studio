@@ -187,4 +187,43 @@ suite =
                     , \_ -> Expect.atLeast 4.0 (List.maximum xs |> Maybe.withDefault 0)
                     ]
                     ()
+        , test "BFC certification requires all transitive subfiles to certify CCW cleanly" <|
+            \_ ->
+                let
+                    certifiedPart =
+                        Parser.parseFile "0 BFC CERTIFY CCW\n3 16 -20 0 -10 20 24 10 20 -4 10"
+
+                    cwPart =
+                        Parser.parseFile "0 BFC CERTIFY CW\n3 16 -20 0 -10 20 24 10 20 -4 10"
+
+                    certifiedCache =
+                        Dict.fromList [ ( "3001.dat", Loaded certifiedPart ) ]
+
+                    uncertifiedCache =
+                        Dict.fromList [ ( "3001.dat", Loaded fakeBrick ) ]
+
+                    cwCache =
+                        Dict.fromList [ ( "3001.dat", Loaded cwPart ) ]
+
+                    builtCertified =
+                        BrickProps.build (BrickModels.singlePart "3001.dat") certifiedCache
+
+                    builtUncertified =
+                        BrickProps.build (BrickModels.singlePart "3001.dat") uncertifiedCache
+
+                    builtCw =
+                        BrickProps.build (BrickModels.singlePart "3001.dat") cwCache
+                in
+                Expect.all
+                    [ \_ -> Expect.equal True builtCertified.scene.bfcCertified
+                    , \_ -> Expect.equal False builtUncertified.scene.bfcCertified
+                    , \_ -> Expect.equal False builtCw.scene.bfcCertified
+                    , \_ -> Expect.equal True (BrickProps.arePartsBfcCertified certifiedCache [ "3001.dat" ])
+                    , \_ -> Expect.equal False (BrickProps.arePartsBfcCertified uncertifiedCache [ "3001.dat" ])
+                    , \_ -> Expect.equal False (BrickProps.arePartsBfcCertified cwCache [ "3001.dat" ])
+                    , \_ -> Expect.equal 1 (List.length (BrickProps.surfaceSettings False Mat4.identity))
+                    , \_ -> Expect.equal 2 (List.length (BrickProps.surfaceSettings True Mat4.identity))
+                    , \_ -> Expect.equal 2 (List.length (BrickProps.surfaceSettings True (Mat4.makeScale3 -1 1 1)))
+                    ]
+                    ()
         ]

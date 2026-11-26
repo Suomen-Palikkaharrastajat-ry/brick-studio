@@ -81,7 +81,7 @@ scaledPart colour ( x, y, z ) sxz file =
 
 model : String -> List String -> String
 model name lines =
-    String.join "\n" (("0 " ++ name) :: "0 Author: Brick Frame games" :: lines)
+    String.join "\n" (("0 " ++ name) :: "0 Author: Brick Frame games" :: "0 BFC CERTIFY CCW" :: lines)
 
 
 {-| The origin height of a brick whose body sits on `layer` bricks (and
