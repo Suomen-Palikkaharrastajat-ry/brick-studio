@@ -899,10 +899,53 @@ overlaps : Item -> Item -> Bool
 overlaps a b =
     List.any (\obbA -> List.any (\obbB -> Connectivity.testOBB overlapTolerance obbA obbB) b.obbs) a.obbs
         && not (technicJoined a b)
+        && not (clipBarJoined a b)
         && not (studJoined a b)
         && not (gearsMeshing a b)
         && not (wheelJoined a b)
         && not (turntableJoined a b)
+
+
+{-| Whether a clip of one part connects to a bar of the other (such as connected
+chain links 3711.dat or a flag on a mast).
+-}
+clipBarJoined : Item -> Item -> Bool
+clipBarJoined a b =
+    let
+        pointsB =
+            clipBarPoints b
+    in
+    List.any
+        (\p -> List.any (\q -> joins p q || joins q p) pointsB)
+        (clipBarPoints a)
+
+
+clipBarPoints : Item -> List WorldPoint
+clipBarPoints item =
+    item.conn.connections
+        |> List.filter
+            (\point ->
+                case point.connType of
+                    ClipMale _ ->
+                        True
+
+                    BarFemale _ ->
+                        True
+
+                    _ ->
+                        False
+            )
+        |> List.map
+            (\point ->
+                let
+                    world =
+                        Connectivity.transformPoint item.matrix item.id point
+                in
+                { position = world.worldPosition
+                , normal = world.worldNormal
+                , connType = point.connType
+                }
+            )
 
 
 {-| Whether two parts are mating turntable or hinge halves concentrically assembled.

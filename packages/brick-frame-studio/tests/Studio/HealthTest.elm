@@ -703,6 +703,17 @@ coreTests =
                         Core.applyFixes [ forced ] model
                 in
                 Expect.equal before (Writer.writeDocument applied.document)
+        , test "connected 3711 chain links at 16 LDU pitch are not reported as overlapping" <|
+            \_ ->
+                let
+                    doc =
+                        lines
+                            [ brick "3711.dat" 0 -5 0
+                            , brick "3711.dat" 0 -5 16
+                            , brick "3711.dat" 0 -5 32
+                            ]
+                in
+                Expect.equal [] (Health.check noParts doc Set.empty)
         ]
 
 

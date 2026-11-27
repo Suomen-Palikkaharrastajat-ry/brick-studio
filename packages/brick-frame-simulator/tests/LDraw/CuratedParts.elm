@@ -10,7 +10,7 @@ Do not edit by hand: run `make curated-parts`.
 -}
 
 
-{-| 271 visible curated part files, in catalog order.
+{-| 273 visible curated part files, in catalog order.
 -}
 visibleFiles : List String
 visibleFiles =
@@ -140,6 +140,8 @@ visibleFiles =
     , "3708.dat"
     , "3709b.dat"
     , "3711.dat"
+    , "92338-f1.dat"
+    , "92338-f2.dat"
     , "3713.dat"
     , "3737.dat"
     , "3749.dat"

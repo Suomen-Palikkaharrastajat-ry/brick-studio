@@ -4117,7 +4117,9 @@ expectedLayouts =
     , ( "3938.dat", { studs = [ ( -10, 0, 0 ), ( 10, 0, 0 ) ], antiStuds = [], others = [], boxes = [ ( ( -20, -4, -10 ), ( 20, 16, 10 ) ) ] } )
     , ( "3679.dat", { studs = [ ( -10, 0, -10 ), ( -10, 0, 10 ), ( 10, 0, -10 ), ( 10, 0, 10 ) ], antiStuds = [], others = [], boxes = [ ( ( -17.5, -4, -17.5 ), ( 17.5, 8, 17.5 ) ) ] } )
     , ( "3742.dat", { studs = [], antiStuds = [], others = [], boxes = [ ( ( -11, -4, -11.5 ), ( 11, 2, 11.9 ) ) ] } )
-    , ( "3711.dat", { studs = [], antiStuds = [], others = [], boxes = [ ( ( -9.7, -5, -5 ), ( 9.8, 5, 21 ) ) ] } )
+    , ( "3711.dat", { studs = [], antiStuds = [], others = [ ( "bar", ( 0, 0, 16 ), ( 1, 0, 0 ) ), ( "clip", ( 0, 0, 0 ), ( 1, 0, 0 ) ) ], boxes = [ ( ( -9.7, -5, -5 ), ( 9.8, 5, 21 ) ) ] } )
+    , ( "92338-f1.dat", { studs = [], antiStuds = [], others = [ ( "clip", ( 0, 2, 0 ), ( 0, 1, 0 ) ), ( "clip", ( 0, 2, 100 ), ( 0, 1, 0 ) ) ], boxes = [ ( ( -8, -4, -8 ), ( 8, 8, 108 ) ) ] } )
+    , ( "92338-f2.dat", { studs = [], antiStuds = [], others = [ ( "clip", ( 0, 2, 0 ), ( 0, 1, 0 ) ), ( "clip", ( 0, 2, 100 ), ( 0, 1, 0 ) ) ], boxes = [ ( ( -8, -4, -8 ), ( 8, 15.7, 108 ) ) ] } )
     , ( "4000.dat", { studs = [], antiStuds = [], others = [], boxes = [ ( ( -266, -21, -35 ), ( 46, 34, 35 ) ) ] } )
     , ( "4593.dat", { studs = [], antiStuds = [], others = [], boxes = [ ( ( -4, -38, -4 ), ( 4, 4, 4 ) ) ] } )
     , ( "60601.dat", { studs = [], antiStuds = [], others = [], boxes = [] } )
@@ -4465,5 +4467,67 @@ microscaleCatalogTests =
 
                         _ ->
                             Expect.fail "Missing clip or bar connection point"
+            , test "3711 (Technic chain link) has clip at z=0 and bar at z=16 and snaps end-to-end at 16 LDU pitch" <|
+                \_ ->
+                    case knownCatalogPart "3711.dat" of
+                        Just link ->
+                            let
+                                targets =
+                                    worldPointsOf Mat4.identity 1 link
+                                        |> List.filter (\t -> t.connType == BarFemale { diameter = 4.0 })
+
+                                nearMatrix =
+                                    Mat4.makeTranslate3 1 -2 15
+                            in
+                            case solveSnap 20 0 nearMatrix link.connections targets of
+                                Just snap ->
+                                    let
+                                        snappedOrigin =
+                                            Mat4.transform snap.snapMatrix (vec3 0 0 0)
+                                    in
+                                    Expect.all
+                                        [ \_ -> Expect.within (Expect.Absolute 0.01) 0 (Vec3.getX snappedOrigin)
+                                        , \_ -> Expect.within (Expect.Absolute 0.01) 0 (Vec3.getY snappedOrigin)
+                                        , \_ -> Expect.within (Expect.Absolute 0.01) 16 (Vec3.getZ snappedOrigin)
+                                        ]
+                                        ()
+
+                                Nothing ->
+                                    Expect.fail "3711.dat did not snap end-to-end onto another 3711.dat"
+
+                        Nothing ->
+                            Expect.fail "3711.dat is not a catalog part"
+            , test "92338 (Chain 5 Links) end rings hold bars 100 LDU apart, so the chain hangs from a bar" <|
+                \_ ->
+                    case ( knownCatalogPart "92338-f1.dat", knownCatalogPart "92338-f2.dat", knownCatalogPart "3711.dat" ) of
+                        ( Just straight, Just catenary, Just link ) ->
+                            let
+                                -- A 3711 link turned so its bar (at z = 16) stands upright along Y.
+                                bar =
+                                    worldPointsOf (Mat4.makeRotate (pi / 2) (vec3 0 0 1)) 1 link
+                                        |> List.filter (\t -> t.connType == BarFemale { diameter = 4.0 })
+
+                                ringZs part =
+                                    part.connections
+                                        |> List.filter (\c -> c.connType == ClipMale { width = 4.0 })
+                                        |> List.map (.localPosition >> Vec3.getZ)
+                            in
+                            Expect.all
+                                [ \_ -> Expect.equal [ 0, 100 ] (ringZs straight)
+                                , \_ -> Expect.equal [ 0, 100 ] (ringZs catenary)
+                                , \_ ->
+                                    case solveSnap 20 0 (Mat4.makeTranslate3 1 -1 18) straight.connections bar of
+                                        Just snap ->
+                                            Mat4.transform snap.snapMatrix (vec3 0 2 0)
+                                                |> Vec3.distance (vec3 0 0 16)
+                                                |> Expect.lessThan 0.01
+
+                                        Nothing ->
+                                            Expect.fail "92338-f1.dat's end ring did not seat on a bar"
+                                ]
+                                ()
+
+                        _ ->
+                            Expect.fail "92338-f1.dat, 92338-f2.dat or 3711.dat is not a catalog part"
             ]
         ]
