@@ -3730,8 +3730,22 @@ knownCatalogPart name =
             Just (makePart "3742.dat" [] [] [ boxOf -11 -4 -11.5 11 2 11.9 ])
 
         "3711" ->
-            -- Technic chain link
-            Just (makePart "3711.dat" [] [] [ boxOf -9.7 -5 -5 9.8 5 21 ])
+            -- Technic chain link: clip at z = 0 and pin bar at z = 16 along X (16 LDU pitch)
+            Just
+                (withConnections
+                    [ clipAt 20 (vec3 0 0 0) (vec3 1 0 0)
+                    , barAt 21 (vec3 0 0 16) (vec3 1 0 0)
+                    ]
+                    (makePart "3711.dat" [] [] [ boxOf -9.7 -5 -5 9.8 5 21 ])
+                )
+
+        "92338-f1" ->
+            -- Chain 5 Links, straight: end rings (bar holes along Y) at z = 0 and z = 100
+            Just (chain5Links "92338-f1.dat" 8)
+
+        "92338-f2" ->
+            -- Chain 5 Links, catenary: the same end rings, the middle links sag to y = 15.7
+            Just (chain5Links "92338-f2.dat" 15.7)
 
         "4000" ->
             -- Ladder 4 x 15.6 with pivot
@@ -3796,6 +3810,19 @@ axis along `barAxis`.
 barAt : Int -> Vec3 -> Vec3 -> ConnectionPoint
 barAt id position barAxis =
     technicAt id (BarFemale { diameter = 4.0 }) position barAxis
+
+
+{-| Chain 5 Links (92338): an end ring at each end, 100 LDU apart along Z. Each
+ring (30104k01) is a 3.2 mm hole along Y that holds a bar, like a clip; the box
+runs from the first ring's rim to the last's and down to the lowest link.
+-}
+chain5Links : String -> Float -> PartConnectivity
+chain5Links partName bottom =
+    withConnections
+        [ clipAt 20 (vec3 0 2 0) (vec3 0 1 0)
+        , clipAt 21 (vec3 0 2 100) (vec3 0 1 0)
+        ]
+        (makePart partName [] [] [ boxOf -8 -4 -8 8 bottom 108 ])
 
 
 {-| A connection point with an explicit type, position and normal; the tangent
