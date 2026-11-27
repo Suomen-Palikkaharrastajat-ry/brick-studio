@@ -3237,11 +3237,11 @@ knownCatalogPart name =
                 )
 
         "4740" ->
-            -- Dish 2 x 2 inverted: one centre top stud
+            -- Dish 2 x 2 inverted: one centre top stud, one centre anti-stud
             Just
                 (makePart "4740.dat"
                     [ vec3 0 0 0 ]
-                    [ vec3 -10 8 -10, vec3 10 8 -10, vec3 -10 8 10, vec3 10 8 10 ]
+                    [ vec3 0 8 0 ]
                     [ boxOf -20 -4 -20 20 8 20 ]
                 )
 
