@@ -4,6 +4,7 @@ module Studio.Core exposing
     , DragMode(..)
     , Event(..)
     , GizmoStyle(..)
+    , GroupLock(..)
     , Model
     , Msg(..)
     , OneFinger(..)
@@ -36,6 +37,7 @@ module Studio.Core exposing
     , getClipboard
     , getDocument
     , getPlacements
+    , groupLock
     , groupSelection
     , hasClipboard
     , hasSelection
@@ -81,6 +83,7 @@ module Studio.Core exposing
     , setTwoFingerOrbits
     , shiftHeld
     , subscriptions
+    , toggleGroupLock
     , turnSelected
     , undo
     , update
@@ -325,6 +328,7 @@ type Msg
     | PasteClipboard
     | GroupSelection
     | ExplodeSelection
+    | ToggleGroupLock
     | Undo
     | Redo
     | RotateSelection Axis Int
@@ -1406,6 +1410,59 @@ canUngroup =
     canExplode
 
 
+{-| What the grouping lock button shows for the current selection.
+
+A group is a submodel reference: picking any brick of a group selects the whole
+reference, so "a selected brick belongs to a group" means the selection holds
+that reference.
+
+  - `GroupLockDisabled` — nothing is selected (or a drag is running): the
+    button is greyed and does nothing.
+  - `GroupLockLocked` — the selection is exactly one group: pressing unlocks it
+    (`explodeSelection`), releasing its bricks as single, ungrouped bricks.
+  - `GroupLockOpen` — anything else: single bricks, or a group together with
+    more bricks or groups. Pressing merges the selection into one flat group
+    (`groupSelection`, which unpacks selected groups into their bricks). With a
+    single loose brick there is nothing to merge, and pressing does nothing.
+
+-}
+type GroupLock
+    = GroupLockDisabled
+    | GroupLockOpen
+    | GroupLockLocked
+
+
+{-| The grouping lock state of the current selection; see `GroupLock`.
+-}
+groupLock : Model -> GroupLock
+groupLock model =
+    if isDragging model || Set.isEmpty model.selection then
+        GroupLockDisabled
+
+    else if canExplode model then
+        GroupLockLocked
+
+    else
+        GroupLockOpen
+
+
+{-| Press the grouping lock: unlock a locked group, or merge an open selection
+into one group (see `GroupLock`). One undo entry; nothing happens when the lock
+is disabled.
+-}
+toggleGroupLock : Model -> ( Model, Cmd Msg, List Event )
+toggleGroupLock model =
+    case groupLock model of
+        GroupLockLocked ->
+            explodeSelection model
+
+        GroupLockOpen ->
+            groupSelection model
+
+        GroupLockDisabled ->
+            ( model, Cmd.none, [] )
+
+
 nextSubmodelName : Document -> String
 nextSubmodelName doc =
     let
@@ -1444,8 +1501,10 @@ groupSelection model =
             ( newDoc, newHistory ) =
                 recordEdit (GroupIntoSubmodel submodelName (Set.toList model.selection)) model
 
+            -- The group reference takes the last id: merging a group in unpacks
+            -- its bricks under fresh ids first, so it is not always `nextId`.
             newSelection =
-                Set.singleton model.document.nextId
+                Set.singleton (newDoc.nextId - 1)
 
             ( nextViewport, viewportCmd, events ) =
                 Viewport.applyDocument newDoc model.viewport
@@ -2293,6 +2352,9 @@ updateInner msg model =
 
         ExplodeSelection ->
             explodeSelection model
+
+        ToggleGroupLock ->
+            toggleGroupLock model
 
         Undo ->
             undo model

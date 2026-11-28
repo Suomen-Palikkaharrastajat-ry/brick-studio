@@ -410,6 +410,7 @@ suite =
         , latticeSuite
         , magneticSnapCollisionSuite
         , copyPasteSuite
+        , groupLockSuite
         ]
 
 
@@ -3487,4 +3488,128 @@ copyPasteSuite =
                         ]
                         recolored
             ]
+        ]
+
+
+{-| The grouping lock: disabled with nothing selected, locked on one group, open
+otherwise; pressing it unlocks a group or merges the selection into one group.
+-}
+groupLockSuite : Test
+groupLockSuite =
+    let
+        -- Bricks 0 (loose), and 1 and 2 grouped into the reference with id 3.
+        grouped =
+            groupedAt [ vec3 0 -24 0, vec3 40 -24 0, vec3 80 -24 0 ]
+
+        groupId =
+            grouped.document.nextId - 1
+
+        select ids model =
+            { model | selection = Set.fromList ids }
+
+        press model =
+            let
+                ( after, _, _ ) =
+                    Core.update Core.ToggleGroupLock model
+            in
+            after
+
+        mainParts model =
+            Document.mainPlacements model.document
+
+        references model =
+            List.filter (\p -> Document.isSubmodelReference p model.document) (mainParts model)
+    in
+    describe "grouping lock"
+        [ test "is disabled with no selection, and pressing it does nothing" <|
+            \_ ->
+                let
+                    empty =
+                        select [] grouped
+                in
+                Expect.all
+                    [ \m -> Expect.equal Core.GroupLockDisabled (Core.groupLock m)
+                    , \m -> Expect.equal empty.document (press m).document
+                    , \m -> Expect.equal empty.history (press m).history
+                    ]
+                    empty
+        , test "is locked when the selection is a group" <|
+            \_ ->
+                Expect.equal Core.GroupLockLocked (Core.groupLock (select [ groupId ] grouped))
+        , test "is open when only single ungrouped bricks are selected" <|
+            \_ ->
+                Expect.equal
+                    [ Core.GroupLockOpen, Core.GroupLockOpen ]
+                    [ Core.groupLock (select [ 0 ] grouped)
+                    , Core.groupLock (select [ 0, 1, 2 ] loadedBricks)
+                    ]
+        , test "is open when a group is selected with more bricks" <|
+            \_ ->
+                Expect.equal Core.GroupLockOpen (Core.groupLock (select [ 0, groupId ] grouped))
+        , test "pressing a locked group releases its bricks as single bricks" <|
+            \_ ->
+                let
+                    unlocked =
+                        press (select [ groupId ] grouped)
+                in
+                Expect.all
+                    [ \m -> Expect.equal 3 (List.length (mainParts m))
+                    , \m -> Expect.equal [] (references m)
+                    , \m -> Expect.equal [] (List.filter (\s -> s.name == "assembly.ldr") m.document.submodels)
+                    , \m -> Expect.equal 2 (Set.size m.selection)
+                    , \m -> Expect.equal Core.GroupLockOpen (Core.groupLock m)
+                    , \m -> Expect.equal True (Core.canUndo m)
+                    ]
+                    unlocked
+        , test "pressing open singles groups them, and the lock then shows locked" <|
+            \_ ->
+                let
+                    locked =
+                        press (select [ 0, 1, 2 ] loadedBricks)
+                in
+                Expect.all
+                    [ \m -> Expect.equal 1 (List.length (mainParts m))
+                    , \m -> Expect.equal 1 (List.length (references m))
+                    , \m -> Expect.equal Core.GroupLockLocked (Core.groupLock m)
+                    ]
+                    locked
+        , test "pressing a group plus more bricks merges them all into one flat group" <|
+            \_ ->
+                let
+                    merged =
+                        press (select [ 0, groupId ] grouped)
+
+                    groupSubmodels m =
+                        List.filter (\s -> s.name /= "" && Document.normalise s.name /= "main.ldr") m.document.submodels
+
+                    leafCount m =
+                        groupSubmodels m
+                            |> List.concatMap .entries
+                            |> List.filter
+                                (\e ->
+                                    case e of
+                                        Document.PlacementEntry p ->
+                                            not (Document.isSubmodelReference p m.document)
+
+                                        Document.Raw _ ->
+                                            False
+                                )
+                            |> List.length
+                in
+                Expect.all
+                    [ \m -> Expect.equal 1 (List.length (mainParts m))
+                    , \m -> Expect.equal 1 (List.length (references m))
+                    , \m -> Expect.equal 1 (List.length (groupSubmodels m))
+                    , \m -> Expect.equal 3 (leafCount m)
+                    , \m -> Expect.equal (Set.fromList (List.map .id (references m))) m.selection
+                    , \m -> Expect.equal Core.GroupLockLocked (Core.groupLock m)
+                    ]
+                    merged
+        , test "a single loose brick shows open, and pressing it changes nothing" <|
+            \_ ->
+                let
+                    single =
+                        select [ 0 ] grouped
+                in
+                Expect.equal single.history (press single).history
         ]
