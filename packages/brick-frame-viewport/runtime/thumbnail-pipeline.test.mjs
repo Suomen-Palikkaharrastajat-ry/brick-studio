@@ -7,6 +7,8 @@ import {
   MAX_TITLE_HOPS,
   isLikelyPrimitive,
   candidateRelativePaths,
+  flattenModel,
+  modelCacheKey,
 } from './thumbnail-pipeline.js'
 
 // A stub library: file name -> .dat text. Lookups are recorded to check hops.
@@ -159,4 +161,37 @@ test('candidateRelativePaths prioritizes correct directories and eliminates spur
     'parts/s/3001.dat',
     'p/3001.dat',
   ])
+})
+
+// A one-triangle part, for the whole-model tests.
+const TRIANGLE_PART = '0 Triangle\n3 16 0 0 0 10 0 0 0 0 10\n2 24 0 0 0 10 0 0\n'
+
+test('flattenModel places each line of a model with its own colour and matrix', async () => {
+  const { load, requested } = stubLoader({ 'tri.dat': TRIANGLE_PART })
+  const text = ['1 70 0 0 0 1 0 0 0 1 0 0 0 1 tri.dat', '1 15 100 0 0 1 0 0 0 1 0 0 0 1 tri.dat'].join('\n')
+  const out = await flattenModel(text, load)
+  assert.equal(out.triangles.length, 2)
+  assert.deepEqual(
+    out.triangles.map((t) => t.color),
+    [70, 15],
+  )
+  assert.deepEqual(out.triangles[1].v[0], [100, 0, 0])
+  assert.equal(out.lines.length, 4)
+  // The model text itself is never fetched from the library.
+  assert.deepEqual([...new Set(requested)], ['tri.dat'])
+})
+
+test('flattenModel skips parts the library does not have', async () => {
+  const { load } = stubLoader({ 'tri.dat': TRIANGLE_PART })
+  const out = await flattenModel('1 4 0 0 0 1 0 0 0 1 0 0 0 1 missing.dat\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 tri.dat', load)
+  assert.equal(out.triangles.length, 1)
+})
+
+test('modelCacheKey follows the model text and its colours', () => {
+  const text = '1 70 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat'
+  const colours = [{ code: 70, rgb: [0.4, 0.2, 0.1] }]
+  assert.equal(modelCacheKey(text, colours), modelCacheKey(text, colours))
+  assert.notEqual(modelCacheKey(text, colours), modelCacheKey(text + '\n', colours))
+  assert.notEqual(modelCacheKey(text, colours), modelCacheKey(text, [{ code: 70, rgb: [1, 1, 1] }]))
+  assert.match(modelCacheKey(text, colours), /^model:/)
 })

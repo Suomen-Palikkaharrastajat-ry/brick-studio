@@ -10,6 +10,10 @@
  * Shared by the studio palette and the Brick Play dock (kit and Technic
  * catalog): a host calls `initThumbnails(app.ports, ldrawBase)` and
  * declares the `requestThumbnails` / `thumbnailLoaded` ports (see below).
+ *
+ * The same renderer also draws a whole model (a starter hull, a saved build)
+ * from LDraw text the host sends: the `requestModelThumbnails` /
+ * `modelThumbnailLoaded` ports (see `initThumbnails`).
  */
 
 const DB_NAME = 'brick-frame-thumbnails'
@@ -379,13 +383,15 @@ function shade(tri, base) {
   return [base[0] * k, base[1] * k, base[2] * k]
 }
 
-function colourFor(code, partRgb) {
+function colourFor(code, partRgb, palette) {
   if (code === 16) return partRgb
+  const own = palette?.get(code)
+  if (own) return own
   if (code === 24) return EDGE_RGB
   return INNER_COLOURS[code] ?? partRgb
 }
 
-function draw(geometry, partRgb) {
+function draw(geometry, partRgb, palette) {
   const ctx = getGl()
   if (!ctx) return null
   const { gl, program, buffer } = ctx
@@ -423,7 +429,7 @@ function draw(geometry, partRgb) {
   const data = new Float32Array((triCount * 3 + lineCount * 2) * 6)
   let o = 0
   for (const tri of geometry.triangles) {
-    const rgb = shade(tri, colourFor(tri.color, partRgb))
+    const rgb = shade(tri, colourFor(tri.color, partRgb, palette))
     for (const p of tri.v) {
       data.set(p, o)
       data.set(rgb, o + 3)
@@ -484,6 +490,69 @@ export async function renderIsometricThumbnail(file, color, ldrawBase, rgb) {
   if (geometry.triangles.length === 0) return null
   const partRgb = Array.isArray(rgb) && rgb.length === 3 ? rgb : [0.627, 0.647, 0.663]
   const canvas = draw(geometry, partRgb)
+  return canvas ? canvasToDataUrl(canvas) : null
+}
+
+// ── Whole models ──────────────────────────────────────────────────────────────
+
+// Name of the host's model text while it is flattened; no library file has it.
+const MODEL_ROOT = '\u0000model'
+
+// Part colour of a model line in colour 16 (main colour, light bluish grey).
+const MODEL_DEFAULT_RGB = [0.627, 0.647, 0.663]
+
+/**
+ * Flatten a whole model, given as LDraw text (a plain `.ldr` body of type-1
+ * lines, as `LDraw.Writer.writeLines` writes a flattened document), into the
+ * triangles and edges `flattenPart` gives for one part. Each line keeps its
+ * own colour code; `load(file)` resolves the library parts it references.
+ */
+export async function flattenModel(text, load) {
+  const out = { triangles: [], lines: [] }
+  const loadWithRoot = (name) => (name === MODEL_ROOT ? Promise.resolve(text) : load(name))
+  await flatten(MODEL_ROOT, loadWithRoot, IDENTITY_MATRIX, 16, false, 0, out)
+  return out
+}
+
+// 32-bit FNV-1a of a string, as 8 hex digits.
+function fnv1a(text) {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
+}
+
+/**
+ * The cache name of a model picture: a hash of its text and colours, so an
+ * edited build gets a new picture and an unchanged one is served from cache.
+ */
+export function modelCacheKey(text, colours = []) {
+  const palette = (colours ?? []).map((c) => `${c.code}=${(c.rgb ?? []).join(',')}`).join(';')
+  return `model:${fnv1a(String(text ?? ''))}:${fnv1a(palette)}:${String(text ?? '').length}`
+}
+
+function paletteOf(colours) {
+  const palette = new Map()
+  for (const c of colours ?? []) {
+    if (Array.isArray(c?.rgb) && c.rgb.length === 3) palette.set(c.code, c.rgb)
+  }
+  return palette
+}
+
+/**
+ * Render a whole model as a PNG data URL, or `null` when none of its parts
+ * resolve or WebGL is unavailable. `colours` lists `{ code, rgb }` for the
+ * colour codes the model uses (resolved by the host from LDConfig).
+ *
+ * `options.load` replaces the library fetch (for tests).
+ */
+export async function renderModelThumbnail(text, ldrawBase, colours = [], options = {}) {
+  const load = options.load ?? ((sub) => fetchDatText(sub, ldrawBase))
+  const geometry = await flattenModel(text, load)
+  if (geometry.triangles.length === 0) return null
+  const canvas = draw(geometry, MODEL_DEFAULT_RGB, paletteOf(colours))
   return canvas ? canvasToDataUrl(canvas) : null
 }
 
@@ -570,11 +639,22 @@ export async function partTitle(file, ldrawBase, options = {}) {
  * unknown — so a host without a part index can show a readable name. Elm
  * ignores the extra field when the port's record type does not declare it.
  *
+ * Pictures of whole models (optional, both ports needed):
+ *
+ *     port requestModelThumbnails : List { key : String, text : String, colours : List { code : Int, rgb : List Float } } -> Cmd msg
+ *     port modelThumbnailLoaded : ({ key : String, url : String } -> msg) -> Sub msg
+ *
+ * `text` is the model as flat LDraw text (see `flattenModel`) and `key` the
+ * host's own name for the picture, sent back with it. They share the queue,
+ * the renderer and the cache (by `modelCacheKey`) with the part pictures.
+ *
  * Subscribes synchronously, so call it right after the Elm app starts; requests
  * wait for the cache to open. Returns a promise that resolves once it has.
  */
 export function initThumbnails(ports, ldrawBase, { titles = false } = {}) {
-  if (!ports || !ports.requestThumbnails || !ports.thumbnailLoaded) return Promise.resolve()
+  const partPorts = Boolean(ports?.requestThumbnails && ports?.thumbnailLoaded)
+  const modelPorts = Boolean(ports?.requestModelThumbnails && ports?.modelThumbnailLoaded)
+  if (!partPorts && !modelPorts) return Promise.resolve()
 
   // Subscribe at once, not after the cache opens: a request sent from the
   // app's `init` would otherwise be dropped.
@@ -583,6 +663,38 @@ export function initThumbnails(ports, ldrawBase, { titles = false } = {}) {
   const queue = []
   let processing = false
 
+  async function renderPart(db, { file, color, rgb }) {
+    let url = await getCachedThumbnail(db, file, color)
+    if (!url) {
+      url = await renderIsometricThumbnail(file, color, ldrawBase, rgb)
+      if (url) {
+        await storeCachedThumbnail(db, file, color, url)
+      }
+    }
+    if (url) {
+      if (titles) {
+        const title = (await partTitle(file, ldrawBase)) ?? ''
+        ports.thumbnailLoaded.send({ file, color, url, title })
+      } else {
+        ports.thumbnailLoaded.send({ file, color, url })
+      }
+    }
+  }
+
+  async function renderModel(db, { key, text, colours }) {
+    const name = modelCacheKey(text, colours)
+    let url = await getCachedThumbnail(db, name, 0)
+    if (!url) {
+      url = await renderModelThumbnail(text, ldrawBase, colours)
+      if (url) {
+        await storeCachedThumbnail(db, name, 0, url)
+      }
+    }
+    if (url) {
+      ports.modelThumbnailLoaded.send({ key, url })
+    }
+  }
+
   async function processQueue() {
     if (processing || queue.length === 0) return
     processing = true
@@ -590,25 +702,14 @@ export function initThumbnails(ports, ldrawBase, { titles = false } = {}) {
 
     while (queue.length > 0) {
       const item = queue.shift()
-      const { file, color, rgb } = item
       try {
-        let url = await getCachedThumbnail(db, file, color)
-        if (!url) {
-          url = await renderIsometricThumbnail(file, color, ldrawBase, rgb)
-          if (url) {
-            await storeCachedThumbnail(db, file, color, url)
-          }
-        }
-        if (url) {
-          if (titles) {
-            const title = (await partTitle(file, ldrawBase)) ?? ''
-            ports.thumbnailLoaded.send({ file, color, url, title })
-          } else {
-            ports.thumbnailLoaded.send({ file, color, url })
-          }
+        if (item.kind === 'model') {
+          await renderModel(db, item)
+        } else {
+          await renderPart(db, item)
         }
       } catch (err) {
-        console.warn('Thumbnail generation failed for', file, err)
+        console.warn('Thumbnail generation failed for', item.kind === 'model' ? item.key : item.file, err)
       }
       // Yield briefly between renders to preserve 60fps main thread responsiveness
       await new Promise((r) => setTimeout(r, 8))
@@ -617,13 +718,26 @@ export function initThumbnails(ports, ldrawBase, { titles = false } = {}) {
     processing = false
   }
 
-  ports.requestThumbnails.subscribe((items) => {
-    for (const item of items) {
-      if (!queue.some((q) => q.file === item.file && q.color === item.color)) {
-        queue.push(item)
+  if (partPorts) {
+    ports.requestThumbnails.subscribe((items) => {
+      for (const item of items) {
+        if (!queue.some((q) => q.kind === 'part' && q.file === item.file && q.color === item.color)) {
+          queue.push({ ...item, kind: 'part' })
+        }
       }
-    }
-    processQueue()
-  })
+      processQueue()
+    })
+  }
+
+  if (modelPorts) {
+    ports.requestModelThumbnails.subscribe((items) => {
+      for (const item of items) {
+        if (!queue.some((q) => q.kind === 'model' && q.key === item.key && q.text === item.text)) {
+          queue.push({ ...item, kind: 'model' })
+        }
+      }
+      processQueue()
+    })
+  }
   return dbReady.then(() => undefined)
 }
