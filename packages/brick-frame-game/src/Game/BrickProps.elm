@@ -11,6 +11,7 @@ module Game.BrickProps exposing
     , fitHeight
     , fitLength
     , fitWidth
+    , merge
     , progress
     , refresh
     , refreshWith
@@ -33,6 +34,11 @@ another copy of the geometry.
 `draw` uses a plastic shader like the cars' and boats' with the game's
 distance fog, so far props fade into the sky like the ground around them.
 
+Every `draw` is its own draw call (two with edge lines), and each one costs
+a program switch, a dozen attribute binds and its uniforms in the WebGL
+kernel. Scenery that never moves (a grove of trees, a village, the trees along
+a track) can instead be baked with `merge` into one prop that is drawn once.
+
 -}
 
 import Dict exposing (Dict)
@@ -44,7 +50,7 @@ import LDraw.Resolve as Resolve exposing (PartCache, PartStatus(..))
 import LDraw.Types exposing (LDrawLine(..))
 import Math.Matrix4 as Mat4 exposing (Mat4)
 import Math.Vector3 as Vec3 exposing (Vec3, vec3)
-import Math.Vector4 exposing (Vec4)
+import Math.Vector4 as Vec4 exposing (Vec4)
 import Render.EdgeShader as EdgeShader
 import Render.Mesh exposing (Vertex)
 import Render.Scene as Scene exposing (Scene)
@@ -173,30 +179,8 @@ buildWith options ldraw cache =
             fileBfcCertified parsed
                 && Tuple.first (linesSubfilesBfc cache Set.empty parsed Dict.empty)
 
-        grow p acc =
-            let
-                r =
-                    Vec3.toRecord p
-            in
-            { minX = min acc.minX r.x
-            , minY = min acc.minY r.y
-            , minZ = min acc.minZ r.z
-            , maxX = max acc.maxX r.x
-            , maxY = max acc.maxY r.y
-            , maxZ = max acc.maxZ r.z
-            }
-
-        b =
-            List.foldl (\( v1, v2, v3 ) acc -> acc |> grow v1.position |> grow v2.position |> grow v3.position)
-                { minX = 1.0e9, minY = 1.0e9, minZ = 1.0e9, maxX = -1.0e9, maxY = -1.0e9, maxZ = -1.0e9 }
-                geom.triangles
-
         ( boundsMin, boundsMax ) =
-            if b.minX > b.maxX then
-                ( vec3 0 0 0, vec3 0 0 0 )
-
-            else
-                ( vec3 b.minX b.minY b.minZ, vec3 b.maxX b.maxY b.maxZ )
+            trianglesBounds geom.triangles
 
         scene =
             if options.includeLines then
@@ -215,6 +199,101 @@ buildWith options ldraw cache =
     , boundsMax = boundsMax
     , triangleCount = List.length geom.triangles
     }
+
+
+{-| Bounds of a triangle list, or the origin for none.
+-}
+trianglesBounds : List ( Vertex, Vertex, Vertex ) -> ( Vec3, Vec3 )
+trianglesBounds triangles =
+    let
+        grow p acc =
+            let
+                r =
+                    Vec3.toRecord p
+            in
+            { minX = min acc.minX r.x
+            , minY = min acc.minY r.y
+            , minZ = min acc.minZ r.z
+            , maxX = max acc.maxX r.x
+            , maxY = max acc.maxY r.y
+            , maxZ = max acc.maxZ r.z
+            }
+
+        b =
+            List.foldl (\( v1, v2, v3 ) acc -> acc |> grow v1.position |> grow v2.position |> grow v3.position)
+                { minX = 1.0e9, minY = 1.0e9, minZ = 1.0e9, maxX = -1.0e9, maxY = -1.0e9, maxZ = -1.0e9 }
+                triangles
+    in
+    if b.minX > b.maxX then
+        ( vec3 0 0 0, vec3 0 0 0 )
+
+    else
+        ( vec3 b.minX b.minY b.minZ, vec3 b.maxX b.maxY b.maxZ )
+
+
+{-| Bake many placed props into one prop, so static scenery costs one draw
+call instead of one (or two) per piece. Each placement's model matrix is
+applied to its vertices and its tint painted into its colour-16 parts, so the
+merged prop is drawn with `draw` at `Mat4.identity` (its tint argument is then
+unused). Mirrored placements (negative determinant) have their winding
+reversed, so back-face culling stays right; the merged prop is BFC certified
+only when every placed prop is.
+
+The merged prop has surfaces only, no edge lines: merge scenery drawn past
+the edge-line range, and keep drawing nearby pieces one by one with `draw` if
+they need their edges. Culling now works on the whole batch, so merge pieces
+that sit close together (one island, one stretch of track), and build the
+batch once (when its props have loaded), not per frame.
+
+-}
+merge : List { prop : PropModel, model : Mat4, tint : Vec4 } -> PropModel
+merge placements =
+    let
+        triangles =
+            List.concatMap bakePlacement placements
+
+        ( boundsMin, boundsMax ) =
+            trianglesBounds triangles
+    in
+    { scene = Scene.buildStaticScene triangles (List.all (\p -> p.prop.scene.bfcCertified) placements)
+    , boundsMin = boundsMin
+    , boundsMax = boundsMax
+    , triangleCount = List.length triangles
+    }
+
+
+bakePlacement : { prop : PropModel, model : Mat4, tint : Vec4 } -> List ( Vertex, Vertex, Vertex )
+bakePlacement placement =
+    let
+        m =
+            Mat4.toRecord placement.model
+
+        -- The vertex shader turns normals by `mat3(modelMatrix)`: the same
+        -- matrix without its translation.
+        linear =
+            Mat4.fromRecord { m | m14 = 0, m24 = 0, m34 = 0 }
+
+        bake v =
+            { position = Mat4.transform placement.model v.position
+            , normal = normalizeOr v.normal (Mat4.transform linear v.normal)
+            , color = Vec4.add (Vec4.scale (1 - v.inherit) v.color) (Vec4.scale v.inherit placement.tint)
+            , inherit = 0
+            }
+    in
+    if determinant3 placement.model < 0 then
+        List.map (\( a, b, c ) -> ( bake a, bake c, bake b )) placement.prop.scene.surface
+
+    else
+        List.map (\( a, b, c ) -> ( bake a, bake b, bake c )) placement.prop.scene.surface
+
+
+normalizeOr : Vec3 -> Vec3 -> Vec3
+normalizeOr fallback v =
+    if Vec3.length v < 1.0e-12 then
+        fallback
+
+    else
+        Vec3.normalize v
 
 
 {-| Whether every part in `partNames` and all of its transitive subfiles in
